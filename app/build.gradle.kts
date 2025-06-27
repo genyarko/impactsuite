@@ -123,6 +123,12 @@ dependencies {
     implementation(libs.accompanist.permissions)
     implementation(libs.supabase.kt)
     implementation(libs.hilt.android)
+    implementation(libs.firebase.crashlytics)
+    implementation(libs.firebase.analytics)
+    implementation(libs.androidx.hilt.navigation.compose)
+    implementation(libs.timber)
+    ksp(libs.hilt.android.compiler)
+    ksp(libs.androidx.room.compiler)
 
     // Optional instrumentation-test helpers
     androidTestImplementation(libs.hilt.android.testing)
