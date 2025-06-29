@@ -10,25 +10,27 @@ import timber.log.Timber
 import javax.inject.Inject
 
 @HiltAndroidApp
-class Gemma3nApplication(override val workManagerConfiguration: Configuration) : Application(), Configuration.Provider {
+class Gemma3nApplication : Application(), Configuration.Provider {
 
-    @Inject
-    lateinit var workerFactory: HiltWorkerFactory
+    @Inject lateinit var workerFactory: HiltWorkerFactory
+
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder()
+            .setWorkerFactory(workerFactory)
+            .setMinimumLoggingLevel(
+                if (BuildConfig.DEBUG) android.util.Log.DEBUG
+                else android.util.Log.ERROR
+            )
+            .build()
 
     override fun onCreate() {
         super.onCreate()
-
-        // Initialize Timber for logging
         if (BuildConfig.DEBUG) {
             Timber.plant(Timber.DebugTree())
         } else {
-            // Plant a crash reporting tree in production
             Timber.plant(CrashReportingTree())
         }
-
-        Timber.d("Gemma3n Application started")
     }
-
     fun getWorkManagerConfiguration(): Configuration {
         return Configuration.Builder()
             .setWorkerFactory(workerFactory)

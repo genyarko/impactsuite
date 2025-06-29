@@ -1,6 +1,7 @@
 package com.example.mygemma3n.feature.quiz
 
 import androidx.room.*
+import com.example.mygemma3n.data.local.entities.SubjectAccuracy
 import com.example.mygemma3n.shared_utilities.OfflineRAG
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -79,6 +80,11 @@ data class UserProgress(
     val timestamp: Long = System.currentTimeMillis(),
     val responseTimeMs: Long
 )
+// Aggregated accuracy by subject
+data class SubjectAccuracy(
+    val subject: Subject,
+    val accuracy: Float
+)
 
 // Room entities for quiz storage
 @Entity(tableName = "quizzes")
@@ -136,12 +142,13 @@ interface UserProgressDao {
     suspend fun getRecentProgress(subject: Subject, limit: Int = 20): List<UserProgress>
 
     @Query("""
-        SELECT subject, 
-               SUM(CASE WHEN correct THEN 1 ELSE 0 END) * 1.0 / COUNT(*) as accuracy
-        FROM user_progress
-        GROUP BY subject
-    """)
-    suspend fun getAccuracyBySubject(): Map<Subject, Float>
+  SELECT subject, 
+         SUM(CASE WHEN correct THEN 1 ELSE 0 END)*1.0 / COUNT(*) as accuracy
+  FROM user_progress
+  GROUP BY subject
+""")
+    suspend fun getAccuracyBySubject(): List<SubjectAccuracy>
+
 
     @Query("""
         SELECT AVG(CASE WHEN correct THEN 1 ELSE 0 END) as accuracy
