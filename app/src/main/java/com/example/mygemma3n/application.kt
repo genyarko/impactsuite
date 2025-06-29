@@ -1,59 +1,73 @@
 package com.example.mygemma3n
 
-
 import android.app.Application
+import android.util.Log
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import com.google.firebase.crashlytics.BuildConfig
+import com.google.firebase.crashlytics.FirebaseCrashlytics
 import dagger.hilt.android.HiltAndroidApp
+import timber.log.Timber
 import javax.inject.Inject
 
 @HiltAndroidApp
-class ImpactSuiteApplication(override val workManagerConfiguration: Configuration) : Application(), Configuration.Provider {
+class ImpactSuiteApplication : Application(), Configuration.Provider {
 
     @Inject
     lateinit var workerFactory: HiltWorkerFactory
 
+    // -- WorkManager configuration ------------------------------------------
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder()
+            .setWorkerFactory(workerFactory)
+            .setMinimumLoggingLevel(
+                if (BuildConfig.DEBUG) Log.DEBUG else Log.INFO
+            )
+            .build()
+    // -----------------------------------------------------------------------
+
     override fun onCreate() {
         super.onCreate()
 
-        // Initialize Timber for logging
+        // Timber setup
         if (BuildConfig.DEBUG) {
             Timber.plant(Timber.DebugTree())
         } else {
             Timber.plant(CrashReportingTree())
         }
 
-        // Initialize AI Edge
+        // AI-Edge cache setup
         initializeAIEdge()
 
-        // Configure Firebase Crashlytics
-        FirebaseCrashlytics.getInstance().setCrashlyticsCollectionEnabled(!BuildConfig.DEBUG)
+        // Crashlytics
+        FirebaseCrashlytics.getInstance()
+            .setCrashlyticsCollectionEnabled(!BuildConfig.DEBUG)
+
+        Timber.d("ImpactSuite Application initialized")
     }
 
     private fun initializeAIEdge() {
-        // Pre-warm GPU delegate
-        System.loadLibrary("tensorflowlite_gpu_jni")
+        try {
+            val modelCacheDir = getDir("model_cache", MODE_PRIVATE).apply { mkdirs() }
+            listOf("gemma", "mobilenet", "audio", "temp").forEach { name ->
+                java.io.File(modelCacheDir, name).mkdirs()
+            }
 
-        // Initialize model cache directory
-        val modelCacheDir = getDir("model_cache", MODE_PRIVATE)
-        modelCacheDir.mkdirs()
+            val prefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
+            if (prefs.getBoolean("is_first_launch", true)) {
+                prefs.edit().putBoolean("is_first_launch", false).apply()
+                Timber.d("First launch detected – models will download on demand.")
+            }
 
-        // Copy models from assets on first launch
-        if (isFirstLaunch()) {
-            copyModelsFromAssets()
+            Timber.d("AI Edge cache directories initialized at: ${modelCacheDir.absolutePath}")
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to initialize AI Edge")
         }
-    }
-
-    override fun getWorkManagerConfiguration(): Configuration {
-        return Configuration.Builder()
-            .setWorkerFactory(workerFactory)
-            .setMinimumLoggingLevel(android.util.Log.INFO)
-            .build()
     }
 
     private class CrashReportingTree : Timber.Tree() {
         override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
-            if (priority >= android.util.Log.WARN) {
+            if (priority >= Log.WARN) {
                 FirebaseCrashlytics.getInstance().log(message)
                 t?.let { FirebaseCrashlytics.getInstance().recordException(it) }
             }

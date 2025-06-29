@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Internal storage for captured images -->
+    <files-path
+        name="images"
+        path="images/" />
+
+    <!-- Cache directory for temporary files -->
+    <cache-path
+        name="cache"
+        path="." />
+
+    <!-- External files directory -->
+    <external-files-path
+        name="external_files"
+        path="." />
+
+    <!-- External cache directory -->
+    <external-cache-path
+        name="external_cache"
+        path="." />
+
+    <!-- Model files -->
+    <files-path
+        name="models"
+        path="models/" />
+
+    <!-- Audio recordings -->
+    <files-path
+        name="audio"
+        path="audio/" />
+
+    <!-- Downloads -->
+    <cache-path
+        name="downloads"
+        path="downloads/" />
+</paths>
