@@ -2,29 +2,48 @@
 accompanistPermissions = "0.37.3"
 agp = "8.11.0"
 cameraView = "1.4.2"
+coreSplashscreen = "1.0.1"
 datastorePreferences = "1.1.7"
 edgeLitert = "0.9.0"
+firebaseBom = "33.16.0"
+gson = "2.13.1"
 hiltAndroidTesting = "2.56.2"
-kotlin = "2.0.21"
+hiltCompiler = "2.56.2"
+kotlin = "2.2.0"
 coreKtx = "1.16.0"
 junit = "4.13.2"
-junitVersion = "1.1.5"
-espressoCore = "3.5.1"
-lifecycleRuntimeKtx = "2.6.1"
-activityCompose = "1.8.0"
-composeBom = "2024.09.00"
+junitVersion = "1.2.1"
+espressoCore = "3.6.1"
+kotlinxCoroutinesAndroid = "1.10.2"
+kotlinxCoroutinesPlayServices = "1.10.2"
+leakcanaryAndroid = "2.14"
+lifecycleRuntimeKtx = "2.9.1"
+activityCompose = "1.10.1"
+composeBom = "2025.06.01"
+litertSupport = "1.3.0"
+mapsCompose = "6.6.0"
+media3Exoplayer = "1.7.1"
+playServicesLocation = "21.3.0"
+playServicesMaps = "19.2.0"
+roomCompiler = "2.7.2"
 roomKtx = "2.7.2"
+roomKtxVersion = "2.7.2"
+roomRuntime = "2.7.2"
 supabaseKt = "0.11.0"
 hiltCommon = "1.2.0"
 playServicesMeasurementApi = "22.5.0"
 localagentsRag = "0.2.0"
 media3CommonKtx = "1.7.1"
+tensorflowLiteGpu = "2.17.0"
+tensorflowLiteGpuApi = "2.17.0"
 workRuntimeKtx = "2.10.2"
 hiltWork = "1.2.0"
 navigationComposeJvmstubs = "2.9.0"
-firebaseAnalytics = "21.6.1"
-firebaseCrashlytics = "18.6.1"
+firebaseAnalytics = "22.5.0"
+firebaseCrashlytics = "19.4.4"
 timber = "5.0.1"
+litert = "1.3.0"
+litertGpu = "1.3.0"
 
 [libraries]
 accompanist-permissions = { module = "com.google.accompanist:accompanist-permissions", version.ref = "accompanistPermissions" }
@@ -32,18 +51,28 @@ androidx-camera-camera2 = { module = "androidx.camera:camera-camera2", version.r
 androidx-camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "cameraView" }
 androidx-camera-view = { module = "androidx.camera:camera-view", version.ref = "cameraView" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "coreSplashscreen" }
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastorePreferences" }
+androidx-material-icons-extended = { module = "androidx.compose.material:material-icons-extended" }
+androidx-media3-exoplayer = { module = "androidx.media3:media3-exoplayer", version.ref = "media3Exoplayer" }
+androidx-room-compiler-v261 = { module = "androidx.room:room-compiler", version.ref = "roomCompiler" }
 androidx-room-ktx = { module = "androidx.room:room-ktx", version.ref = "roomKtx" }
 androidx-room-compiler = { module = "androidx.room:room-compiler", version.ref = "roomKtx" }
+androidx-room-ktx-v261 = { module = "androidx.room:room-ktx", version.ref = "roomKtxVersion" }
+androidx-room-runtime = { module = "androidx.room:room-runtime", version.ref = "roomRuntime" }
 androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "workRuntimeKtx" }
 edge-litert = { module = "com.google.ai:edge-litert", version.ref = "edgeLitert" }
 edge-litert-gpu = { module = "com.google.ai:edge-litert-gpu", version.ref = "edgeLitert" }
 edge-litert-nnapi = { module = "com.google.ai:edge-litert-nnapi", version.ref = "edgeLitert" }
+firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebaseBom" }
 firebase-crashlytics = { module = "com.google.firebase:firebase-crashlytics", version.ref = "firebaseCrashlytics" }
 firebase-analytics = { module = "com.google.firebase:firebase-analytics", version.ref = "firebaseAnalytics" }
+firebase-perf-ktx = { module = "com.google.firebase:firebase-perf-ktx" }
+gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
 hilt-android = { module = "com.google.dagger:hilt-android", version.ref = "hiltAndroidTesting" }
 hilt-android-compiler = { module = "com.google.dagger:hilt-android-compiler", version.ref = "hiltAndroidTesting" }
 hilt-android-testing = { module = "com.google.dagger:hilt-android-testing", version.ref = "hiltAndroidTesting" }
+hilt-compiler = { module = "com.google.dagger:hilt-compiler", version.ref = "hiltCompiler" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
@@ -57,6 +86,13 @@ androidx-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-toolin
 androidx-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 androidx-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
+kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinxCoroutinesAndroid" }
+kotlinx-coroutines-play-services = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-play-services", version.ref = "kotlinxCoroutinesPlayServices" }
+leakcanary-android = { module = "com.squareup.leakcanary:leakcanary-android", version.ref = "leakcanaryAndroid" }
+litert-support = { module = "com.google.ai.edge.litert:litert-support", version.ref = "litertSupport" }
+maps-compose = { module = "com.google.maps.android:maps-compose", version.ref = "mapsCompose" }
+play-services-location = { module = "com.google.android.gms:play-services-location", version.ref = "playServicesLocation" }
+play-services-maps = { module = "com.google.android.gms:play-services-maps", version.ref = "playServicesMaps" }
 supabase-kt = { module = "io.supabase:supabase-kt", version.ref = "supabaseKt" }
 androidx-hilt-common = { group = "androidx.hilt", name = "hilt-common", version.ref = "hiltCommon" }
 play-services-measurement-api = { group = "com.google.android.gms", name = "play-services-measurement-api", version.ref = "playServicesMeasurementApi" }
@@ -65,7 +101,11 @@ androidx-media3-common-ktx = { group = "androidx.media3", name = "media3-common-
 androidx-hilt-work = { group = "androidx.hilt", name = "hilt-work", version.ref = "hiltWork" }
 androidx-hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hiltCommon" }
 androidx-navigation-compose-jvmstubs = { group = "androidx.navigation", name = "navigation-compose-jvmstubs", version.ref = "navigationComposeJvmstubs" }
+tensorflow-lite-gpu = { module = "org.tensorflow:tensorflow-lite-gpu", version.ref = "tensorflowLiteGpu" }
+tensorflow-lite-gpu-api = { module = "org.tensorflow:tensorflow-lite-gpu-api", version.ref = "tensorflowLiteGpuApi" }
 timber = { module = "com.jakewharton.timber:timber", version.ref = "timber" }
+litert = { group = "com.google.ai.edge.litert", name = "litert", version.ref = "litert" }
+litert-gpu = { group = "com.google.ai.edge.litert", name = "litert-gpu", version.ref = "litertGpu" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

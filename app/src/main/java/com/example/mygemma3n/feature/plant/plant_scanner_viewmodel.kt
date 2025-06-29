@@ -1,10 +1,11 @@
-package com.example.mygemma3n.feature
+package com.example.mygemma3n.feature.plant
 
 import android.graphics.Bitmap
 import android.hardware.camera2.CameraManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mygemma3n.gemma.GemmaEngine
+import com.example.mygemma3n.shared_utilities.generateText
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow

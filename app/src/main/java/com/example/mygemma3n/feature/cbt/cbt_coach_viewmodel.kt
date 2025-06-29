@@ -1,7 +1,8 @@
-package com.example.mygemma3n.feature
+package com.example.mygemma3n.feature.cbt
 
 import androidx.lifecycle.ViewModel
 import com.example.mygemma3n.gemma.GemmaEngine
+import com.example.mygemma3n.shared_utilities.generateText
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow

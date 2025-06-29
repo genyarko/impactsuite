@@ -1,275 +1,53 @@
-package com.example.mygemma3n.feature
+package com.example.mygemma3n.feature.quiz
 
-// ===== Feature: Offline Quiz Generator with RAG =====
-
-// QuizGeneratorViewModel.kt
-
-
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import com.example.mygemma3n.gemma.GemmaEngine
-import dagger.hilt.android.lifecycle.HiltViewModel
-
-import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
-import javax.inject.Inject
-import javax.security.auth.Subject
-
-@HiltViewModel
-class QuizGeneratorViewModel @Inject constructor(
-    private val gemmaEngine: GemmaEngine,
-    private val vectorDB: VectorDatabase,
-    private val educationalContent: EducationalContentRepository,
-    private val quizRepository: QuizRepository
-) : ViewModel() {
-
-    private val _quizState = MutableStateFlow(QuizState())
-    val quizState: StateFlow<QuizState> = _quizState.asStateFlow()
-
-    data class QuizState(
-        val isGenerating: Boolean = false,
-        val currentQuiz: Quiz? = null,
-        val subjects: List<Subject> = emptyList(),
-        val difficulty: Difficulty = Difficulty.MEDIUM,
-        val questionsGenerated: Int = 0,
-        val userProgress: Map<Subject, Float> = emptyMap()
-    )
-
-    init {
-        initializeEducationalContent()
-    }
-
-    private fun initializeEducationalContent() {
-        viewModelScope.launch {
-            // Load pre-embedded educational content
-            val contents = educationalContent.getAllContent()
-
-            contents.forEach { content ->
-                // Generate embeddings using Gemma's encoder
-                val embedding = generateEmbedding(content.text)
-
-                vectorDB.insert(
-                    Vectorocument(
-                        id = content.id,
-                        content = content.text,
-                        embedding = embedding,
-                        metadata = mapOf(
-                            "subject" to content.subject.name,
-                            "grade" to content.gradeLevel,
-                            "topic" to content.topic
-                        )
-                    )
-                )
-            }
-
-            _quizState.update {
-                it.copy(subjects = contents.map { it.subject }.distinct())
-            }
-        }
-    }
-
-    suspend fun generateAdaptiveQuiz(
-        subject: Subject,
-        topic: String,
-        questionCount: Int = 10
-    ) {
-        _quizState.update { it.copy(isGenerating = true) }
-
-        val questions = mutableListOf<Question>()
-        val userLevel = getUserProficiencyLevel(subject)
-
-        // Retrieve relevant content using RAG
-        val relevantContent = retrieveRelevantContent(subject, topic, questionCount * 2)
-
-        // Generate questions adaptively
-        for (i in 1..questionCount) {
-            val difficulty = calculateAdaptiveDifficulty(userLevel, questions)
-
-            val question = generateQuestion(
-                context = relevantContent,
-                difficulty = difficulty,
-                previousQuestions = questions,
-                questionType = selectQuestionType(i)
-            )
-
-            questions.add(question)
-
-            _quizState.update {
-                it.copy(questionsGenerated = questions.size)
-            }
-        }
-
-        val quiz = Quiz(
-            id = generateQuizId(),
-            subject = subject,
-            topic = topic,
-            questions = questions,
-            difficulty = _quizState.value.difficulty,
-            createdAt = System.currentTimeMillis()
-        )
-
-        quizRepository.saveQuiz(quiz)
-
-        _quizState.update {
-            it.copy(
-                isGenerating = false,
-                currentQuiz = quiz
-            )
-        }
-    }
-
-    private suspend fun generateQuestion(
-        context: List<String>,
-        difficulty: Difficulty,
-        previousQuestions: List<Question>,
-        questionType: QuestionType
-    ): Question {
-        val contextText = context.joinToString("\n\n")
-        val previousQuestionsText = previousQuestions.joinToString("\n") {
-            "- ${it.questionText}"
-        }
-
-        val prompt = """
-            Based on the following educational content, generate a ${questionType.name} question.
-            
-            CONTENT:
-            $contextText
-            
-            REQUIREMENTS:
-            - Difficulty level: ${difficulty.name}
-            - Question type: ${questionType.name}
-            - Make it different from these previous questions:
-            $previousQuestionsText
-            
-            FORMAT YOUR RESPONSE AS JSON:
-            {
-                "question": "...",
-                "options": ["A) ...", "B) ...", "C) ...", "D) ..."],
-                "correctAnswer": "A",
-                "explanation": "...",
-                "hint": "...",
-                "conceptsCovered": ["concept1", "concept2"]
-            }
-            
-            For TRUE/FALSE questions, use options ["True", "False"].
-            For FILL_IN_BLANK, use a single blank marked as _____.
-        """.trimIndent()
-
-        val response = gemmaEngine.generateText(
-            prompt = prompt,
-            maxTokens = 300,
-            temperature = 0.7f,
-            modelConfig = ModelConfig.Balanced3B
-        ).toList().joinToString("")
-
-        return parseQuestionFromJson(response, questionType, difficulty)
-    }
-
-    private suspend fun retrieveRelevantContent(
-        subject: Subject,
-        topic: String,
-        k: Int
-    ): List<String> {
-        // Generate query embedding
-        val queryEmbedding = generateEmbedding("$subject $topic educational content")
-
-        // Retrieve from vector database with metadata filtering
-        val results = vectorDB.search(
-            queryEmbedding = queryEmbedding,
-            k = k,
-            filter = mapOf(
-                "subject" to subject.name,
-                "topic" to topic
-            )
-        )
-
-        return results.map { it.content }
-    }
-
-    private suspend fun generateEmbedding(text: String): FloatArray {
-        // Use Gemma's encoder for generating embeddings
-        val prompt = """
-            Generate a semantic embedding for the following text:
-            "$text"
-            
-            [EMBEDDING]:
-        """.trimIndent()
-
-        // In practice, you'd use a dedicated embedding model or Gemma's encoder
-        // This is a simplified representation
-        return gemmaEngine.generateEmbedding(text)
-    }
-
-    fun submitAnswer(questionId: String, answer: String) {
-        viewModelScope.launch {
-            val quiz = _quizState.value.currentQuiz ?: return@launch
-            val question = quiz.questions.find { it.id == questionId } ?: return@launch
-
-            val isCorrect = answer == question.correctAnswer
-
-            // Update user progress
-            updateUserProgress(quiz.subject, question.difficulty, isCorrect)
-
-            // Generate personalized feedback
-            val feedback = generatePersonalizedFeedback(
-                question = question,
-                userAnswer = answer,
-                isCorrect = isCorrect
-            )
-
-            _quizState.update { state ->
-                state.copy(
-                    currentQuiz = quiz.copy(
-                        questions = quiz.questions.map {
-                            if (it.id == questionId) {
-                                it.copy(
-                                    userAnswer = answer,
-                                    feedback = feedback,
-                                    isAnswered = true
-                                )
-                            } else it
-                        }
-                    )
-                )
-            }
-        }
-    }
-
-    private suspend fun generatePersonalizedFeedback(
-        question: Question,
-        userAnswer: String,
-        isCorrect: Boolean
-    ): String {
-        val prompt = if (isCorrect) {
-            """
-                The user correctly answered: "${question.questionText}"
-                Correct answer: ${question.correctAnswer}
-                
-                Provide encouraging feedback and add an interesting fact about ${question.conceptsCovered.joinToString()}.
-                Keep it under 50 words.
-            """.trimIndent()
-        } else {
-            """
-                Question: "${question.questionText}"
-                User answered: $userAnswer
-                Correct answer: ${question.correctAnswer}
-                
-                Provide constructive feedback explaining why their answer was incorrect and why the correct answer is right.
-                Reference the concepts: ${question.conceptsCovered.joinToString()}
-                Keep it supportive and under 75 words.
-            """.trimIndent()
-        }
-
-        return gemmaEngine.generateText(
-            prompt = prompt,
-            maxTokens = 100,
-            temperature = 0.7f
-        ).toList().joinToString("")
-    }
-}
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ElevatedButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.mygemma3n.feature.quiz.Subject
 
 // QuizScreen.kt - Compose UI
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuizScreen(
     viewModel: QuizGeneratorViewModel = hiltViewModel()
@@ -293,11 +71,14 @@ fun QuizScreen(
                 // Quiz Setup Screen
                 QuizSetupScreen(
                     subjects = state.subjects,
-                    onGenerateQuiz = { subject, topic, count ->
-                        viewModel.generateAdaptiveQuiz(subject, topic, count)
+                    onGenerateQuiz = { s, t, c ->
+                        viewModel.generateAdaptiveQuiz(s, t, c)
                     },
                     modifier = Modifier.padding(paddingValues)
                 )
+
+
+
             }
 
             state.isGenerating -> {
@@ -339,6 +120,122 @@ fun QuizScreen(
                 )
             }
         }
+    }
+}
+
+/* ────────────────────────────────────────────────────────────────
+ * QuizSetupScreen – select subject / topic / #questions
+ * ──────────────────────────────────────────────────────────────── */
+@Composable
+fun QuizSetupScreen(
+    subjects: List<Subject>,
+    onGenerateQuiz: (Subject, String, Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var selectedSubject by remember { mutableStateOf<Subject?>(null) }
+    var topicText by remember { mutableStateOf("") }
+    var questionCount by remember { mutableStateOf(10f) }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            "Create a new adaptive quiz",
+            style = MaterialTheme.typography.headlineSmall
+        )
+
+        // 1. Subject dropdown
+        OutlinedButton(
+            onClick = { /* show menu – simple selector for brevity */ },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(selectedSubject?.name ?: "Choose subject")
+        }
+        // Simple drop-down menu
+        androidx.compose.material3.DropdownMenu(
+            expanded = selectedSubject == null,   // opens first time
+            onDismissRequest = { /* no-op */ }
+        ) {
+            subjects.forEach { subj ->
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text(subj.name) },
+                    onClick = { selectedSubject = subj }
+                )
+            }
+        }
+
+        // 2. Topic text field
+        OutlinedTextField(
+            value = topicText,
+            onValueChange = { topicText = it },
+            label = { Text("Topic (optional)") },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        // 3. Question count slider
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text("Number of questions: ${questionCount.toInt()}")
+            androidx.compose.material3.Slider(
+                value = questionCount,
+                onValueChange = { questionCount = it },
+                valueRange = 5f..20f,
+                steps = 15
+            )
+        }
+
+        // 4. Generate button
+        Button(
+            onClick = {
+                val subj = selectedSubject ?: return@Button
+                onGenerateQuiz(subj, topicText.trim(), questionCount.toInt())
+            },
+            enabled = selectedSubject != null
+        ) {
+            Text("Generate Quiz")
+            Spacer(Modifier.width(4.dp))
+            Icon(Icons.Default.ArrowForward, contentDescription = null)
+        }
+    }
+}
+
+/* ────────────────────────────────────────────────────────────────
+ * AnswerOption – used by QuizTakingScreen for MCQ choices
+ * ──────────────────────────────────────────────────────────────── */
+@Composable
+fun AnswerOption(
+    text: String,
+    isSelected: Boolean,
+    isCorrect: Boolean,
+    isWrong: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    val containerColor = when {
+        isCorrect  -> MaterialTheme.colorScheme.primary
+        isWrong    -> MaterialTheme.colorScheme.error
+        isSelected -> MaterialTheme.colorScheme.secondaryContainer
+        else       -> MaterialTheme.colorScheme.surface
+    }
+    val contentColor =
+        if (isCorrect || isWrong)
+            MaterialTheme.colorScheme.onPrimary
+        else
+            MaterialTheme.colorScheme.onSurface
+
+    ElevatedButton(
+        onClick  = onClick,
+        enabled  = enabled,
+        colors   = ButtonDefaults.elevatedButtonColors(
+            containerColor = containerColor,
+            contentColor   = contentColor
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(text)
     }
 }
 
@@ -396,7 +293,7 @@ fun QuizTakingScreen(
                         onClick = { showHint = !showHint }
                     ) {
                         Icon(
-                            Icons.Default.Lightbulb,
+                            Icons.Default.ThumbUp,
                             contentDescription = null,
                             modifier = Modifier.size(16.dp)
                         )
@@ -418,7 +315,7 @@ fun QuizTakingScreen(
         Spacer(modifier = Modifier.height(24.dp))
 
         // Answer options
-        when (currentQuestion.type) {
+        when (currentQuestion.questionType) {
             QuestionType.MULTIPLE_CHOICE -> {
                 currentQuestion.options.forEach { option ->
                     AnswerOption(
@@ -474,6 +371,9 @@ fun QuizTakingScreen(
                     modifier = Modifier.fillMaxWidth()
                 )
             }
+
+            QuestionType.SHORT_ANSWER -> TODO()
+            QuestionType.MATCHING -> TODO()
         }
 
         // Feedback section
@@ -578,88 +478,5 @@ fun QuizTakingScreen(
                 }
             }
         }
-    }
-}
-
-// ===== Vector Database Implementation =====
-
-// VectorDatabase.kt
-package com.impactsuite.data.rag
-
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import javax.inject.Inject
-import javax.inject.Singleton
-
-@Singleton
-class VectorDatabase @Inject constructor(
-    private val roomDatabase: AppDatabase
-) {
-
-    data class VectorDocument(
-        val id: String = UUID.randomUUID().toString(),
-        val content: String,
-        val embedding: FloatArray,
-        val metadata: Map<String, String> = emptyMap()
-    )
-
-    suspend fun insert(document: VectorDocument) = withContext(Dispatchers.IO) {
-        val entity = VectorEntity(
-            id = document.id,
-            content = document.content,
-            embedding = document.embedding.toList(),
-            metadata = document.metadata
-        )
-        roomDatabase.vectorDao().insert(entity)
-    }
-
-    suspend fun search(
-        queryEmbedding: FloatArray,
-        k: Int = 5,
-        filter: Map<String, String>? = null
-    ): List<VectorDocument> = withContext(Dispatchers.IO) {
-        val allDocuments = if (filter != null) {
-            roomDatabase.vectorDao().getByMetadata(filter)
-        } else {
-            roomDatabase.vectorDao().getAll()
-        }
-
-        // Calculate cosine similarity
-        val scoredDocs = allDocuments.map { entity ->
-            val similarity = cosineSimilarity(
-                queryEmbedding,
-                entity.embedding.toFloatArray()
-            )
-            entity to similarity
-        }
-
-        // Return top-k results
-        scoredDocs
-            .sortedByDescending { it.second }
-            .take(k)
-            .map { (entity, _) ->
-                VectorDocument(
-                    id = entity.id,
-                    content = entity.content,
-                    embedding = entity.embedding.toFloatArray(),
-                    metadata = entity.metadata
-                )
-            }
-    }
-
-    private fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
-        require(a.size == b.size) { "Vectors must have same dimension" }
-
-        var dotProduct = 0f
-        var normA = 0f
-        var normB = 0f
-
-        for (i in a.indices) {
-            dotProduct += a[i] * b[i]
-            normA += a[i] * a[i]
-            normB += b[i] * b[i]
-        }
-
-        return dotProduct / (kotlin.math.sqrt(normA) * kotlin.math.sqrt(normB))
     }
 }
