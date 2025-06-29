@@ -1,6 +1,7 @@
 package com.example.mygemma3n.data.local
 
 import androidx.room.*
+import com.example.mygemma3n.data.local.dao.SubjectDao
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -89,13 +90,14 @@ interface VectorDao {
 
 // Room Database
 @Database(
-    entities = [VectorEntity::class],
+    entities = [VectorEntity::class, SubjectEntity::class],
     version = 1,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun vectorDao(): VectorDao
+    abstract fun subjectDao(): SubjectDao  // 🔍 Add this line
 }
 
 // Vector Database implementation

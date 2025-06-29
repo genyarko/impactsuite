@@ -7,6 +7,7 @@ import androidx.work.WorkManager
 import com.example.mygemma3n.data.ModelDownloadManager
 import com.example.mygemma3n.data.ModelRepository
 import com.example.mygemma3n.data.local.*
+import com.example.mygemma3n.data.local.dao.SubjectDao
 import com.example.mygemma3n.feature.caption.AudioCapture
 import com.example.mygemma3n.feature.caption.TranslationCache
 import com.example.mygemma3n.feature.cbt.*
@@ -33,6 +34,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import javax.inject.Singleton
+
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -68,10 +70,14 @@ object AppModule {
             context,
             AppDatabase::class.java,
             "vector_database"
-        )
-            .fallbackToDestructiveMigration()
+        ).fallbackToDestructiveMigration()
             .build()
     }
+
+    @Provides
+    @Singleton
+    fun provideSubjectDao(db: AppDatabase): SubjectDao = db.subjectDao()
+
 
     @Provides
     @Singleton
@@ -200,10 +206,20 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideSubjectRepository(dao: SubjectDao): SubjectRepository =
+        SubjectRepository(dao)
+
+
+
+
+    @Provides
+    @Singleton
     fun provideOfflineRAG(
         vectorDatabase: VectorDatabase,
+        subjectRepository: SubjectRepository,
         modelManager: GemmaModelManager
-    ): OfflineRAG = OfflineRAG(vectorDatabase, modelManager)
+    ): OfflineRAG = OfflineRAG(vectorDatabase, subjectRepository, modelManager)
+
 
     @Provides
     @Singleton
