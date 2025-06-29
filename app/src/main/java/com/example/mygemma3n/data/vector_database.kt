@@ -8,6 +8,8 @@ import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.sqrt
+import com.example.mygemma3n.data.local.entities.SubjectEntity
+
 
 // Room Entity for vector storage
 @Entity(tableName = "vector_documents")
