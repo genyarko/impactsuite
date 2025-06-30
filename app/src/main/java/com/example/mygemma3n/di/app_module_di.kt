@@ -236,13 +236,9 @@ object AppModule {
     )
 
     // Feature-specific services
-    @Provides
-    @Singleton
-    fun provideAudioCapture(): AudioCapture = AudioCapture()
 
-    @Provides
-    @Singleton
-    fun provideTranslationCache(): TranslationCache = TranslationCache()
+
+
 
     @Provides
     @Singleton

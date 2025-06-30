@@ -65,6 +65,13 @@ class AudioCaptureService : Service() {
     private fun startCapture() {
         if (_isRunning.value) return
 
+        // Check permission first
+        if (!audioCapture.hasRecordPermission()) {
+            _audioDataFlow.value = null
+            stopSelf()
+            return
+        }
+
         _isRunning.value = true
 
         // Start foreground service with notification
@@ -77,6 +84,10 @@ class AudioCaptureService : Service() {
                     .collect { audioData ->
                         _audioDataFlow.value = audioData
                     }
+            } catch (e: SecurityException) {
+                // Permission was revoked while running
+                e.printStackTrace()
+                stopCapture()
             } catch (e: Exception) {
                 e.printStackTrace()
                 stopCapture()
@@ -147,7 +158,7 @@ class AudioCaptureService : Service() {
             .setOngoing(true)
             .setContentIntent(pendingIntent)
             .addAction(
-                R.drawable.ic_launcher_background, // You'll need to add this icon
+                R.drawable.ic_launcher_foreground, // You'll need to add this icon
                 "Stop",
                 stopPendingIntent
             )
