@@ -5,7 +5,6 @@ import android.Manifest
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -16,8 +15,13 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.mygemma3n.ui.theme.Gemma3nTheme
+import com.example.mygemma3n.feature.caption.LiveCaptionScreen
+import com.example.mygemma3n.feature.quiz.QuizScreen
+import com.example.mygemma3n.feature.plant.PlantScannerScreen
+import com.example.mygemma3n.feature.plant.PlantScannerViewModel
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
+import androidx.hilt.navigation.compose.hiltViewModel
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
@@ -81,13 +85,16 @@ fun Gemma3nNavigation(
             LiveCaptionScreen()
         }
         composable("quiz_generator") {
-            QuizGeneratorScreen()
+            QuizScreen()
         }
         composable("cbt_coach") {
             CBTCoachScreen()
         }
         composable("plant_scanner") {
-            PlantScannerScreen()
+            val vm: PlantScannerViewModel = hiltViewModel()
+            PlantScannerScreen(onScanClick = { bitmap ->
+                vm.analyzeImage(bitmap)
+            })
         }
         composable("crisis_handbook") {
             CrisisHandbookScreen()
@@ -157,31 +164,11 @@ fun HomeScreen(navController: androidx.navigation.NavHostController) {
 }
 
 @Composable
-fun LiveCaptionScreen() {
-    // Implement screen
-    Text("Live Caption Screen")
-}
-
-@Composable
-fun QuizGeneratorScreen() {
-    // Implement screen
-    Text("Quiz Generator Screen")
-}
-
-@Composable
 fun CBTCoachScreen() {
-    // Implement screen
     Text("CBT Coach Screen")
 }
 
 @Composable
-fun PlantScannerScreen() {
-    // Implement screen
-    Text("Plant Scanner Screen")
-}
-
-@Composable
 fun CrisisHandbookScreen() {
-    // Implement screen
     Text("Crisis Handbook Screen")
 }
