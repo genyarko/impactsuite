@@ -1,8 +1,12 @@
 package com.example.mygemma3n.feature.caption
 
+import android.content.Context
+import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import androidx.core.content.ContextCompat
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -40,7 +44,9 @@ enum class Language(val code: String, val displayName: String) {
 
 // Audio capture service
 @Singleton
-class AudioCapture @Inject constructor() {
+class AudioCapture @Inject constructor(
+    @ApplicationContext private val context: Context
+) {
 
     companion object {
         private const val SAMPLE_RATE = 16000
@@ -52,53 +58,96 @@ class AudioCapture @Inject constructor() {
     private var audioRecord: AudioRecord? = null
     private var isRecording = false
 
-    fun startCapture(): Flow<FloatArray> = flow @androidx.annotation.RequiresPermission(android.Manifest.permission.RECORD_AUDIO) {
+    fun hasRecordPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    fun startCapture(): Flow<FloatArray> = flow {
+        // Check permission first
+        if (!hasRecordPermission()) {
+            throw SecurityException("RECORD_AUDIO permission not granted")
+        }
+
         val minBufferSize = AudioRecord.getMinBufferSize(
             SAMPLE_RATE,
             CHANNEL_CONFIG,
             AUDIO_FORMAT
         )
 
-        val bufferSize = minBufferSize * BUFFER_SIZE_FACTOR
-
-        audioRecord = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
-            SAMPLE_RATE,
-            CHANNEL_CONFIG,
-            AUDIO_FORMAT,
-            bufferSize
-        ).apply {
-            if (state != AudioRecord.STATE_INITIALIZED) {
-                throw IllegalStateException("AudioRecord initialization failed")
-            }
+        if (minBufferSize == AudioRecord.ERROR || minBufferSize == AudioRecord.ERROR_BAD_VALUE) {
+            throw IllegalStateException("Failed to get minimum buffer size")
         }
 
-        val audioBuffer = ShortArray(bufferSize)
-        val floatBuffer = FloatArray(bufferSize)
+        val bufferSize = minBufferSize * BUFFER_SIZE_FACTOR
 
-        audioRecord?.startRecording()
-        isRecording = true
-
-        while (coroutineContext.isActive && isRecording) {
-            val readSize = audioRecord?.read(audioBuffer, 0, bufferSize) ?: 0
-
-            if (readSize > 0) {
-                // Convert PCM16 to float
-                for (i in 0 until readSize) {
-                    floatBuffer[i] = audioBuffer[i] / 32768.0f
+        try {
+            audioRecord = AudioRecord(
+                MediaRecorder.AudioSource.MIC,
+                SAMPLE_RATE,
+                CHANNEL_CONFIG,
+                AUDIO_FORMAT,
+                bufferSize
+            ).apply {
+                if (state != AudioRecord.STATE_INITIALIZED) {
+                    throw IllegalStateException("AudioRecord initialization failed")
                 }
-
-                // Emit audio chunk
-                emit(floatBuffer.copyOfRange(0, readSize))
             }
+
+            val audioBuffer = ShortArray(bufferSize)
+            val floatBuffer = FloatArray(bufferSize)
+
+            audioRecord?.startRecording()
+            isRecording = true
+
+            while (coroutineContext.isActive && isRecording) {
+                val readSize = audioRecord?.read(audioBuffer, 0, bufferSize) ?: 0
+
+                when {
+                    readSize > 0 -> {
+                        // Convert PCM16 to float
+                        for (i in 0 until readSize) {
+                            floatBuffer[i] = audioBuffer[i] / 32768.0f
+                        }
+
+                        // Emit audio chunk
+                        emit(floatBuffer.copyOfRange(0, readSize))
+                    }
+                    readSize == AudioRecord.ERROR_INVALID_OPERATION -> {
+                        throw IllegalStateException("AudioRecord read error: Invalid operation")
+                    }
+                    readSize == AudioRecord.ERROR_BAD_VALUE -> {
+                        throw IllegalStateException("AudioRecord read error: Bad value")
+                    }
+                    readSize == AudioRecord.ERROR_DEAD_OBJECT -> {
+                        throw IllegalStateException("AudioRecord read error: Dead object")
+                    }
+                }
+            }
+        } catch (e: SecurityException) {
+            throw SecurityException("Failed to access microphone. Please grant RECORD_AUDIO permission.", e)
+        } catch (e: Exception) {
+            throw IllegalStateException("Audio capture failed: ${e.message}", e)
+        } finally {
+            // Ensure cleanup happens even if an exception is thrown
+            stopCapture()
         }
     }.flowOn(Dispatchers.IO)
 
     fun stopCapture() {
         isRecording = false
         audioRecord?.apply {
-            stop()
-            release()
+            try {
+                if (state == AudioRecord.STATE_INITIALIZED) {
+                    stop()
+                }
+                release()
+            } catch (e: Exception) {
+                // Log error but don't throw, as we're cleaning up
+                e.printStackTrace()
+            }
         }
         audioRecord = null
     }

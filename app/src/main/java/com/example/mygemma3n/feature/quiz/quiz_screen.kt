@@ -24,6 +24,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedButton
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -48,13 +49,17 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.mygemma3n.feature.quiz.Subject
 
 // QuizScreen.kt - Compose UI
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuizScreen(
     viewModel: QuizGeneratorViewModel = hiltViewModel()
 ) {
     val state by viewModel.quizState.collectAsState()
-    var selectedSubject by remember { mutableStateOf<Subject?>(null) }
-    var selectedTopic by remember { mutableStateOf("") }
+
+    // Add debug logging
+    LaunchedEffect(state) {
+        println("QuizScreen State: subjects=${state.subjects.size}, isGenerating=${state.isGenerating}, hasQuiz=${state.currentQuiz != null}")
+    }
 
     Scaffold(
         topBar = {
@@ -66,30 +71,35 @@ fun QuizScreen(
             )
         }
     ) { paddingValues ->
-        when {
-            state.currentQuiz == null && !state.isGenerating -> {
-                // Quiz Setup Screen
-                QuizSetupScreen(
-                    subjects = state.subjects,
-                    onGenerateQuiz = { s, t, c ->
-                        viewModel.generateAdaptiveQuiz(s, t, c)
-                    },
-                    modifier = Modifier.padding(paddingValues)
-                )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+        ) {
+            when {
+                state.currentQuiz == null && !state.isGenerating -> {
+                    // Show setup screen OR empty state
+                    if (state.subjects.isEmpty()) {
+                        // Show empty state with manual subject selection
+                        EmptyStateQuizSetup(
+                            onGenerateQuiz = { s, t, c ->
+                                viewModel.generateAdaptiveQuiz(s, t, c)
+                            }
+                        )
+                    } else {
+                        QuizSetupScreen(
+                            subjects = state.subjects,
+                            onGenerateQuiz = { s, t, c ->
+                                viewModel.generateAdaptiveQuiz(s, t, c)
+                            }
+                        )
+                    }
+                }
 
-
-
-            }
-
-            state.isGenerating -> {
-                // Generation Progress
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(paddingValues),
-                    contentAlignment = Alignment.Center
-                ) {
+                state.isGenerating -> {
+                    // Generation Progress
                     Column(
+                        modifier = Modifier.align(Alignment.Center),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
@@ -104,25 +114,122 @@ fun QuizScreen(
                         )
                     }
                 }
-            }
 
-            state.currentQuiz != null -> {
-                // Quiz Taking Screen
-                QuizTakingScreen(
-                    quiz = state.currentQuiz!!,
-                    onAnswerSubmit = { questionId, answer ->
-                        viewModel.submitAnswer(questionId, answer)
-                    },
-                    onQuizComplete = {
-                        viewModel.completeQuiz()
-                    },
-                    modifier = Modifier.padding(paddingValues)
-                )
+                state.currentQuiz != null -> {
+                    // Quiz Taking Screen
+                    QuizTakingScreen(
+                        quiz = state.currentQuiz!!,
+                        onAnswerSubmit = { questionId, answer ->
+                            viewModel.submitAnswer(questionId, answer)
+                        },
+                        onQuizComplete = {
+                            viewModel.completeQuiz()
+                        }
+                    )
+                }
             }
         }
     }
 }
 
+// New composable for when subjects list is empty
+@Composable
+fun EmptyStateQuizSetup(
+    onGenerateQuiz: (Subject, String, Int) -> Unit
+) {
+    var selectedSubject by remember { mutableStateOf<Subject?>(null) }
+    var topicText by remember { mutableStateOf("") }
+    var questionCount by remember { mutableStateOf(10f) }
+
+    // All available subjects from the enum
+    val allSubjects = remember { Subject.values().toList() }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            "Create a new adaptive quiz",
+            style = MaterialTheme.typography.headlineSmall
+        )
+
+        Text(
+            "No educational content loaded. You can still create a quiz!",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        // Subject selection
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Text(
+                    "Select Subject:",
+                    style = MaterialTheme.typography.labelLarge
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                allSubjects.forEach { subject ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        androidx.compose.material3.RadioButton(
+                            selected = selectedSubject == subject,
+                            onClick = { selectedSubject = subject }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(subject.name)
+                    }
+                }
+            }
+        }
+
+        // Topic text field
+        OutlinedTextField(
+            value = topicText,
+            onValueChange = { topicText = it },
+            label = { Text("Topic (optional)") },
+            placeholder = { Text("e.g., Linear Equations, Cell Biology") },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        // Question count slider
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text("Number of questions: ${questionCount.toInt()}")
+            androidx.compose.material3.Slider(
+                value = questionCount,
+                onValueChange = { questionCount = it },
+                valueRange = 5f..20f,
+                steps = 14
+            )
+        }
+
+        // Generate button
+        Button(
+            onClick = {
+                selectedSubject?.let { subject ->
+                    onGenerateQuiz(subject, topicText.trim(), questionCount.toInt())
+                }
+            },
+            enabled = selectedSubject != null,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Generate Quiz")
+            Spacer(Modifier.width(4.dp))
+            Icon(Icons.Default.ArrowForward, contentDescription = null)
+        }
+    }
+}
 /* ────────────────────────────────────────────────────────────────
  * QuizSetupScreen – select subject / topic / #questions
  * ──────────────────────────────────────────────────────────────── */
