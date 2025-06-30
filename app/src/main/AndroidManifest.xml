@@ -9,6 +9,7 @@
     <!-- Audio Recording for Live Caption and CBT Coach -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+
     <!-- Location for Crisis Handbook -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -48,6 +49,7 @@
         android:required="false" />
 
     <application
+        android:name=".Gemma3nApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -117,10 +119,16 @@
             tools:node="merge" />
 
         <!-- Audio Capture Service -->
-<!--        <service-->
-<!--            android:name=".service.AudioCaptureService"-->
-<!--            android:foregroundServiceType="microphone"-->
-<!--            android:exported="false" />-->
+        <service
+            android:name=".service.AudioCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" >
+            <intent-filter>
+                <action android:name="com.example.mygemma3n.START_CAPTURE" />
+                <action android:name="com.example.mygemma3n.STOP_CAPTURE" />
+            </intent-filter>
+        </service>
+
 
         <provider
             android:name="androidx.startup.InitializationProvider"

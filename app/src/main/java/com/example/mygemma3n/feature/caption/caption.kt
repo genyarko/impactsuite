@@ -52,7 +52,7 @@ class AudioCapture @Inject constructor() {
     private var audioRecord: AudioRecord? = null
     private var isRecording = false
 
-    fun startCapture(): Flow<FloatArray> = flow {
+    fun startCapture(): Flow<FloatArray> = flow @androidx.annotation.RequiresPermission(android.Manifest.permission.RECORD_AUDIO) {
         val minBufferSize = AudioRecord.getMinBufferSize(
             SAMPLE_RATE,
             CHANNEL_CONFIG,
