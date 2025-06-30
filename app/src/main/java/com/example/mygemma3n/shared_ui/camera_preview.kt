@@ -1,27 +1,22 @@
 package com.example.mygemma3n.shared_ui
 
-import android.view.ViewGroup
-import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
-import androidx.camera.core.Preview
-import androidx.camera.core.CameraSelector
 import androidx.camera.view.LifecycleCameraController
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
-import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.camera.view.PreviewView
 
 @Composable
-fun CameraPreview(modifier: Modifier = Modifier) {
-    val context = LocalContext.current
+fun CameraPreview(
+    controller: LifecycleCameraController,
+    modifier: Modifier = Modifier
+) {
     val lifecycleOwner = LocalLifecycleOwner.current
-    val cameraController = remember {
-        LifecycleCameraController(context).apply {
-            bindToLifecycle(lifecycleOwner)
-        }
+    LaunchedEffect(controller) {
+        controller.bindToLifecycle(lifecycleOwner)
     }
 
     AndroidView(
@@ -30,10 +25,10 @@ fun CameraPreview(modifier: Modifier = Modifier) {
             PreviewView(ctx).apply {
                 scaleType = PreviewView.ScaleType.FILL_START
                 implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-                controller = cameraController
+                this.controller = controller
             }
         },
-        onRelease = { cameraController.unbind() }
+        onRelease = { controller.unbind() }
     )
 }
 
