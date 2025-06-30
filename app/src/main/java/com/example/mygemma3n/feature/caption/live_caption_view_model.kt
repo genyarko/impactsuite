@@ -1,8 +1,11 @@
 package com.example.mygemma3n.feature.caption
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import android.content.Intent
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mygemma3n.gemma.GemmaEngine
+import com.example.mygemma3n.service.AudioCaptureService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
@@ -11,15 +14,15 @@ import javax.inject.Inject
 
 @HiltViewModel
 class LiveCaptionViewModel @Inject constructor(
+    application: Application,
     private val gemmaEngine: GemmaEngine,
-    private val audioCapture: AudioCapture,
     private val translationCache: TranslationCache
-) : ViewModel() {
+) : AndroidViewModel(application) {
 
     private val _captionState = MutableStateFlow(CaptionState())
     val captionState: StateFlow<CaptionState> = _captionState.asStateFlow()
 
-    private var captureJob: Job? = null
+    private var audioProcessingJob: Job? = null
 
     data class CaptionState(
         val isListening: Boolean = false,
@@ -31,62 +34,89 @@ class LiveCaptionViewModel @Inject constructor(
         val error: String? = null
     )
 
-    fun startLiveCaption() {
-        if (_captionState.value.isListening) return
+    init {
+        // Monitor service state
+        viewModelScope.launch {
+            AudioCaptureService.isRunning.collect { isRunning ->
+                _captionState.update { it.copy(isListening = isRunning) }
 
-        captureJob = viewModelScope.launch {
-            try {
-                _captionState.update { it.copy(isListening = true, error = null) }
-
-                audioCapture.startCapture()
-                    .chunked(1600) // Process in 100ms chunks (16kHz * 0.1s)
-                    .transform { audioChunk ->
-                        val startTime = System.currentTimeMillis()
-
-                        // Process audio through Gemma for transcription
-                        val transcript = processAudioChunk(audioChunk)
-
-                        if (transcript.isNotEmpty()) {
-                            emit(transcript)
-
-                            val latency = System.currentTimeMillis() - startTime
-                            _captionState.update { it.copy(latencyMs = latency) }
-                        }
-                    }
-                    .scan("") { acc, newText ->
-                        // Keep last 500 characters for context
-                        val combined = acc + " " + newText
-                        if (combined.length > 500) {
-                            combined.takeLast(500)
-                        } else {
-                            combined
-                        }.trim()
-                    }
-                    .collect { transcript ->
-                        _captionState.update { it.copy(currentTranscript = transcript) }
-
-                        // Translate if needed
-                        if (_captionState.value.targetLanguage != _captionState.value.sourceLanguage &&
-                            _captionState.value.sourceLanguage != Language.AUTO) {
-                            translateText(transcript)
-                        }
-                    }
-            } catch (e: Exception) {
-                _captionState.update {
-                    it.copy(
-                        isListening = false,
-                        error = "Capture error: ${e.message}"
-                    )
+                if (isRunning) {
+                    startProcessingAudio()
+                } else {
+                    stopProcessingAudio()
                 }
             }
         }
     }
 
+    fun startLiveCaption() {
+        if (_captionState.value.isListening) return
+
+        try {
+            val context = getApplication<Application>()
+            val intent = Intent(context, AudioCaptureService::class.java).apply {
+                action = AudioCaptureService.ACTION_START_CAPTURE
+            }
+            context.startService(intent)
+
+            _captionState.update { it.copy(error = null) }
+        } catch (e: Exception) {
+            _captionState.update {
+                it.copy(error = "Failed to start service: ${e.message}")
+            }
+        }
+    }
+
     fun stopLiveCaption() {
-        captureJob?.cancel()
-        captureJob = null
-        audioCapture.stopCapture()
-        _captionState.update { it.copy(isListening = false) }
+        val context = getApplication<Application>()
+        val intent = Intent(context, AudioCaptureService::class.java).apply {
+            action = AudioCaptureService.ACTION_STOP_CAPTURE
+        }
+        context.startService(intent)
+    }
+
+    private fun startProcessingAudio() {
+        audioProcessingJob = viewModelScope.launch {
+            AudioCaptureService.audioDataFlow
+                .filterNotNull()
+                .chunked(1600) // Process in 100ms chunks (16kHz * 0.1s)
+                .transform { audioChunk ->
+                    val startTime = System.currentTimeMillis()
+
+                    // Process audio through Gemma for transcription
+                    val transcript = processAudioChunk(audioChunk)
+
+                    if (transcript.isNotEmpty()) {
+                        emit(transcript)
+
+                        val latency = System.currentTimeMillis() - startTime
+                        _captionState.update { it.copy(latencyMs = latency) }
+                    }
+                }
+                .scan("") { acc, newText ->
+                    // Keep last 500 characters for context
+                    val combined = acc + " " + newText
+                    if (combined.length > 500) {
+                        combined.takeLast(500)
+                    } else {
+                        combined
+                    }.trim()
+                }
+                .collect { transcript ->
+                    _captionState.update { it.copy(currentTranscript = transcript) }
+
+                    // Translate if needed
+                    if (_captionState.value.targetLanguage != _captionState.value.sourceLanguage &&
+                        _captionState.value.sourceLanguage != Language.AUTO) {
+                        translateText(transcript)
+                    }
+                }
+        }
+    }
+
+    private fun stopProcessingAudio() {
+        audioProcessingJob?.cancel()
+        audioProcessingJob = null
     }
 
     fun setSourceLanguage(language: Language) {
@@ -190,7 +220,7 @@ class LiveCaptionViewModel @Inject constructor(
     }
 }
 
-// Extension function to convert Flow to List
+// Extension function for Flow operations
 suspend fun <T> Flow<T>.toList(): List<T> {
     val list = mutableListOf<T>()
     collect { list.add(it) }
