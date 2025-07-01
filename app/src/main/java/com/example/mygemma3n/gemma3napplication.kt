@@ -5,6 +5,7 @@ import com.google.firebase.BuildConfig
 import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import androidx.work.WorkManager
 import dagger.hilt.android.HiltAndroidApp
 import timber.log.Timber
 import javax.inject.Inject
@@ -25,6 +26,7 @@ class Gemma3nApplication : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+        WorkManager.initialize(this, workManagerConfiguration)
         if (BuildConfig.DEBUG) {
             Timber.plant(Timber.DebugTree())
         } else {
