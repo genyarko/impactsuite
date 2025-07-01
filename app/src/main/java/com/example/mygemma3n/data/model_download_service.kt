@@ -125,13 +125,16 @@ class ModelDownloadWorker @AssistedInject constructor(
     private val modelRepository: ModelRepository
 ) : CoroutineWorker(context, params) {
 
-    @AssistedFactory                     // ✅ NOT @AssistedInject.Factory
-    interface Factory {
-        fun create(
-            context: Context,
+
+
+    @AssistedFactory
+    interface Factory : ChildWorkerFactory {
+        override fun create(
+            appContext: Context,
             params: WorkerParameters
         ): ModelDownloadWorker
     }
+
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val modelUrl = inputData.getString(KEY_MODEL_URL) ?: return@withContext Result.failure()
