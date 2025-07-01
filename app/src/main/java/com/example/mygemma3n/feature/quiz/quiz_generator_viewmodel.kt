@@ -2,6 +2,7 @@ package com.example.mygemma3n.feature.quiz
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.mygemma3n.data.ModelDownloadManager
 import com.example.mygemma3n.data.local.VectorDatabase
 import com.example.mygemma3n.gemma.GemmaEngine
 import com.example.mygemma3n.gemma.GemmaModelManager
@@ -16,6 +17,7 @@ class QuizGeneratorViewModel @Inject constructor(
     private val gemmaEngine: GemmaEngine,
     private val vectorDB: VectorDatabase,
     private val modelManager: GemmaModelManager,
+    private val modelDownloadManager: ModelDownloadManager, // Ensure injected
     private val educationalContent: EducationalContentRepository,
     private val quizRepository: QuizRepository
 ) : ViewModel() {
@@ -33,79 +35,53 @@ class QuizGeneratorViewModel @Inject constructor(
     )
 
     init {
-        // Initialize with prepopulated content
         viewModelScope.launch {
             try {
-                // First, prepopulate the educational content
                 educationalContent.prepopulateContent()
-
-                // Then initialize
                 initializeEducationalContent()
             } catch (e: Exception) {
-                // If content loading fails, at least show available subjects
-                _quizState.update {
-                    it.copy(subjects = Subject.values().toList())
-                }
+                _quizState.update { it.copy(subjects = Subject.values().toList()) }
                 println("Error initializing educational content: ${e.message}")
             }
         }
     }
 
     private suspend fun initializeEducationalContent() {
-        try {
-            // Load pre-embedded educational content
-            val contents = educationalContent.getAllContent()
+        val contents = educationalContent.getAllContent()
+        if (contents.isEmpty()) {
+            _quizState.update { it.copy(subjects = Subject.values().toList()) }
+            return
+        }
 
-            if (contents.isEmpty()) {
-                // If no content, just show available subjects
-                _quizState.update {
-                    it.copy(subjects = Subject.values().toList())
-                }
-                return
-            }
-
-            contents.forEach { content ->
-                try {
-                    // Generate embeddings using the embedding model
-                    val embedding = generateEmbedding(content.text)
-
-                    vectorDB.insert(
-                        VectorDatabase.VectorDocument(
-                            id = content.id,
-                            content = content.text,
-                            embedding = embedding,
-                            metadata = mapOf(
-                                "subject" to content.subject.name,
-                                "grade" to content.gradeLevel,
-                                "topic" to content.topic
-                            )
+        contents.forEach { content ->
+            try {
+                val embedding = generateEmbedding(content.text)
+                vectorDB.insert(
+                    VectorDatabase.VectorDocument(
+                        id = content.id,
+                        content = content.text,
+                        embedding = embedding,
+                        metadata = mapOf(
+                            "subject" to content.subject.name,
+                            "grade" to content.gradeLevel,
+                            "topic" to content.topic
                         )
                     )
-                } catch (e: Exception) {
-                    println("Error embedding content ${content.id}: ${e.message}")
-                }
+                )
+            } catch (e: Exception) {
+                println("Error embedding content ${content.id}: ${e.message}")
             }
+        }
 
-            _quizState.update {
-                it.copy(subjects = contents.map { it.subject }.distinct())
-            }
-        } catch (e: Exception) {
-            println("Error in initializeEducationalContent: ${e.message}")
-            // Fallback to showing all subjects
-            _quizState.update {
-                it.copy(subjects = Subject.values().toList())
-            }
+        _quizState.update {
+            it.copy(subjects = contents.map { it.subject }.distinct())
         }
     }
 
-    /** Called when the user finishes the quiz to clean up or reset state. */
     fun completeQuiz() {
         _quizState.update { it.copy(currentQuiz = null, questionsGenerated = 0) }
     }
 
-    /**
-     * Generate an adaptive quiz in the background.
-     */
     fun generateAdaptiveQuiz(
         subject: Subject,
         topic: String,
@@ -115,36 +91,37 @@ class QuizGeneratorViewModel @Inject constructor(
             _quizState.update { it.copy(isGenerating = true, questionsGenerated = 0) }
 
             try {
-                // Initialize GemmaEngine if needed
+                val request = ModelDownloadManager.DownloadRequest(
+                    url = "https://huggingface.co/google/gemma-3n-E4B-it-litert-preview/resolve/main/gemma-2b-it-fast.tflite",
+                    name = "gemma-2b-it-fast",
+                    type = "gemma-3n-2b"
+                )
+
+                val state = ensureModelDownloaded(request)
+                if (state !is ModelDownloadManager.DownloadState.Success) {
+                    println("Error ensuring model: ${(state as? ModelDownloadManager.DownloadState.Error)?.message}")
+                    _quizState.update { it.copy(isGenerating = false) }
+                    return@launch
+                }
+
                 if (!isGemmaInitialized()) {
                     initializeGemmaEngine()
                 }
 
                 val questions = mutableListOf<Question>()
-                val userLevel = getUserProficiencyLevel(
-                    subject,
-                    quizRepository.progressDao()
-                )
-
-                // Retrieve relevant content using RAG
+                val userLevel = getUserProficiencyLevel(subject, quizRepository.progressDao())
                 val relevantContent = retrieveRelevantContent(subject, topic, questionCount * 2)
 
-                // Generate questions adaptively
                 for (i in 1..questionCount) {
                     val difficulty = calculateAdaptiveDifficulty(userLevel, questions)
-
                     val question = generateQuestion(
                         context = relevantContent,
                         difficulty = difficulty,
                         previousQuestions = questions,
                         questionType = selectQuestionType(i)
                     )
-
                     questions.add(question)
-
-                    _quizState.update {
-                        it.copy(questionsGenerated = questions.size)
-                    }
+                    _quizState.update { it.copy(questionsGenerated = questions.size) }
                 }
 
                 val quiz = Quiz(
@@ -157,58 +134,42 @@ class QuizGeneratorViewModel @Inject constructor(
                 )
 
                 quizRepository.saveQuiz(quiz)
+                _quizState.update { it.copy(isGenerating = false, currentQuiz = quiz) }
 
-                _quizState.update {
-                    it.copy(
-                        isGenerating = false,
-                        currentQuiz = quiz
-                    )
-                }
             } catch (e: Exception) {
                 println("Error generating quiz: ${e.message}")
-                _quizState.update {
-                    it.copy(isGenerating = false)
-                }
+                _quizState.update { it.copy(isGenerating = false) }
             }
         }
+    }
+
+    private suspend fun ensureModelDownloaded(request: ModelDownloadManager.DownloadRequest): ModelDownloadManager.DownloadState {
+        if (modelDownloadManager.isModelAvailable(request.name)) {
+            val model = modelDownloadManager.getAvailableModels().first { it.name == request.name }
+            return ModelDownloadManager.DownloadState.Success(model.path, model.size)
+        }
+        var result: ModelDownloadManager.DownloadState = ModelDownloadManager.DownloadState.Idle
+        modelDownloadManager.downloadModel(request).collect { result = it }
+        return result
     }
 
     fun submitAnswer(questionId: String, answer: String) {
         viewModelScope.launch {
             val quiz = _quizState.value.currentQuiz ?: return@launch
             val question = quiz.questions.find { it.id == questionId } ?: return@launch
-
             val isCorrect = answer == question.correctAnswer
-
-            // Update user progress
             updateUserProgress(quiz.subject, question.difficulty, isCorrect)
-
-            // Record progress in database
-            quizRepository.recordProgress(
-                subject = quiz.subject,
-                difficulty = question.difficulty,
-                correct = isCorrect,
-                responseTimeMs = 1000L // You might want to track actual response time
-            )
-
-            // Generate personalized feedback
-            val feedback = generatePersonalizedFeedback(
-                question = question,
-                userAnswer = answer,
-                isCorrect = isCorrect
-            )
-
-            _quizState.update { state ->
-                state.copy(
+            quizRepository.recordProgress(quiz.subject, question.difficulty, isCorrect, 1000L)
+            val feedback = generatePersonalizedFeedback(question, answer, isCorrect)
+            _quizState.update {
+                it.copy(
                     currentQuiz = quiz.copy(
                         questions = quiz.questions.map {
-                            if (it.id == questionId) {
-                                it.copy(
-                                    userAnswer = answer,
-                                    feedback = feedback,
-                                    isAnswered = true
-                                )
-                            } else it
+                            if (it.id == questionId) it.copy(
+                                userAnswer = answer,
+                                feedback = feedback,
+                                isAnswered = true
+                            ) else it
                         }
                     )
                 )
@@ -414,7 +375,6 @@ class QuizGeneratorViewModel @Inject constructor(
             )
         }
     }
-
 
     private suspend fun generatePersonalizedFeedback(
         question: Question,

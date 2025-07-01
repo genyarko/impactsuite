@@ -3,6 +3,7 @@ package com.example.mygemma3n.shared_utilities
 import com.example.mygemma3n.data.local.Converters
 import com.example.mygemma3n.data.local.SubjectRepository
 import com.example.mygemma3n.data.local.VectorDatabase
+import com.example.mygemma3n.data.local.entities.SubjectEntity
 import com.example.mygemma3n.gemma.GemmaModelManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -52,7 +53,8 @@ class OfflineRAG @Inject constructor(
     )
 
 
-    fun Converters.SubjectEntity.toModel() = OfflineRAG.Subject.valueOf(subject) to accuracy
+    fun SubjectEntity.toModel() =
+        OfflineRAG.Subject.valueOf(subject) to accuracy
 
     suspend fun loadSubjects(): List<Pair<OfflineRAG.Subject, Float>> =
         subjectRepo.getSubjectsWithAccuracy()
