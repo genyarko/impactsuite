@@ -415,19 +415,6 @@ class QuizGeneratorViewModel @Inject constructor(
         }
     }
 
-    // Add this at the bottom of QuizGeneratorViewModel.kt, outside the class
-    private suspend fun GemmaEngine.generateText(
-        prompt: String,
-        maxTokens: Int = 256,
-        temperature: Float = 0.7f,
-        modelConfig: GemmaModelManager.ModelConfig
-    ): Flow<String> {
-        val generationConfig = GemmaEngine.GenerationConfig(
-            maxNewTokens = maxTokens,
-            temperature = temperature
-        )
-        return generateText(prompt, generationConfig)
-    }
 
     private suspend fun generatePersonalizedFeedback(
         question: Question,
