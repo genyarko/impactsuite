@@ -127,13 +127,6 @@ class ModelDownloadWorker @AssistedInject constructor(
 
 
 
-    @AssistedFactory
-    interface Factory : ChildWorkerFactory {
-        override fun create(
-            appContext: Context,
-            params: WorkerParameters
-        ): ModelDownloadWorker
-    }
 
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
