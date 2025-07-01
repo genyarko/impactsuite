@@ -32,7 +32,7 @@ import org.tensorflow.lite.gpu.GpuDelegateFactory.Options as GpuOptions
 @Singleton
 class GemmaModelManager @Inject constructor(
     private val context: Context,
-    private val modelRepository: ModelRepository,
+    val modelRepository: ModelRepository,
     private val performanceMonitor: PerformanceMonitor
 ) {
     private val modelCache = mutableMapOf<ModelConfig, Interpreter>()

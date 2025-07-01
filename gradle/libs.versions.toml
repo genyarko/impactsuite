@@ -1,6 +1,7 @@
 [versions]
 accompanistPermissions = "0.37.3"
 agp = "8.11.0"
+assetDeliveryKtx = "2.3.0"
 cameraView = "1.4.2"
 coreSplashscreen = "1.0.1"
 datastorePreferences = "1.1.7"
@@ -9,6 +10,7 @@ firebaseBom = "33.16.0"
 gson = "2.13.1"
 hiltAndroidTesting = "2.56.2"
 hiltCompiler = "2.56.2"
+hiltCompilerVersion = "1.2.0"
 kotlin = "2.2.0"
 coreKtx = "1.16.0"
 junit = "4.13.2"
@@ -44,6 +46,8 @@ firebaseCrashlytics = "19.4.4"
 timber = "5.0.1"
 litert = "1.3.0"
 litertGpu = "1.3.0"
+appcompat = "1.6.1"
+material = "1.10.0"
 
 [libraries]
 accompanist-permissions = { module = "com.google.accompanist:accompanist-permissions", version.ref = "accompanistPermissions" }
@@ -54,6 +58,7 @@ androidx-camera-view = { module = "androidx.camera:camera-view", version.ref = "
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "coreSplashscreen" }
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastorePreferences" }
+androidx-hilt-compiler = { module = "androidx.hilt:hilt-compiler", version.ref = "hiltCompilerVersion" }
 androidx-material-icons-extended = { module = "androidx.compose.material:material-icons-extended" }
 androidx-media3-exoplayer = { module = "androidx.media3:media3-exoplayer", version.ref = "media3Exoplayer" }
 androidx-room-compiler-v261 = { module = "androidx.room:room-compiler", version.ref = "roomCompiler" }
@@ -62,6 +67,7 @@ androidx-room-compiler = { module = "androidx.room:room-compiler", version.ref =
 androidx-room-ktx-v261 = { module = "androidx.room:room-ktx", version.ref = "roomKtxVersion" }
 androidx-room-runtime = { module = "androidx.room:room-runtime", version.ref = "roomRuntime" }
 androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "workRuntimeKtx" }
+asset-delivery-ktx = { module = "com.google.android.play:asset-delivery-ktx", version.ref = "assetDeliveryKtx" }
 edge-litert = { module = "com.google.ai:edge-litert", version.ref = "edgeLitert" }
 edge-litert-gpu = { module = "com.google.ai:edge-litert-gpu", version.ref = "edgeLitert" }
 edge-litert-nnapi = { module = "com.google.ai:edge-litert-nnapi", version.ref = "edgeLitert" }
@@ -107,6 +113,8 @@ tensorflow-lite-gpu-api = { module = "org.tensorflow:tensorflow-lite-gpu-api", v
 timber = { module = "com.jakewharton.timber:timber", version.ref = "timber" }
 litert = { group = "com.google.ai.edge.litert", name = "litert", version.ref = "litert" }
 litert-gpu = { group = "com.google.ai.edge.litert", name = "litert-gpu", version.ref = "litertGpu" }
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

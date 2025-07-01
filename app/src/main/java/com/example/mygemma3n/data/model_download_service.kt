@@ -1,12 +1,8 @@
 package com.example.mygemma3n.data
 
 import android.content.Context
-import androidx.hilt.work.HiltWorker
 import androidx.lifecycle.asFlow
 import androidx.work.*
-import dagger.assisted.Assisted
-import dagger.assisted.AssistedFactory
-import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.withContext
@@ -115,19 +111,33 @@ class ModelRepository @Inject constructor(
         val modelFile = File(modelsDir, "$name.tflite")
         return if (modelFile.exists()) modelFile.length() else 0L
     }
+
+    // --------- Added for bundled asset pack model loading ---------
+    /**
+     * Loads the Gemma 3N model from the install-time asset pack.
+     * @return ByteArray with the full model file contents.
+     * @throws IOException if the asset does not exist.
+     */
+    fun loadBundledModel(): ByteArray {
+        context.assets.open("gemma-3n-E4B-it-int4.task").use { input ->
+            return input.readBytes()
+        }
+    }
+    /**
+     * Optionally, return an InputStream if your model loader needs it.
+     */
+    fun openBundledModelStream() = context.assets.open("gemma-3n-E4B-it-int4.task")
+    // -------------------------------------------------------------
 }
 
-// Download Worker
-@HiltWorker
-class ModelDownloadWorker @AssistedInject constructor(
-    @Assisted context: Context,
-    @Assisted params: WorkerParameters,
-    private val modelRepository: ModelRepository
+// Download Worker - Without Hilt
+class ModelDownloadWorker(
+    context: Context,
+    params: WorkerParameters
 ) : CoroutineWorker(context, params) {
 
-
-
-
+    // Create ModelRepository directly without injection
+    private val modelRepository = ModelRepository(context.applicationContext)
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val modelUrl = inputData.getString(KEY_MODEL_URL) ?: return@withContext Result.failure()

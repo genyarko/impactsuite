@@ -7,11 +7,15 @@ plugins {
     id("kotlin-parcelize")
     id("com.google.gms.google-services")
     id("com.google.firebase.crashlytics")
+    id("org.jetbrains.kotlin.kapt")
+    id("com.android.asset-pack")
 }
+
 
 android {
     namespace = "com.example.mygemma3n"
     compileSdk = 36
+    assetPacks += listOf(":gemma3n_assetpack")
 
     defaultConfig {
         applicationId = "com.example.mygemma3n"
@@ -84,7 +88,7 @@ android {
     sourceSets {
         getByName("main") {
             assets {
-                srcDirs("src/main/assets", "src/main/ml")
+                srcDirs("src/main/assets", "src/main/ml", "src\\main\\assets", "src\\main\\assets")
             }
         }
     }
@@ -112,17 +116,15 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     implementation(libs.litert.gpu)
-    ksp(libs.hilt.android.compiler)
     ksp(libs.androidx.room.compiler)
 
 // WorkManager
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.room.ktx.v261)
-    ksp(libs.androidx.room.compiler.v261)
 
 // Hilt Dependency Injection
     implementation(libs.hilt.android)
-    ksp(libs.hilt.compiler)
+    kapt(libs.hilt.compiler)
     implementation(libs.androidx.hilt.common)
 
 // Coroutines
@@ -180,12 +182,14 @@ dependencies {
     implementation(libs.tensorflow.lite.gpu.api)
 
     implementation(libs.androidx.hilt.work)
-
     // Optional instrumentation-test helpers
     androidTestImplementation(libs.hilt.android.testing)
 
     // Leak Detection (debug only)
     debugImplementation(libs.leakcanary.android)
+
+    implementation(libs.asset.delivery.ktx)
+
 }
 
 // Enable Gemma 3n model optimizations

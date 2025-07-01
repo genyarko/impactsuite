@@ -54,11 +54,6 @@ object AppModule {
     @Singleton
     fun provideFirebaseAnalytics(): FirebaseAnalytics = Firebase.analytics
 
-    @Provides
-    @Singleton
-    fun provideWorkManager(
-        @ApplicationContext context: Context
-    ): WorkManager = WorkManager.getInstance(context)
 
     // Databases
     @Provides

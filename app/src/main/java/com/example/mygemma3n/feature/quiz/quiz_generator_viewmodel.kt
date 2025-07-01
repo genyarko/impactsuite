@@ -11,9 +11,11 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
-
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 @HiltViewModel
 class QuizGeneratorViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val gemmaEngine: GemmaEngine,
     private val vectorDB: VectorDatabase,
     private val modelManager: GemmaModelManager,
@@ -195,12 +197,33 @@ class QuizGeneratorViewModel @Inject constructor(
     }
 
     private suspend fun getModelPath(): String {
-        // Try to get a model path from the model manager or repository
-        return modelManager.getModelStats().let { stats ->
-            stats.availableModels.firstOrNull()?.path
-                ?: throw IllegalStateException("No Gemma model found. Please download a model first.")
+        // 1. Try to use a downloaded model if available
+        val stats = modelManager.getModelStats()
+        val downloaded = stats.availableModels.firstOrNull()?.path
+        if (downloaded != null && java.io.File(downloaded).exists()) {
+            return downloaded
         }
+        // 2. Fallback: copy from asset parts to a temp file
+        val tmp = java.io.File(context.cacheDir, "gemma-3n-E4B-it-int4.task")
+        if (!tmp.exists()) {
+            val partNames = listOf(
+                "gemma-3n-E4B-it-int4.task.partaa",
+                "gemma-3n-E4B-it-int4.task.partab"
+
+            )
+            tmp.outputStream().use { output ->
+                for (name in partNames) {
+                    context.assets.open(name).use { input ->
+                        input.copyTo(output)
+                    }
+                }
+            }
+        }
+        return tmp.absolutePath
     }
+
+
+
 
     private suspend fun generateQuestion(
         context: List<String>,
