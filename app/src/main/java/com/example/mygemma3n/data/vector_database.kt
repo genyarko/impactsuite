@@ -37,13 +37,6 @@ class Converters {
         }
     }
 
-    @Entity(tableName = "subjects")
-    data class SubjectEntity(
-        @PrimaryKey val subject: String,  // or use Int or UUID if needed
-        var accuracy: Float
-    )
-
-
     @TypeConverter
     fun fromStringMap(value: Map<String, String>): String {
         return value.entries.joinToString(";") { "${it.key}:${it.value}" }
