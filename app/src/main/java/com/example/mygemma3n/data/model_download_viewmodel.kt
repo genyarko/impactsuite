@@ -145,9 +145,9 @@ class ModelDownloadViewModel @Inject constructor(
 
     fun getModelPath(context: Context): String {
         // Copy asset to cache if not already present
-        val tmp = java.io.File(context.cacheDir, "gemma-3n-E2B-it-int4.task")
+        val tmp = java.io.File(context.cacheDir, "models/gemma-3n-E2B-it-int4.task")
         if (!tmp.exists()) {
-            context.assets.open("gemma-3n-E2B-it-int4.task").use { input ->
+            context.assets.open("models/gemma-3n-E2B-it-int4.task").use { input ->
                 tmp.outputStream().use { output ->
                     input.copyTo(output)
                 }

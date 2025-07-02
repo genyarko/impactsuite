@@ -51,7 +51,7 @@ class ModelRepository @Inject constructor(
         }
 
         // Check for cached asset model
-        val modelNames = listOf("gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
+        val modelNames = listOf("models/gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
 
         for (modelName in modelNames) {
             val cachedFile = File(context.cacheDir, modelName)
@@ -94,7 +94,7 @@ class ModelRepository @Inject constructor(
             }
 
             // Direct fallback to asset loading
-            val modelNames = listOf("gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
+            val modelNames = listOf("models/gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
             for (modelName in modelNames) {
                 try {
                     context.assets.open(modelName).use { input ->
@@ -123,7 +123,7 @@ class ModelRepository @Inject constructor(
         }
 
         // Check cached models
-        val modelNames = listOf("gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
+        val modelNames = listOf("models/gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
         for (modelName in modelNames) {
             if (File(context.cacheDir, modelName).exists()) {
                 return@withContext true

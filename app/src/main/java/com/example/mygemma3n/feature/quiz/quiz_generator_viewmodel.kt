@@ -277,7 +277,7 @@ class QuizGeneratorViewModel @Inject constructor(
             .listFiles { f -> f.extension in setOf("tflite", "task") && f.length() > 0 }
             ?.firstOrNull()
             ?.absolutePath
-            ?: copyBundledAsset("gemma-3n-E2B-it-int4.task")
+            ?: copyBundledAsset("models/gemma-3n-E2B-it-int4.task")
     }
 
     private fun copyBundledAsset(name: String): String {
@@ -292,7 +292,7 @@ class QuizGeneratorViewModel @Inject constructor(
         // Use ModelRepository's unified model loading
         modelRepository.getGemmaModelPath() ?: run {
             // Fallback: ensure we have a model by copying from assets
-            val modelNames = listOf("gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
+            val modelNames = listOf("models/gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
 
             for (modelName in modelNames) {
                 val cacheFile = File(context.cacheDir, modelName)

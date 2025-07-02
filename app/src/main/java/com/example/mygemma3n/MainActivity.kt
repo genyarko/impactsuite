@@ -25,9 +25,7 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.android.play.core.assetpacks.AssetPackManagerFactory
-import com.google.android.play.core.assetpacks.AssetPackState
 import com.google.android.play.core.assetpacks.AssetPackStateUpdateListener
-import com.google.android.play.core.assetpacks.AssetPackStates
 import com.google.android.play.core.assetpacks.model.AssetPackStatus
 import com.google.android.play.core.assetpacks.AssetPackManager
 import dagger.hilt.android.AndroidEntryPoint
@@ -283,7 +281,7 @@ fun checkModelAvailability(
 // Check if model exists in assets
 private fun checkAssetModel(context: Context): Boolean {
     return try {
-        context.assets.list("")?.contains("gemma-3n-E2B-it-int4.task") == true ||
+        context.assets.list("")?.contains("models/gemma-3n-E2B-it-int4.task") == true ||
                 context.assets.list("")?.contains("gemma-3n-E4B-it-int4.task") == true
     } catch (e: Exception) {
         Timber.e(e, "Error checking asset model")
@@ -295,7 +293,7 @@ private fun checkAssetModel(context: Context): Boolean {
 private suspend fun copyAssetModelToCache(context: Context): String? = withContext(Dispatchers.IO) {
     try {
         // Try both possible model names
-        val modelNames = listOf("gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
+        val modelNames = listOf("models/gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
 
         for (modelName in modelNames) {
             try {
@@ -454,7 +452,7 @@ fun getModelFilePath(context: Context): String? {
     }
 
     // Fallback to cached asset model
-    val modelNames = listOf("gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
+    val modelNames = listOf("models/gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
     for (modelName in modelNames) {
         val cacheFile = File(context.cacheDir, modelName)
         if (cacheFile.exists()) {

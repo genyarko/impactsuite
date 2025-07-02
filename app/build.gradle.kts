@@ -68,6 +68,7 @@ android {
         compose = true
         buildConfig = true
         viewBinding = true
+        mlModelBinding = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.10"
@@ -185,6 +186,8 @@ dependencies {
     implementation(libs.tensorflow.lite.support)
     implementation(libs.tensorflow.lite.gpu)
     implementation(libs.tensorflow.lite.gpu.api)
+    implementation(libs.tensorflow.lite.metadata)
+
 
     // MediaPipe for .task models (if you want to use .task files)
     implementation(libs.tasks.genai)
