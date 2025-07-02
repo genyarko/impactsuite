@@ -479,8 +479,37 @@ fun QuizTakingScreen(
                 )
             }
 
-            QuestionType.SHORT_ANSWER -> TODO()
-            QuestionType.MATCHING -> TODO()
+            QuestionType.SHORT_ANSWER -> {
+                var textAnswer by remember { mutableStateOf("") }
+
+                OutlinedTextField(
+                    value = textAnswer,
+                    onValueChange = {
+                        textAnswer = it
+                        selectedAnswer = it
+                    },
+                    label = { Text("Your answer") },
+                    enabled = !currentQuestion.isAnswered,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 96.dp)
+                )
+            }
+            QuestionType.MATCHING -> {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Matching questions are not supported yet.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedButton(onClick = { selectedAnswer = "skipped" }) {
+                        Text("Skip Question")
+                    }
+                }
+            }
         }
 
         // Feedback section
