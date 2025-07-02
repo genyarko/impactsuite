@@ -28,6 +28,9 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
+import java.io.FileInputStream
+import java.nio.MappedByteBuffer
+import java.nio.channels.FileChannel
 import java.util.Random
 import javax.inject.Inject
 import kotlin.math.sqrt
@@ -119,37 +122,25 @@ class QuizGeneratorViewModel @Inject constructor(
         "TF_LITE_PREFILL_DECODE.tflite",
         "TF_LITE_VISION_ADAPTER.tflite",
         "TF_LITE_VISION_ENCODER.tflite",
-        "TOKENIZER_MODEL.tflite"
+        "TOKENIZER_MODEL.tflite",
+        "METADATA"
     )
 
-    /**
-     * Checks that all required Gemma3n .tflite files are present under assets/models/.
-     * Calls onStatusUpdate with:
-     *   • progress = 100f & ready=true if everything’s there
-     *   • otherwise ready=false and an error message listing missing files.
-     */
     fun checkModelAvailability(
         ctx: Context,
-        onStatusUpdate: (progress: Float, ready: Boolean, preparing: Boolean, error: String?) -> Unit
+        onStatusUpdate: (progress: Float,
+                         ready: Boolean,
+                         preparing: Boolean,
+                         error: String?) -> Unit
     ) {
         CoroutineScope(Dispatchers.IO).launch {
-            try {
-                // List assets in "models" folder
-                val available = ctx.assets.list("models")?.toSet() ?: emptySet()
+            val available = ctx.assets.list("models")?.toSet() ?: emptySet()
+            val missing   = REQUIRED_SHARDS.filterNot { it in available }
 
-                // Which shards are missing?
-                val missing = REQUIRED_SHARDS.filterNot { available.contains(it) }
-                if (missing.isEmpty()) {
-                    Timber.d("All model shards present in assets/models/")
-                    onStatusUpdate(100f, true, false, null)
-                } else {
-                    val msg = "Missing model files: ${missing.joinToString()}"
-                    Timber.e(msg)
-                    onStatusUpdate(0f, false, false, msg)
-                }
-            } catch (e: Exception) {
-                Timber.e(e, "Error checking model assets")
-                onStatusUpdate(0f, false, false, "Model check failed: ${e.message}")
+            if (missing.isEmpty()) {
+                onStatusUpdate(100f, true, false, null)
+            } else {
+                onStatusUpdate(0f, false, false, "Missing files: ${missing.joinToString()}")
             }
         }
     }

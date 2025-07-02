@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import com.example.mygemma3n.shared_utilities.PerformanceMonitor
 import com.example.mygemma3n.shared_utilities.loadTfliteAsset
+
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import org.tensorflow.lite.Delegate
@@ -110,19 +111,20 @@ class GemmaEngine @Inject constructor(
 
     suspend fun initialize(config: InferenceConfig) = withContext(Dispatchers.IO) {
         try {
-            cleanup() // Clean up any existing interpreter
+            // 0) Clean up any existing interpreter and state
+            cleanup()
 
             currentConfig = config
 
-            // 1) Load each TFLite shard directly from assets/models/*.tflite
-            val embedderBuf       = loadTfliteAsset(context, "models/TF_LITE_EMBEDDER")
-            val perLayerBuf       = loadTfliteAsset(context, "models/TF_LITE_PER_LAYER_EMBEDDER")
-            val prefillDecodeBuf  = loadTfliteAsset(context, "models/TF_LITE_PREFILL_DECODE")
-            val visionAdapterBuf  = loadTfliteAsset(context, "models/TF_LITE_VISION_ADAPTER")
-            val visionEncoderBuf  = loadTfliteAsset(context, "models/TF_LITE_VISION_ENCODER")
-            val tokenizerModelBuf = loadTfliteAsset(context, "models/TOKENIZER_MODEL")
+            // 1) Load each TFLite shard from assets/models/*.tflite via zero-copy mmap
+            val embedderBuf       = loadTfliteAsset(context, "TF_LITE_EMBEDDER")
+            val perLayerBuf       = loadTfliteAsset(context, "TF_LITE_PER_LAYER_EMBEDDER")
+            val prefillDecodeBuf  = loadTfliteAsset(context, "TF_LITE_PREFILL_DECODE")
+            val visionAdapterBuf  = loadTfliteAsset(context, "TF_LITE_VISION_ADAPTER")
+            val visionEncoderBuf  = loadTfliteAsset(context, "TF_LITE_VISION_ENCODER")
+            val tokenizerModelBuf = loadTfliteAsset(context, "TOKENIZER_MODEL")
 
-            // 2) Build Interpreter options (threads, delegates, etc.)
+            // 2) Build Interpreter.Options (threads, delegates, FP16, XNNPACK, etc.)
             val options = Interpreter.Options().apply {
                 setNumThreads(config.numThreads)
 
@@ -137,7 +139,9 @@ class GemmaEngine @Inject constructor(
                                 )
                             }
                         ).also { addDelegate(it); delegates.add(it) }
-                    }.onFailure { Timber.w(it, "GPU delegate not available") }
+                    }.onFailure {
+                        Timber.w(it, "GPU delegate not available")
+                    }
                 }
 
                 if (config.useNnapi && Build.VERSION.SDK_INT >= 27) {
@@ -154,17 +158,19 @@ class GemmaEngine @Inject constructor(
                                 }
                             }
                         ).also { addDelegate(it); delegates.add(it) }
-                    }.onFailure { Timber.w(it, "NNAPI delegate not available") }
+                    }.onFailure {
+                        Timber.w(it, "NNAPI delegate not available")
+                    }
                 }
 
                 setAllowFp16PrecisionForFp32(true)
                 setUseXNNPACK(true)
             }
 
-            // 3) Initialize the Interpreter with the embedder buffer (or your multi-buffer loader)
+            // 3) Initialize the Interpreter with the embedder buffer and options
             interpreter = Interpreter(embedderBuf, options)
 
-            // 4) Allocate tensors and initialize PLE
+            // 4) Allocate tensors and set up PLE cache if enabled
             interpreter?.allocateTensors()
             if (config.enablePLE) initializePLECache()
 
@@ -174,6 +180,26 @@ class GemmaEngine @Inject constructor(
         }
     }
 
+
+
+
+    /**
+     * Memory‐maps a .tflite file from assets/models/<modelName>.tflite
+     * and properly closes all streams to avoid StrictMode warnings.
+     */
+    fun loadTfliteAsset(context: Context, modelName: String): MappedByteBuffer {
+        // Open the asset; this returns a Closeable AssetFileDescriptor
+        context.assets.openFd("models/$modelName.tflite").use { afd ->
+            // Wrap the FileInputStream in use{} so it auto-closes
+            FileInputStream(afd.fileDescriptor).use { fis ->
+                return fis.channel.map(
+                    FileChannel.MapMode.READ_ONLY,
+                    afd.startOffset,
+                    afd.declaredLength
+                )
+            }
+        }
+    }
 
     /**
      * FIXED: Handle large model files (>2GB) by either direct mapping or chunking
