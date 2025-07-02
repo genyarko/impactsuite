@@ -89,7 +89,10 @@ android {
     sourceSets {
         getByName("main") {
             assets {
-                srcDirs("src/main/assets", "src/main/ml", "src\\main\\assets", "src\\main\\assets")
+                srcDirs("src/main/assets", "src/main/ml", "src\\main\\assets", "src\\main\\assets",
+                    "src\\main\\assets",
+                    "src\\main\\assets"
+                )
             }
         }
     }

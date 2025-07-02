@@ -233,92 +233,76 @@ fun CrisisHandbookScreen() {
 }
 
 // Updated model availability check
+// ---- checkModelAvailability -----------------------------------------
 fun checkModelAvailability(
-    context: Context,
+    ctx: Context,
     onStatusUpdate: (progress: Float, ready: Boolean, preparing: Boolean) -> Unit
 ) {
     CoroutineScope(Dispatchers.IO).launch {
         try {
-            // First, check if we have the model in assets
-            val hasAssetModel = checkAssetModel(context)
+            /* ---------- DEBUG / local build ---------- */
+            if (BuildConfig.DEBUG) {
+                // stitch the *.part? pieces once, then signal ready
+                onStatusUpdate(0f, false, true)            // “preparing…”
+                val modelPath = ensureLargeModelOnDisk(ctx) // <─ HERE
+                Timber.i("Local model ready at $modelPath")
+                onStatusUpdate(100f, true, false)
+                return@launch
+            }
 
-            if (hasAssetModel) {
-                // Copy asset model to cache if needed
+            /* ---------- PRODUCTION / play-store path ---------- */
+            // 1. bundled fallback?
+            val hasAsset = checkAssetModel(ctx)
+            if (hasAsset) {
                 onStatusUpdate(0f, false, true)
-                val modelPath = copyAssetModelToCache(context)
-                if (modelPath != null) {
-                    Timber.d("Model ready from assets at: $modelPath")
+                copyAssetModelToCache(ctx)?.let {
+                    Timber.i("Model ready from assets → $it")
                     onStatusUpdate(100f, true, false)
                     return@launch
                 }
             }
 
-            // Try Google Play Asset Delivery as fallback
-            // Only attempt if we're in a production environment
-            if (isPlayStoreAvailable(context)) {
-                try {
-                    checkAndDownloadFromPlay(context, onStatusUpdate)
-                } catch (e: Exception) {
-                    // If Play Store download fails, still use bundled model
-                    Timber.w("Play Store download failed, using bundled model: ${e.message}")
-                    onStatusUpdate(100f, hasAssetModel, false)
-                }
-            } else {
-                // In development, just use the bundled model
-                Timber.w("Google Play not available, using bundled model only")
-                onStatusUpdate(100f, hasAssetModel, false)
-            }
-
-        } catch (e: Exception) {
-            Timber.e(e, "Error checking model availability")
-            // If we have asset model, still mark as ready
-            val hasAssetModel = checkAssetModel(context)
-            onStatusUpdate(100f, hasAssetModel, false)
+            // 2. try the Play-Asset-Pack
+            if (isPlayStoreAvailable(ctx))
+                checkAndDownloadFromPlay(ctx, onStatusUpdate)
+            else
+                onStatusUpdate(100f, hasAsset, false)      // offline side-load
+        } catch (t: Throwable) {
+            Timber.e(t, "Model availability check failed")
+            onStatusUpdate(100f, checkAssetModel(ctx), false)
         }
     }
 }
 
-// Check if model exists in assets
-private fun checkAssetModel(context: Context): Boolean {
-    return try {
-        context.assets.list("")?.contains("models/gemma-3n-E2B-it-int4.task") == true ||
-                context.assets.list("")?.contains("gemma-3n-E4B-it-int4.task") == true
-    } catch (e: Exception) {
-        Timber.e(e, "Error checking asset model")
-        false
-    }
+
+// ---- checkAssetModel -------------------------------------------------
+private fun checkAssetModel(ctx: Context): Boolean = try {
+    val dir = "models"
+    ctx.assets.list(dir)?.any {
+        it == "gemma-3n-E2B-it-int4.task" || it == "gemma-3n-E4B-it-int4.task"
+    } ?: false
+} catch (e: Exception) {
+    Timber.e(e, "Error checking asset model")
+    false
 }
 
 // Copy model from assets to cache
-private suspend fun copyAssetModelToCache(context: Context): String? = withContext(Dispatchers.IO) {
-    try {
-        // Try both possible model names
-        val modelNames = listOf("models/gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
-
-        for (modelName in modelNames) {
-            try {
-                val cacheFile = File(context.cacheDir, modelName)
-                if (!cacheFile.exists()) {
-                    context.assets.open(modelName).use { input ->
-                        cacheFile.outputStream().use { output ->
-                            input.copyTo(output)
-                        }
-                    }
+// ---- copyAssetModelToCache ------------------------------------------
+private suspend fun copyAssetModelToCache(ctx: Context): String? = withContext(Dispatchers.IO) {
+    val names = listOf("gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
+    for (name in names) {
+        try {
+            val cacheFile = File(ctx.cacheDir, name)
+            if (!cacheFile.exists()) {
+                ctx.assets.open("models/$name").use { input ->
+                    cacheFile.outputStream().use { output -> input.copyTo(output) }
                 }
-                Timber.d("Model copied to cache: ${cacheFile.absolutePath}")
-                return@withContext cacheFile.absolutePath
-            } catch (e: Exception) {
-                // Try next model name
-                continue
             }
-        }
-
-        Timber.e("No model found in assets")
-        null
-    } catch (e: Exception) {
-        Timber.e(e, "Error copying model to cache")
-        null
+            return@withContext cacheFile.absolutePath
+        } catch (_: Exception) { /* try next */ }
     }
+    Timber.e("No model found in assets")
+    null
 }
 
 // Check if Google Play Services is available
@@ -439,26 +423,32 @@ private fun monitorDownload(
     assetPackManager.registerListener(listener)
 }
 
-// Helper function to get model file path
-fun getModelFilePath(context: Context): String? {
-    // First try asset pack location
-    val assetPackManager = AssetPackManagerFactory.getInstance(context)
-    val location = assetPackManager.getPackLocation("gemma3n_assetpack")
-    location?.assetsPath()?.let { path ->
-        val modelFile = File(path, "gemma-3n-E4B-it-int4.task")
-        if (modelFile.exists()) {
-            return modelFile.absolutePath
-        }
+// ---- getModelFilePath -----------------------------------------------
+fun getModelFilePath(ctx: Context): String? {
+    val pack = AssetPackManagerFactory.getInstance(ctx)
+        .getPackLocation("gemma3n_assetpack")
+    pack?.assetsPath()?.let { base ->
+        File(base, "gemma-3n-E4B-it-int4.task").takeIf { it.exists() }?.let { return it.path }
     }
-
-    // Fallback to cached asset model
-    val modelNames = listOf("models/gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
-    for (modelName in modelNames) {
-        val cacheFile = File(context.cacheDir, modelName)
-        if (cacheFile.exists()) {
-            return cacheFile.absolutePath
-        }
+    listOf("gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task").forEach { name ->
+        File(ctx.cacheDir, name).takeIf { it.exists() }?.let { return it.path }
     }
-
     return null
+}
+
+suspend fun ensureLargeModelOnDisk(ctx: Context): String = withContext(Dispatchers.IO) {
+    val target = File(ctx.cacheDir, "gemma-3n-E2B-it-int4.task")
+    if (target.exists()) return@withContext target.path          // already done
+
+    ctx.assets.list("models")!!
+        .filter { it.startsWith("gemma-3n-E2B-it-int4.part") }
+        .sorted()                                               // part0, part1, …
+        .forEach { partName ->
+            ctx.assets.open("models/$partName").use { input ->
+                target.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+        }
+    target.path
 }

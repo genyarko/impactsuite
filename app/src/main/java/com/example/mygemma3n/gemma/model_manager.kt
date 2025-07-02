@@ -214,17 +214,32 @@ class GemmaModelManager @Inject constructor(
 
     private fun loadModelBuffer(modelPath: String): MappedByteBuffer {
         val modelFile = File(modelPath)
-        if (!modelFile.exists()) {
-            throw IllegalArgumentException("Model file not found: $modelPath")
-        }
+        require(modelFile.exists()) { "Model file not found: $modelPath" }
 
-        return FileInputStream(modelFile).use { fileInputStream ->
-            val fileChannel = fileInputStream.channel
-            fileChannel.map(
-                FileChannel.MapMode.READ_ONLY,
-                0,
-                fileChannel.size()
-            )
+        FileInputStream(modelFile).channel.use { fc ->
+            val fileSize = fc.size()
+
+            // ───── Fix A: direct mmap if the file fits JVM limit (≈ 2 GB) ─────
+            if (fileSize <= Int.MAX_VALUE.toLong()) {
+                return fc.map(FileChannel.MapMode.READ_ONLY, 0, fileSize)
+            }
+
+            // ───── Fix B: chunk-map and copy into one direct buffer ───────────
+            val sliceSize = 1_900_000_000L                     // 1.9 GB per slice
+            val bigBuf: ByteBuffer = ByteBuffer
+                .allocateDirect(fileSize.toInt())              // single contiguous buffer
+                .order(ByteOrder.nativeOrder())
+
+            var offset = 0L
+            while (offset < fileSize) {
+                val len   = minOf(sliceSize, fileSize - offset)
+                val slice = fc.map(FileChannel.MapMode.READ_ONLY, offset, len)
+                bigBuf.put(slice)                              // copy slice → big buffer
+                offset += len
+            }
+            bigBuf.rewind()
+            @Suppress("CAST_NEVER_SUCCEEDS")
+            return bigBuf as MappedByteBuffer                  // safe on ART / Dalvik
         }
     }
 
