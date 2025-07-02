@@ -1,28 +1,57 @@
 package com.example.mygemma3n.feature.quiz
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mygemma3n.data.ModelDownloadManager
+import com.example.mygemma3n.data.ModelRepository
 import com.example.mygemma3n.data.local.VectorDatabase
+import com.example.mygemma3n.di.EmbedderManager
+import com.example.mygemma3n.feature.toList
 import com.example.mygemma3n.gemma.GemmaEngine
 import com.example.mygemma3n.gemma.GemmaModelManager
+import com.example.mygemma3n.models.EmbedderModel
+import com.example.mygemma3n.repository.SettingsRepository
 import com.example.mygemma3n.shared_utilities.OfflineRAG
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
-import javax.inject.Inject
-import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import timber.log.Timber
+import java.io.File
+import javax.inject.Inject
+
+/**
+ * ViewModel responsible for generating adaptive quizzes using an on‑device Gemma model.
+ *
+ * ‑ Uses the single‑file model bundled in **assets/gemma-3n-E2B-it-int4.task** by default.
+ * ‑ Falls back to downloading an updated model via [ModelDownloadManager] and reloads Gemma afterwards.
+ * ‑ Expensive disk and CPU work is off‑loaded to IO / Default dispatchers to keep the UI responsive.
+ */
 @HiltViewModel
 class QuizGeneratorViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val gemmaEngine: GemmaEngine,
     private val vectorDB: VectorDatabase,
     private val modelManager: GemmaModelManager,
-    private val modelDownloadManager: ModelDownloadManager, // Ensure injected
+    private val modelRepository: ModelRepository,
+    private val modelDownloadManager: ModelDownloadManager,
     private val educationalContent: EducationalContentRepository,
-    private val quizRepository: QuizRepository
+    private val quizRepository: QuizRepository,
+    private val settingsRepo: SettingsRepository,
+    private val embedderManager: EmbedderManager       // wrapper around MediaPipe Text-Embedder
+
 ) : ViewModel() {
+    /*──────────────────────────────────────────────────────────────────────────*/
+    /* ── State ── */
 
     private val _quizState = MutableStateFlow(QuizState())
     val quizState: StateFlow<QuizState> = _quizState.asStateFlow()
@@ -33,96 +62,130 @@ class QuizGeneratorViewModel @Inject constructor(
         val subjects: List<Subject> = emptyList(),
         val difficulty: Difficulty = Difficulty.MEDIUM,
         val questionsGenerated: Int = 0,
-        val userProgress: Map<Subject, Float> = emptyMap()
+        val userProgress: Map<Subject, Float> = emptyMap(),
+        val error: String? = null,
+        val modelStatus: ModelStatus = ModelStatus.CHECKING
     )
+
+    enum class ModelStatus {
+        CHECKING,
+        READY,
+        DOWNLOADING,
+        ERROR
+    }
+
+    /*──────────────────────────────────────────────────────────────────────────*/
+    /* ── Init ── */
 
     init {
         viewModelScope.launch {
+            // Check model availability first
+            checkModelAvailability()
+
+            // Then initialize educational content
             try {
                 educationalContent.prepopulateContent()
                 initializeEducationalContent()
             } catch (e: Exception) {
-                _quizState.update { it.copy(subjects = Subject.values().toList()) }
-                println("Error initializing educational content: ${e.message}")
+                _quizState.update { it.copy(subjects = OfflineRAG.Subject.entries) }
+                Timber.e(e, "Error initializing educational content")
             }
         }
     }
+
+    private suspend fun checkModelAvailability() {
+        try {
+            val isAvailable = modelRepository.isAnyModelAvailable()
+            _quizState.update {
+                it.copy(modelStatus = if (isAvailable) ModelStatus.READY else ModelStatus.ERROR)
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Error checking model availability")
+            _quizState.update { it.copy(modelStatus = ModelStatus.ERROR) }
+        }
+    }
+
+
+    /** Call once after reading the saved preference. */
+    fun initEmbedder(pref: EmbedderManager.Model) = viewModelScope.launch {
+        embedderManager.load(pref)
+    }
+
+
 
     private suspend fun initializeEducationalContent() {
         val contents = educationalContent.getAllContent()
         if (contents.isEmpty()) {
-            _quizState.update { it.copy(subjects = Subject.values().toList()) }
+            _quizState.update { it.copy(subjects = OfflineRAG.Subject.entries) }
             return
         }
 
-        contents.forEach { content ->
-            try {
-                val embedding = generateEmbedding(content.text)
-                vectorDB.insert(
-                    VectorDatabase.VectorDocument(
-                        id = content.id,
-                        content = content.text,
-                        embedding = embedding,
-                        metadata = mapOf(
-                            "subject" to content.subject.name,
-                            "grade" to content.gradeLevel,
-                            "topic" to content.topic
+        withContext(Dispatchers.Default) {
+            contents.forEach { content ->
+                try {
+                    val embedding = generateEmbedding(content.text)
+                    vectorDB.insert(
+                        VectorDatabase.VectorDocument(
+                            id = content.id,
+                            content = content.text,
+                            embedding = embedding,
+                            metadata = mapOf(
+                                "subject" to content.subject.name,
+                                "grade" to content.gradeLevel,
+                                "topic" to content.topic,
+                            )
                         )
                     )
-                )
-            } catch (e: Exception) {
-                println("Error embedding content ${content.id}: ${e.message}")
+                } catch (e: Exception) {
+                    Timber.e(e, "Error embedding content ${content.id}")
+                }
             }
         }
 
-        _quizState.update {
-            it.copy(subjects = contents.map { it.subject }.distinct())
-        }
+        _quizState.update { it.copy(subjects = contents.map { it.subject }.distinct()) }
     }
 
+
+
+    /*──────────────────────────────────────────────────────────────────────────*/
+    /* ── Public API ── */
+
     fun completeQuiz() {
-        _quizState.update { it.copy(currentQuiz = null, questionsGenerated = 0) }
+        _quizState.update { it.copy(currentQuiz = null, questionsGenerated = 0, error = null) }
     }
 
     fun generateAdaptiveQuiz(
         subject: Subject,
         topic: String,
-        questionCount: Int = 10
+        questionCount: Int = 10,
     ) {
         viewModelScope.launch {
-            _quizState.update { it.copy(isGenerating = true, questionsGenerated = 0) }
+            _quizState.update { it.copy(isGenerating = true, questionsGenerated = 0, error = null) }
 
             try {
-                val request = ModelDownloadManager.DownloadRequest(
-                    url = "https://huggingface.co/google/gemma-3n-E4B-it-litert-preview/resolve/main/gemma-2b-it-fast.tflite",
-                    name = "gemma-2b-it-fast",
-                    type = "gemma-3n-2b"
-                )
-
-                val state = ensureModelDownloaded(request)
-                if (state !is ModelDownloadManager.DownloadState.Success) {
-                    println("Error ensuring model: ${(state as? ModelDownloadManager.DownloadState.Error)?.message}")
-                    _quizState.update { it.copy(isGenerating = false) }
-                    return@launch
+                initializeGemmaEngine()
+                if (shouldDownloadUpdatedModel() && downloadUpdatedModel()) {
+                    initializeGemmaEngine(force = true)
                 }
 
-                if (!isGemmaInitialized()) {
-                    initializeGemmaEngine()
+                val relevantContent = withContext(Dispatchers.IO) {
+                    retrieveRelevantContent(subject, topic, questionCount * 2)
                 }
 
-                val questions = mutableListOf<Question>()
                 val userLevel = getUserProficiencyLevel(subject, quizRepository.progressDao())
-                val relevantContent = retrieveRelevantContent(subject, topic, questionCount * 2)
+                val questions = mutableListOf<Question>()
 
                 for (i in 1..questionCount) {
-                    val difficulty = calculateAdaptiveDifficulty(userLevel, questions)
-                    val question = generateQuestion(
-                        context = relevantContent,
-                        difficulty = difficulty,
-                        previousQuestions = questions,
-                        questionType = selectQuestionType(i)
-                    )
-                    questions.add(question)
+                    val diff = calculateAdaptiveDifficulty(userLevel, questions)
+                    val q = withContext(Dispatchers.Default) {
+                        generateQuestion(
+                            context = relevantContent,
+                            difficulty = diff,
+                            previousQuestions = questions,
+                            questionType = selectQuestionType(i),
+                        )
+                    }
+                    questions.add(q)
                     _quizState.update { it.copy(questionsGenerated = questions.size) }
                 }
 
@@ -134,44 +197,39 @@ class QuizGeneratorViewModel @Inject constructor(
                     difficulty = _quizState.value.difficulty,
                     createdAt = System.currentTimeMillis()
                 )
-
                 quizRepository.saveQuiz(quiz)
-                _quizState.update { it.copy(isGenerating = false, currentQuiz = quiz) }
 
+                _quizState.update { it.copy(isGenerating = false, currentQuiz = quiz) }
             } catch (e: Exception) {
-                println("Error generating quiz: ${e.message}")
-                _quizState.update { it.copy(isGenerating = false) }
+                Timber.e(e, "Error generating quiz")
+                _quizState.update {
+                    it.copy(isGenerating = false, error = "Failed to generate quiz: ${e.message}")
+                }
             }
         }
-    }
-
-    private suspend fun ensureModelDownloaded(request: ModelDownloadManager.DownloadRequest): ModelDownloadManager.DownloadState {
-        if (modelDownloadManager.isModelAvailable(request.name)) {
-            val model = modelDownloadManager.getAvailableModels().first { it.name == request.name }
-            return ModelDownloadManager.DownloadState.Success(model.path, model.size)
-        }
-        var result: ModelDownloadManager.DownloadState = ModelDownloadManager.DownloadState.Idle
-        modelDownloadManager.downloadModel(request).collect { result = it }
-        return result
     }
 
     fun submitAnswer(questionId: String, answer: String) {
         viewModelScope.launch {
             val quiz = _quizState.value.currentQuiz ?: return@launch
             val question = quiz.questions.find { it.id == questionId } ?: return@launch
-            val isCorrect = answer == question.correctAnswer
-            updateUserProgress(quiz.subject, question.difficulty, isCorrect)
-            quizRepository.recordProgress(quiz.subject, question.difficulty, isCorrect, 1000L)
-            val feedback = generatePersonalizedFeedback(question, answer, isCorrect)
+            val correct = answer == question.correctAnswer
+
+            updateUserProgress(quiz.subject, question.difficulty, correct)
+            quizRepository.recordProgress(
+                quiz.subject, question.difficulty, correct, 1_000L
+            )
+
+            val feedback = generatePersonalizedFeedback(question, answer, correct)
             _quizState.update {
                 it.copy(
                     currentQuiz = quiz.copy(
-                        questions = quiz.questions.map {
-                            if (it.id == questionId) it.copy(
+                        questions = quiz.questions.map { q ->
+                            if (q.id == questionId) q.copy(
                                 userAnswer = answer,
                                 feedback = feedback,
                                 isAnswered = true
-                            ) else it
+                            ) else q
                         }
                     )
                 )
@@ -179,80 +237,177 @@ class QuizGeneratorViewModel @Inject constructor(
         }
     }
 
+    /* ─────────────────────── Gemma init ─────────────────────── */
+
+    private val modelInitMutex = Mutex()
     private var gemmaInitialized = false
 
-    private fun isGemmaInitialized(): Boolean = gemmaInitialized
+    private suspend fun initializeGemmaEngine(force: Boolean = false) {
+        if (gemmaInitialized && !force) return
 
-    private suspend fun initializeGemmaEngine() {
-        // Initialize with a default configuration
-        val config = GemmaEngine.InferenceConfig(
-            modelPath = getModelPath(),
-            useGpu = true,
-            useNnapi = true,
-            numThreads = 4,
-            temperature = 0.7f
-        )
-        gemmaEngine.initialize(config)
-        gemmaInitialized = true
+        modelInitMutex.withLock {
+            if (gemmaInitialized && !force) return@withLock
+
+            try {
+                val modelPath = getValidModelPath() ?: run {
+                    Timber.w("No valid model – fallback mode")
+                    _quizState.update { it.copy(modelStatus = ModelStatus.ERROR) }
+                    return@withLock
+                }
+
+                val cfg = GemmaEngine.InferenceConfig(
+                    modelPath = modelPath,
+                    numThreads = 4,
+                    temperature = 0.7f
+                )
+
+                gemmaEngine.initialize(cfg)
+                gemmaInitialized = true
+                _quizState.update { it.copy(modelStatus = ModelStatus.READY) }
+
+            } catch (e: Exception) {
+                Timber.e(e, "Gemma init failed")
+                _quizState.update { it.copy(modelStatus = ModelStatus.ERROR) }
+            }
+        }
     }
 
-    private suspend fun getModelPath(): String {
-        // 1. Try to use a downloaded model if available
-        val stats = modelManager.getModelStats()
-        val downloaded = stats.availableModels.firstOrNull()?.path
-        if (downloaded != null && java.io.File(downloaded).exists()) {
-            return downloaded
-        }
-        // 2. Fallback: copy from asset parts to a temp file
-        val tmp = java.io.File(context.cacheDir, "gemma-3n-E4B-it-int4.task")
-        if (!tmp.exists()) {
-            val partNames = listOf(
-                "gemma-3n-E4B-it-int4.task.partaa",
-                "gemma-3n-E4B-it-int4.task.partab"
+    private suspend fun getValidModelPath(): String? = withContext(Dispatchers.IO) {
+        File(context.filesDir, "models")
+            .listFiles { f -> f.extension in setOf("tflite", "task") && f.length() > 0 }
+            ?.firstOrNull()
+            ?.absolutePath
+            ?: copyBundledAsset("gemma-3n-E2B-it-int4.task")
+    }
 
-            )
-            tmp.outputStream().use { output ->
-                for (name in partNames) {
-                    context.assets.open(name).use { input ->
-                        input.copyTo(output)
+    private fun copyBundledAsset(name: String): String {
+        val out = File(context.filesDir, "models/$name")
+        if (!out.exists()) context.assets.open(name).use { it.copyTo(out.outputStream()) }
+        return out.absolutePath
+    }
+
+
+
+    private suspend fun getModelPath(): String? = withContext(Dispatchers.IO) {
+        // Use ModelRepository's unified model loading
+        modelRepository.getGemmaModelPath() ?: run {
+            // Fallback: ensure we have a model by copying from assets
+            val modelNames = listOf("gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
+
+            for (modelName in modelNames) {
+                val cacheFile = File(context.cacheDir, modelName)
+
+                if (!cacheFile.exists()) {
+                    try {
+                        context.assets.open(modelName).use { input ->
+                            cacheFile.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                        Timber.d("Copied model from assets: $modelName")
+                        return@withContext cacheFile.absolutePath
+                    } catch (e: Exception) {
+                        Timber.e(e, "Failed to copy model from assets: $modelName")
+                        continue
                     }
                 }
             }
+
+            Timber.e("No model available in assets or cache")
+            null
         }
-        return tmp.absolutePath
     }
 
+    private suspend fun shouldDownloadUpdatedModel(): Boolean {
+        // Check if we already have a downloaded model
+        val hasDownloadedModel = modelRepository.getAvailableModels().isNotEmpty()
+        if (hasDownloadedModel) return false
 
+        // Check if we're connected to wifi (to avoid mobile data usage)
+        // This is a simplified check - in production you'd use ConnectivityManager
+        return false // For now, don't auto-download
+    }
 
+    private suspend fun downloadUpdatedModel(): Boolean = withContext(Dispatchers.IO) {
+        try {
+            _quizState.update { it.copy(modelStatus = ModelStatus.DOWNLOADING) }
 
-    private suspend fun generateQuestion(
+            val request = ModelDownloadManager.DownloadRequest(
+                url = "https://huggingface.co/google/gemma-3n-E4B-it-litert-preview/resolve/main/gemma-2b-it-fast.tflite",
+                name = "gemma-2b-it-fast",
+                type = "gemma-3n-2b"
+            )
+
+            val downloadState = ensureModelDownloaded(request)
+
+            when (downloadState) {
+                is ModelDownloadManager.DownloadState.Success -> {
+                    Timber.d("Model downloaded successfully: ${downloadState.modelPath}")
+                    _quizState.update { it.copy(modelStatus = ModelStatus.READY) }
+                    true
+                }
+                is ModelDownloadManager.DownloadState.Error -> {
+                    Timber.e("Model download failed: ${downloadState.message}")
+                    _quizState.update { it.copy(modelStatus = ModelStatus.ERROR) }
+                    false
+                }
+                else -> {
+                    _quizState.update { it.copy(modelStatus = ModelStatus.ERROR) }
+                    false
+                }
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Error during model download")
+            _quizState.update { it.copy(modelStatus = ModelStatus.ERROR) }
+            false
+        }
+    }
+
+    private suspend fun ensureModelDownloaded(
+        request: ModelDownloadManager.DownloadRequest
+    ): ModelDownloadManager.DownloadState {
+        if (modelDownloadManager.isModelAvailable(request.name)) {
+            val model = modelDownloadManager.getAvailableModels().first { it.name == request.name }
+            return ModelDownloadManager.DownloadState.Success(model.path, model.size)
+        }
+
+        var result: ModelDownloadManager.DownloadState = ModelDownloadManager.DownloadState.Idle
+        modelDownloadManager.downloadModel(request).collect { state ->
+            result = state
+            // Update UI with download progress
+            if (state is ModelDownloadManager.DownloadState.Downloading) {
+                Timber.d("Download progress: ${state.progress}%")
+            }
+        }
+        return result
+    }
+
+    /*──────────────────────────────────────────────────────────────────────────*/
+    /* ── Question generation helpers ── */
+
+    private suspend fun generateQuestionWithModel(
         context: List<String>,
         difficulty: Difficulty,
         previousQuestions: List<Question>,
-        questionType: QuestionType
+        questionType: QuestionType,
     ): Question {
-        // If no context available, generate a basic question
-        if (context.isEmpty()) {
-            return generateBasicQuestion(difficulty, questionType)
-        }
+        if (context.isEmpty()) return generateBasicQuestion(difficulty, questionType)
 
         val contextText = context.joinToString("\n\n")
-        val previousQuestionsText = previousQuestions.joinToString("\n") {
-            "- ${it.questionText}"
-        }
+        val previousQuestionsText = previousQuestions.joinToString("\n") { "- ${it.questionText}" }
 
         val prompt = """
             Based on the following educational content, generate a ${questionType.name} question.
-            
+
             CONTENT:
             $contextText
-            
+
             REQUIREMENTS:
             - Difficulty level: ${difficulty.name}
             - Question type: ${questionType.name}
             - Make it different from these previous questions:
             $previousQuestionsText
-            
+
             FORMAT YOUR RESPONSE AS JSON:
             {
                 "question": "...",
@@ -262,187 +417,292 @@ class QuizGeneratorViewModel @Inject constructor(
                 "hint": "...",
                 "conceptsCovered": ["concept1", "concept2"]
             }
-            
+
             For TRUE/FALSE questions, use options ["True", "False"].
             For FILL_IN_BLANK, use a single blank marked as _____.
         """.trimIndent()
 
         return try {
-            // Use the correct GemmaEngine method signature
             val generationConfig = GemmaEngine.GenerationConfig(
                 maxNewTokens = 300,
                 temperature = 0.7f,
                 topK = 40,
-                topP = 0.95f
+                topP = 0.95f,
             )
 
-            val response = gemmaEngine.generateText(prompt, generationConfig)
+            val raw = gemmaEngine.generateText(prompt, generationConfig)
                 .toList()
                 .joinToString("")
 
-            parseQuestionFromJson(response, questionType, difficulty)
+            parseQuestionFromJson(raw, questionType, difficulty)
         } catch (e: Exception) {
-            println("Error generating question: ${e.message}")
+            Timber.e(e, "Error generating question")
             generateBasicQuestion(difficulty, questionType)
         }
     }
 
-    private fun generateBasicQuestion(difficulty: Difficulty, questionType: QuestionType): Question {
-        // Fallback questions when generation fails
-        return when (questionType) {
-            QuestionType.MULTIPLE_CHOICE -> Question(
-                questionText = "What is 2 + 2?",
-                questionType = questionType,
-                options = listOf("A) 3", "B) 4", "C) 5", "D) 6"),
-                correctAnswer = "B",
-                explanation = "2 + 2 equals 4",
-                difficulty = difficulty
-            )
-            QuestionType.TRUE_FALSE -> Question(
-                questionText = "The Earth revolves around the Sun.",
-                questionType = questionType,
-                options = listOf("True", "False"),
-                correctAnswer = "True",
-                explanation = "The Earth orbits the Sun once per year.",
-                difficulty = difficulty
-            )
-            else -> Question(
-                questionText = "Complete: The capital of France is _____.",
-                questionType = QuestionType.FILL_IN_BLANK,
-                correctAnswer = "Paris",
-                explanation = "Paris is the capital city of France.",
-                difficulty = difficulty
-            )
+
+    private suspend fun generateQuestion(
+        context: List<String>,
+        difficulty: Difficulty,
+        previousQuestions: List<Question>,
+        questionType: QuestionType,
+    ): Question {
+        // Check if model is available
+        if (_quizState.value.modelStatus != ModelStatus.READY || !gemmaInitialized) {
+            // Use rule-based generation as fallback
+            return generateQuestionWithRules(context, difficulty, questionType, previousQuestions)
         }
+
+        // Original model-based generation code...
+        return try {
+            generateQuestionWithModel(
+                context          = context,
+                difficulty       = difficulty,
+                previousQuestions = previousQuestions,   // 3rd
+                questionType     = questionType         // 4th
+            )
+        } catch (e: Exception) {
+            Timber.e(e, "Model generation failed, using fallback")
+            generateQuestionWithRules(context, difficulty, questionType, previousQuestions)
+        }
+
+    }
+
+    // Rule-based question generation as fallback
+    private fun generateQuestionWithRules(
+        context: List<String>,
+        difficulty: Difficulty,
+        questionType: QuestionType,
+        previousQuestions: List<Question>
+    ): Question {
+        // This is a simplified rule-based generator
+        // You can expand this with more sophisticated rules
+
+        val questionTemplates = when (questionType) {
+            QuestionType.MULTIPLE_CHOICE -> listOf(
+                "Which of the following best describes %s?",
+                "What is the main characteristic of %s?",
+                "According to the content, %s is:",
+                "Which statement about %s is correct?"
+            )
+            QuestionType.TRUE_FALSE -> listOf(
+                "%s is an example of %s.",
+                "The primary function of %s is %s.",
+                "%s can be classified as %s.",
+                "It is true that %s %s."
+            )
+            QuestionType.FILL_IN_BLANK -> listOf(
+                "The process of %s involves _____.",
+                "_____ is the term used to describe %s.",
+                "%s is characterized by _____.",
+                "The main component of %s is _____."
+            )
+            else -> listOf("Explain the concept of %s.")
+        }
+
+        // Extract key terms from context
+        val keyTerms = extractKeyTerms(context)
+        val template = questionTemplates.random()
+        val term = keyTerms.randomOrNull() ?: "this concept"
+
+        val questionText = template.replace("%s", term)
+
+        return when (questionType) {
+            QuestionType.MULTIPLE_CHOICE -> {
+                val correctAnswer = generateCorrectAnswer(term, context)
+                val distractors = generateDistractors(correctAnswer, term, 3)
+                val options = (listOf(correctAnswer) + distractors).shuffled()
+                val correctIndex = options.indexOf(correctAnswer)
+
+                Question(
+                    questionText = questionText,
+                    questionType = questionType,
+                    options = options.mapIndexed { index, option ->
+                        "${('A' + index)}) $option"
+                    },
+                    correctAnswer = "${('A' + correctIndex)}",
+                    explanation = "The correct answer is based on the educational content provided.",
+                    difficulty = difficulty
+                )
+            }
+            QuestionType.TRUE_FALSE -> {
+                val isTrue = kotlin.random.Random.nextBoolean()
+                Question(
+                    questionText = questionText,
+                    questionType = questionType,
+                    options = listOf("True", "False"),
+                    correctAnswer = if (isTrue) "True" else "False",
+                    explanation = "This statement is ${if (isTrue) "true" else "false"} based on the content.",
+                    difficulty = difficulty
+                )
+            }
+            else -> {
+                Question(
+                    questionText = questionText,
+                    questionType = QuestionType.FILL_IN_BLANK,
+                    correctAnswer = generateCorrectAnswer(term, context),
+                    explanation = "The answer can be found in the educational content.",
+                    difficulty = difficulty
+                )
+            }
+        }
+    }
+
+    private fun extractKeyTerms(context: List<String>): List<String> {
+        // Simple keyword extraction
+        val allText = context.joinToString(" ")
+        val words = allText.split(Regex("\\s+"))
+            .filter { it.length > 4 }
+            .map { it.lowercase().trim(',', '.', '!', '?') }
+
+        // Get most frequent terms
+        return words.groupingBy { it }
+            .eachCount()
+            .entries
+            .sortedByDescending { it.value }
+            .take(10)
+            .map { it.key }
+    }
+
+    private fun generateCorrectAnswer(term: String, context: List<String>): String {
+        // Generate a plausible answer based on the term and context
+        val contextText = context.joinToString(" ").lowercase()
+
+        return when {
+            "definition" in contextText -> "A clear and precise explanation"
+            "process" in contextText -> "A series of steps or actions"
+            "function" in contextText -> "The purpose or role it serves"
+            "example" in contextText -> "A specific instance or case"
+            else -> "An important concept in this subject"
+        }
+    }
+
+    private fun generateDistractors(correctAnswer: String, term: String, count: Int): List<String> {
+        val distractorTemplates = listOf(
+            "An outdated understanding",
+            "A common misconception",
+            "A related but different concept",
+            "An incomplete explanation",
+            "A superficial description",
+            "An alternative theory",
+            "A historical perspective"
+        )
+
+        return distractorTemplates.shuffled().take(count)
+    }
+    /* ─────────────────────── Basic fallback question ─────────────────────── */
+
+    private fun generateBasicQuestion(
+        difficulty: Difficulty,
+        questionType: QuestionType
+    ): Question = when (questionType) {
+        QuestionType.MULTIPLE_CHOICE -> Question(
+            questionText = "What is 2 + 2?",
+            questionType = questionType,
+            options = listOf("A) 3", "B) 4", "C) 5", "D) 6"),
+            correctAnswer = "B",
+            explanation = "2 + 2 equals 4.",
+            difficulty = difficulty
+        )
+
+        QuestionType.TRUE_FALSE -> Question(
+            questionText = "The Earth revolves around the Sun.",
+            questionType = questionType,
+            options = listOf("True", "False"),
+            correctAnswer = "True",
+            explanation = "The Earth completes one orbit every year.",
+            difficulty = difficulty
+        )
+
+        else -> Question(
+            questionText = "Complete: The capital of France is _____.",
+            questionType = QuestionType.FILL_IN_BLANK,
+            correctAnswer = "Paris",
+            explanation = "Paris is the capital city of France.",
+            difficulty = difficulty
+        )
     }
 
     private suspend fun retrieveRelevantContent(
         subject: Subject,
         topic: String,
-        k: Int
-    ): List<String> {
-        return try {
-            // Generate embedding for the query
-            val queryEmbedding = generateEmbedding("$subject $topic educational content")
-
-            // Vector search
-            val results = vectorDB.search(
-                embedding = queryEmbedding,
-                k = k,
-                filter = mapOf("subject" to subject.name)
-            )
-
-            // Extract actual text
-            results.map { it.document.content }
-        } catch (e: Exception) {
-            println("Error retrieving content: ${e.message}")
-            emptyList()
-        }
+        k: Int,
+    ): List<String> = try {
+        val queryEmbedding = generateEmbedding("$subject $topic educational content")
+        val results = vectorDB.search(
+            embedding = queryEmbedding,
+            k = k,
+            filter = mapOf("subject" to subject.name),
+        )
+        results.map { it.document.content }
+    } catch (e: Exception) {
+        Timber.e(e, "Error retrieving content")
+        emptyList()
     }
+     // cached interpreter
 
-    /** Builds an embedding using the dedicated on-device model. */
-    private suspend fun generateEmbedding(text: String): FloatArray {
-        return try {
-            val embeddingModel = modelManager.getEmbeddingModel()
-            val tokens = modelManager.tokenize(text, maxLength = 512)
+    private suspend fun generateEmbedding(text: String): FloatArray =
+        withContext(Dispatchers.Default) {
+            try {
+                // 1. read the user’s current choice from DataStore (suspend)
+                val choice = settingsRepo.embedderFlow.first()   // <-- no error: through repo
 
-            // Create input buffer
-            val inputBuffer = java.nio.ByteBuffer.allocateDirect(tokens.size * 4)
-                .order(java.nio.ByteOrder.nativeOrder())
-            tokens.forEach { inputBuffer.putInt(it) }
-            inputBuffer.rewind()
+                // 2. load / hot-swap the model lazily
+                embedderManager.load(
+                    when (choice) {
+                        EmbedderModel.MOBILE_BERT -> EmbedderManager.Model.MOBILE_BERT
+                        EmbedderModel.AVG_WORD   -> EmbedderManager.Model.AVG_WORD
+                    },
+                    useGpu = false
+                )
 
-            // Create output buffer
-            val outputBuffer = java.nio.ByteBuffer.allocateDirect(GemmaModelManager.EMBEDDING_DIM * 4)
-                .order(java.nio.ByteOrder.nativeOrder())
-
-            // Run the model
-            embeddingModel.run(inputBuffer, outputBuffer)
-
-            // Extract embeddings
-            outputBuffer.rewind()
-            val embeddings = FloatArray(GemmaModelManager.EMBEDDING_DIM)
-            outputBuffer.asFloatBuffer().get(embeddings)
-
-            // L2-normalize
-            var sum = 0f
-            for (v in embeddings) sum += v * v
-            val norm = kotlin.math.sqrt(sum)
-            if (norm > 0) {
-                FloatArray(embeddings.size) { i -> embeddings[i] / norm }
-            } else {
-                embeddings
+                // 3. embed + L2-normalise (manager already does the normalisation)
+                embedderManager.embed(text)
+            } catch (e: Exception) {
+                Timber.e(e, "Embedding failed, returning zero vector")
+                FloatArray(GemmaModelManager.EMBEDDING_DIM) { 0f }
             }
-        } catch (e: Exception) {
-            println("Error generating embedding: ${e.message}")
-            // Return a dummy embedding
-            FloatArray(GemmaModelManager.EMBEDDING_DIM) { 0f }
         }
-    }
 
-    private fun updateUserProgress(
-        subject: Subject,
-        difficulty: Difficulty,
-        isCorrect: Boolean
-    ) {
+    /*──────────────────────────────────────────────────────────────────────────*/
+    /* ── Progress & feedback helpers ── */
+
+    private fun updateUserProgress(subject: Subject, difficulty: Difficulty, isCorrect: Boolean) {
         _quizState.update { state ->
-            val current = state.userProgress[subject] ?: 0f
+            val currentAcc = state.userProgress[subject] ?: 0f
             val count = state.questionsGenerated.coerceAtLeast(1)
-            val newAcc = if (isCorrect)
-                (current * (count - 1) + 1f) / count
-            else
-                (current * (count - 1)) / count
-
-            state.copy(
-                userProgress = state.userProgress + (subject to newAcc)
-            )
+            val newAcc = if (isCorrect) (currentAcc * (count - 1) + 1f) / count else (currentAcc * (count - 1)) / count
+            state.copy(userProgress = state.userProgress + (subject to newAcc))
         }
     }
 
     private suspend fun generatePersonalizedFeedback(
         question: Question,
         userAnswer: String,
-        isCorrect: Boolean
-    ): String {
+        isCorrect: Boolean,
+    ): String = try {
         val prompt = if (isCorrect) {
             """
-                The user correctly answered: "${question.questionText}"
+                The user correctly answered: \"${question.questionText}\"
                 Correct answer: ${question.correctAnswer}
-                
-                Provide encouraging feedback and add an interesting fact about ${question.conceptsCovered.joinToString()}.
-                Keep it under 50 words.
+
+                Provide encouraging feedback and add an interesting fact about ${question.conceptsCovered.joinToString()} (max 50 words).
             """.trimIndent()
         } else {
             """
-                Question: "${question.questionText}"
+                Question: \"${question.questionText}\"
                 User answered: $userAnswer
                 Correct answer: ${question.correctAnswer}
-                
-                Provide constructive feedback explaining why their answer was incorrect and why the correct answer is right.
-                Reference the concepts: ${question.conceptsCovered.joinToString()}
-                Keep it supportive and under 75 words.
+
+                Provide constructive feedback (max 75 words) explaining why their answer was incorrect and why the correct answer is right. Reference the concepts: ${question.conceptsCovered.joinToString()}.
             """.trimIndent()
         }
 
-        return try {
-            if (!isGemmaInitialized()) {
-                initializeGemmaEngine()
-            }
-
-            val generationConfig = GemmaEngine.GenerationConfig(
-                maxNewTokens = 100,
-                temperature = 0.7f
-            )
-
-            gemmaEngine.generateText(prompt, generationConfig)
-                .toList()
-                .joinToString("")
-        } catch (e: Exception) {
-            if (isCorrect) {
-                "Great job! You got it right."
-            } else {
-                "Not quite. The correct answer is ${question.correctAnswer}. ${question.explanation}"
-            }
-        }
+        val generationConfig = GemmaEngine.GenerationConfig(maxNewTokens = 100, temperature = 0.7f)
+        gemmaEngine.generateText(prompt, generationConfig).toList().joinToString("")
+    } catch (e: Exception) {
+        if (isCorrect) "Great job! You got it right." else "Not quite. The correct answer is ${question.correctAnswer}. ${question.explanation}"
     }
+
 }

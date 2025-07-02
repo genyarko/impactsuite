@@ -143,12 +143,19 @@ class ModelDownloadViewModel @Inject constructor(
         assetPackManager.registerListener(listener)
     }
 
-    fun getModelPath(): String? {
-        val location = assetPackManager.getPackLocation(PACK_NAME)
-        return location?.assetsPath()?.let { path ->
-            java.io.File(path, "gemma-3n-E4B-it-int4.task").absolutePath
+    fun getModelPath(context: Context): String {
+        // Copy asset to cache if not already present
+        val tmp = java.io.File(context.cacheDir, "gemma-3n-E2B-it-int4.task")
+        if (!tmp.exists()) {
+            context.assets.open("gemma-3n-E2B-it-int4.task").use { input ->
+                tmp.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
         }
+        return tmp.absolutePath
     }
+
 
     override fun onCleared() {
         super.onCleared()

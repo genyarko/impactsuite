@@ -36,6 +36,109 @@ class ModelRepository @Inject constructor(
         val downloadedAt: Long = System.currentTimeMillis()
     )
 
+    /**
+     * Gets the path to the Gemma model, checking multiple sources:
+     * 1. Downloaded models in the models directory
+     * 2. Cached model from assets
+     * 3. Direct copy from assets (if not cached yet)
+     */
+    suspend fun getGemmaModelPath(): String? = withContext(Dispatchers.IO) {
+        // Check for downloaded models first
+        val downloadedModel = getAvailableModels().firstOrNull()
+        if (downloadedModel != null && File(downloadedModel.path).exists()) {
+            Timber.d("Using downloaded model: ${downloadedModel.path}")
+            return@withContext downloadedModel.path
+        }
+
+        // Check for cached asset model
+        val modelNames = listOf("gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
+
+        for (modelName in modelNames) {
+            val cachedFile = File(context.cacheDir, modelName)
+            if (cachedFile.exists()) {
+                Timber.d("Using cached model: ${cachedFile.absolutePath}")
+                return@withContext cachedFile.absolutePath
+            }
+        }
+
+        // Copy from assets if not cached
+        for (modelName in modelNames) {
+            try {
+                val cachedFile = File(context.cacheDir, modelName)
+                context.assets.open(modelName).use { input ->
+                    cachedFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                Timber.d("Copied model from assets to: ${cachedFile.absolutePath}")
+                return@withContext cachedFile.absolutePath
+            } catch (e: Exception) {
+                // Try next model name
+                continue
+            }
+        }
+
+        Timber.e("No Gemma model found")
+        null
+    }
+
+    /**
+     * Loads the Gemma model as ByteArray, with fallback to bundled asset
+     */
+    suspend fun loadGemmaModel(): ByteArray? = withContext(Dispatchers.IO) {
+        try {
+            // Try to get model path
+            val modelPath = getGemmaModelPath()
+            if (modelPath != null) {
+                return@withContext File(modelPath).readBytes()
+            }
+
+            // Direct fallback to asset loading
+            val modelNames = listOf("gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
+            for (modelName in modelNames) {
+                try {
+                    context.assets.open(modelName).use { input ->
+                        return@withContext input.readBytes()
+                    }
+                } catch (e: Exception) {
+                    continue
+                }
+            }
+
+            Timber.e("Failed to load any Gemma model")
+            null
+        } catch (e: Exception) {
+            Timber.e(e, "Error loading Gemma model")
+            null
+        }
+    }
+
+    /**
+     * Check if any Gemma model is available (downloaded or in assets)
+     */
+    suspend fun isAnyModelAvailable(): Boolean = withContext(Dispatchers.IO) {
+        // Check downloaded models
+        if (getAvailableModels().isNotEmpty()) {
+            return@withContext true
+        }
+
+        // Check cached models
+        val modelNames = listOf("gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
+        for (modelName in modelNames) {
+            if (File(context.cacheDir, modelName).exists()) {
+                return@withContext true
+            }
+        }
+
+        // Check assets
+        try {
+            val assetList = context.assets.list("") ?: emptyArray()
+            return@withContext modelNames.any { it in assetList }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     suspend fun saveModel(
         name: String,
         file: File,
@@ -112,7 +215,7 @@ class ModelRepository @Inject constructor(
         return if (modelFile.exists()) modelFile.length() else 0L
     }
 
-    // --------- Added for bundled asset pack model loading ---------
+    // --------- Original methods for bundled asset pack model loading ---------
     /**
      * Loads the Gemma 3N model from the install-time asset pack.
      * @return ByteArray with the full model file contents.
@@ -492,7 +595,6 @@ class ModelDownloadManager @Inject constructor(
         // Gemma 3n model URLs (these would be real URLs in production)
         const val GEMMA_3N_2B_URL = "https://example.com/models/gemma_3n_2b_it.tflite"
         const val GEMMA_3N_4B_URL = "https://example.com/models/gemma_3n_4b_it.tflite"
-        const val GEMMA_3N_8B_URL = "https://example.com/models/gemma_3n_8b_it.tflite"
 
         // Model metadata
         val MODEL_CONFIGS = mapOf(

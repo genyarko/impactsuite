@@ -178,9 +178,22 @@ dependencies {
     debugImplementation(libs.androidx.ui.test.manifest)
     implementation(libs.play.services.measurement.api)
     implementation(libs.localagents.rag)
+
+    // Tensorflow Lite
+    implementation(libs.tensorflow.lite)
+    implementation(libs.tensorflow.lite.select.tf.ops)
+    implementation(libs.tensorflow.lite.support)
     implementation(libs.tensorflow.lite.gpu)
     implementation(libs.tensorflow.lite.gpu.api)
 
+    // MediaPipe for .task models (if you want to use .task files)
+    implementation(libs.tasks.genai)
+
+    implementation(libs.tasks.text)
+// For downloading models
+    implementation(libs.okhttp)
+
+    // Hilt work manager
     implementation(libs.androidx.hilt.work)
     // Optional instrumentation-test helpers
     androidTestImplementation(libs.hilt.android.testing)
@@ -189,6 +202,8 @@ dependencies {
     debugImplementation(libs.leakcanary.android)
 
     implementation(libs.asset.delivery.ktx)
+
+    implementation(libs.androidx.datastore.preferences.v110)
 
 }
 

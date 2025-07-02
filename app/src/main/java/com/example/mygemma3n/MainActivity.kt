@@ -8,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -35,6 +36,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 
 @AndroidEntryPoint
@@ -120,12 +122,15 @@ fun Gemma3nNavigation(
 fun HomeScreen(navController: androidx.navigation.NavHostController) {
     var downloadProgress by remember { mutableStateOf(0f) }
     var isModelReady by remember { mutableStateOf(false) }
+    var isPreparingModel by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
 
     LaunchedEffect(Unit) {
-        checkAndDownloadModel(context) { progress, ready ->
+        // Check if model exists in assets or needs to be downloaded
+        checkModelAvailability(context) { progress, ready, preparing ->
             downloadProgress = progress
             isModelReady = ready
+            isPreparingModel = preparing
         }
     }
 
@@ -142,14 +147,23 @@ fun HomeScreen(navController: androidx.navigation.NavHostController) {
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        // Show download progress if model is downloading
-        if (downloadProgress > 0 && downloadProgress < 100 && !isModelReady) {
-            LinearProgressIndicator(
-                progress = downloadProgress / 100f,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Text("Downloading model: ${downloadProgress.toInt()}%")
-            Spacer(modifier = Modifier.height(16.dp))
+        // Show appropriate status
+        when {
+            isPreparingModel -> {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text("Preparing model for first use...")
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+            downloadProgress > 0 && downloadProgress < 100 && !isModelReady -> {
+                LinearProgressIndicator(
+                    progress = { downloadProgress / 100f },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text("Downloading model: ${downloadProgress.toInt()}%")
+                Spacer(modifier = Modifier.height(16.dp))
+            }
         }
 
         Button(
@@ -200,10 +214,10 @@ fun HomeScreen(navController: androidx.navigation.NavHostController) {
             Text("Crisis Handbook")
         }
 
-        if (!isModelReady) {
+        if (!isModelReady && !isPreparingModel) {
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                "Model needs to be downloaded before using features",
+                "Model needs to be available before using features",
                 style = MaterialTheme.typography.bodySmall
             )
         }
@@ -220,10 +234,110 @@ fun CrisisHandbookScreen() {
     Text("Crisis Handbook Screen")
 }
 
-// Asset Pack Management
-fun checkAndDownloadModel(
+// Updated model availability check
+fun checkModelAvailability(
     context: Context,
-    onProgressUpdate: (progress: Float, ready: Boolean) -> Unit
+    onStatusUpdate: (progress: Float, ready: Boolean, preparing: Boolean) -> Unit
+) {
+    CoroutineScope(Dispatchers.IO).launch {
+        try {
+            // First, check if we have the model in assets
+            val hasAssetModel = checkAssetModel(context)
+
+            if (hasAssetModel) {
+                // Copy asset model to cache if needed
+                onStatusUpdate(0f, false, true)
+                val modelPath = copyAssetModelToCache(context)
+                if (modelPath != null) {
+                    Timber.d("Model ready from assets at: $modelPath")
+                    onStatusUpdate(100f, true, false)
+                    return@launch
+                }
+            }
+
+            // Try Google Play Asset Delivery as fallback
+            // Only attempt if we're in a production environment
+            if (isPlayStoreAvailable(context)) {
+                try {
+                    checkAndDownloadFromPlay(context, onStatusUpdate)
+                } catch (e: Exception) {
+                    // If Play Store download fails, still use bundled model
+                    Timber.w("Play Store download failed, using bundled model: ${e.message}")
+                    onStatusUpdate(100f, hasAssetModel, false)
+                }
+            } else {
+                // In development, just use the bundled model
+                Timber.w("Google Play not available, using bundled model only")
+                onStatusUpdate(100f, hasAssetModel, false)
+            }
+
+        } catch (e: Exception) {
+            Timber.e(e, "Error checking model availability")
+            // If we have asset model, still mark as ready
+            val hasAssetModel = checkAssetModel(context)
+            onStatusUpdate(100f, hasAssetModel, false)
+        }
+    }
+}
+
+// Check if model exists in assets
+private fun checkAssetModel(context: Context): Boolean {
+    return try {
+        context.assets.list("")?.contains("gemma-3n-E2B-it-int4.task") == true ||
+                context.assets.list("")?.contains("gemma-3n-E4B-it-int4.task") == true
+    } catch (e: Exception) {
+        Timber.e(e, "Error checking asset model")
+        false
+    }
+}
+
+// Copy model from assets to cache
+private suspend fun copyAssetModelToCache(context: Context): String? = withContext(Dispatchers.IO) {
+    try {
+        // Try both possible model names
+        val modelNames = listOf("gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
+
+        for (modelName in modelNames) {
+            try {
+                val cacheFile = File(context.cacheDir, modelName)
+                if (!cacheFile.exists()) {
+                    context.assets.open(modelName).use { input ->
+                        cacheFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                }
+                Timber.d("Model copied to cache: ${cacheFile.absolutePath}")
+                return@withContext cacheFile.absolutePath
+            } catch (e: Exception) {
+                // Try next model name
+                continue
+            }
+        }
+
+        Timber.e("No model found in assets")
+        null
+    } catch (e: Exception) {
+        Timber.e(e, "Error copying model to cache")
+        null
+    }
+}
+
+// Check if Google Play Services is available
+private fun isPlayStoreAvailable(context: Context): Boolean {
+    return try {
+        // Check if we can access Google Play services
+        val packageInfo = context.packageManager.getPackageInfo("com.android.vending", 0)
+        packageInfo != null
+    } catch (e: Exception) {
+        false
+    }
+}
+
+// Original Google Play asset pack download (with error handling)
+fun checkAndDownloadFromPlay(
+    context: Context,
+    onProgressUpdate: (progress: Float, ready: Boolean, preparing: Boolean) -> Unit
 ) {
     val assetPackManager = AssetPackManagerFactory.getInstance(context)
     val packName = "gemma3n_assetpack"
@@ -236,21 +350,26 @@ fun checkAndDownloadModel(
 
             when (packState?.status()) {
                 AssetPackStatus.COMPLETED -> {
-                    onProgressUpdate(100f, true)
+                    onProgressUpdate(100f, true, false)
                     Timber.d("Asset pack already installed")
                 }
                 AssetPackStatus.DOWNLOADING -> {
                     // Monitor download progress
-                    monitorDownload(assetPackManager, packName, onProgressUpdate)
+                    monitorDownload(assetPackManager, packName) { progress, ready ->
+                        onProgressUpdate(progress, ready, false)
+                    }
                 }
                 else -> {
                     // Start download
-                    startDownload(assetPackManager, packName, onProgressUpdate)
+                    startDownload(assetPackManager, packName) { progress, ready ->
+                        onProgressUpdate(progress, ready, false)
+                    }
                 }
             }
         } catch (e: Exception) {
-            Timber.e(e, "Error checking asset pack")
-            onProgressUpdate(0f, false)
+            Timber.e(e, "Asset pack not available, falling back to bundled model")
+            // Don't fail, just use bundled model
+            onProgressUpdate(100f, checkAssetModel(context), false)
         }
     }
 }
@@ -324,9 +443,24 @@ private fun monitorDownload(
 
 // Helper function to get model file path
 fun getModelFilePath(context: Context): String? {
+    // First try asset pack location
     val assetPackManager = AssetPackManagerFactory.getInstance(context)
     val location = assetPackManager.getPackLocation("gemma3n_assetpack")
-    return location?.assetsPath()?.let { path ->
-        File(path, "gemma-3n-E4B-it-int4.task").absolutePath
+    location?.assetsPath()?.let { path ->
+        val modelFile = File(path, "gemma-3n-E4B-it-int4.task")
+        if (modelFile.exists()) {
+            return modelFile.absolutePath
+        }
     }
+
+    // Fallback to cached asset model
+    val modelNames = listOf("gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
+    for (modelName in modelNames) {
+        val cacheFile = File(context.cacheDir, modelName)
+        if (cacheFile.exists()) {
+            return cacheFile.absolutePath
+        }
+    }
+
+    return null
 }
