@@ -15,6 +15,7 @@ import com.example.mygemma3n.repository.SettingsRepository
 import com.example.mygemma3n.shared_utilities.OfflineRAG
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -81,31 +82,78 @@ class QuizGeneratorViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            // Check model availability first
-            checkModelAvailability()
+            // 1) Check model availability first
+            checkModelAvailability(context) { progress, ready, preparing, error ->
+                _quizState.update { state ->
+                    state.copy(
+                        modelStatus   = when {
+                            error != null    -> ModelStatus.ERROR
+                            !ready && preparing -> ModelStatus.CHECKING
+                            ready           -> ModelStatus.READY
+                            else            -> ModelStatus.ERROR
+                        },
+                        // optionally track progress and error if you want
+                        // modelProgress = progress,
+                        // modelError    = error
+                    )
+                }
+            }
 
-            // Then initialize educational content
+            // 2) Then initialize educational content
             try {
                 educationalContent.prepopulateContent()
                 initializeEducationalContent()
             } catch (e: Exception) {
-                _quizState.update { it.copy(subjects = OfflineRAG.Subject.entries) }
+                _quizState.update {
+                    it.copy(subjects = OfflineRAG.Subject.entries)
+                }
                 Timber.e(e, "Error initializing educational content")
             }
         }
     }
 
-    private suspend fun checkModelAvailability() {
-        try {
-            val isAvailable = modelRepository.isAnyModelAvailable()
-            _quizState.update {
-                it.copy(modelStatus = if (isAvailable) ModelStatus.READY else ModelStatus.ERROR)
+
+    private val REQUIRED_SHARDS = listOf(
+        "TF_LITE_EMBEDDER.tflite",
+        "TF_LITE_PER_LAYER_EMBEDDER.tflite",
+        "TF_LITE_PREFILL_DECODE.tflite",
+        "TF_LITE_VISION_ADAPTER.tflite",
+        "TF_LITE_VISION_ENCODER.tflite",
+        "TOKENIZER_MODEL.tflite"
+    )
+
+    /**
+     * Checks that all required Gemma3n .tflite files are present under assets/models/.
+     * Calls onStatusUpdate with:
+     *   • progress = 100f & ready=true if everything’s there
+     *   • otherwise ready=false and an error message listing missing files.
+     */
+    fun checkModelAvailability(
+        ctx: Context,
+        onStatusUpdate: (progress: Float, ready: Boolean, preparing: Boolean, error: String?) -> Unit
+    ) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                // List assets in "models" folder
+                val available = ctx.assets.list("models")?.toSet() ?: emptySet()
+
+                // Which shards are missing?
+                val missing = REQUIRED_SHARDS.filterNot { available.contains(it) }
+                if (missing.isEmpty()) {
+                    Timber.d("All model shards present in assets/models/")
+                    onStatusUpdate(100f, true, false, null)
+                } else {
+                    val msg = "Missing model files: ${missing.joinToString()}"
+                    Timber.e(msg)
+                    onStatusUpdate(0f, false, false, msg)
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Error checking model assets")
+                onStatusUpdate(0f, false, false, "Model check failed: ${e.message}")
             }
-        } catch (e: Exception) {
-            Timber.e(e, "Error checking model availability")
-            _quizState.update { it.copy(modelStatus = ModelStatus.ERROR) }
         }
     }
+
 
 
     /** Call once after reading the saved preference. */

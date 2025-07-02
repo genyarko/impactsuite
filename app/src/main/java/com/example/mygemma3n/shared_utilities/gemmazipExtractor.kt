@@ -1,52 +1,34 @@
 package com.example.mygemma3n.shared_utilities
 
 import android.content.Context
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import timber.log.Timber
-import java.io.*
-import java.util.zip.ZipInputStream
+import android.content.res.AssetFileDescriptor
+import java.io.FileInputStream
+import java.nio.MappedByteBuffer
+import java.nio.channels.FileChannel
 
 /**
- *  Unzips the 2-file split archive stored in assets/models/
- *  and returns the absolute path to the extracted .task file.
+ * Loads a TFLite flatbuffer directly from assets/models/<modelName>.tflite
+ * via zero-copy memory-mapping. Requires that you’ve added:
  *
- *  Idempotent → if the .task file already exists it just returns the path.
+ *   androidResources {
+ *     noCompress += "tflite"
+ *   }
  *
- *  @throws IOException if the archive pieces are missing or corrupted.
+ * to your Gradle config so these files aren’t compressed in the APK.
+ *
+ * @param context     your application or activity context
+ * @param modelName   the base name of the model file (without “.tflite”)
+ * @return            a MappedByteBuffer ready to feed into Interpreter()
  */
-suspend fun Context.ensureGemmaTaskOnDisk(): String = withContext(Dispatchers.IO) {
-    val target = File(cacheDir, "gemma-3n-E2B-it-int4.task")
-    if (target.exists()) return@withContext target.absolutePath      // done already
-
-    // ---- 1️⃣ open the two parts in the correct order ----
-    val partNames = listOf(
-        "models/gemma-3n-E2B-it-int4.z01",
-        "models/gemma-3n-E2B-it-int4.zip"
-    )
-
-    val streams = partNames.map { assetName ->
-        assets.open(assetName) ?: throw FileNotFoundException(assetName)
+fun loadTfliteAsset(context: Context, modelName: String): MappedByteBuffer {
+    // e.g. modelName = "TF_LITE_EMBEDDER" → assets/models/TF_LITE_EMBEDDER.tflite
+    val assetPath = "models/$modelName.tflite"
+    val afd: AssetFileDescriptor = context.assets.openFd(assetPath)
+    FileInputStream(afd.fileDescriptor).channel.use { channel ->
+        return channel.map(
+            FileChannel.MapMode.READ_ONLY,
+            afd.startOffset,
+            afd.declaredLength
+        )
     }
-
-    // ---- 2️⃣ concatenate → ZipInputStream ----
-    SequenceInputStream(streams[0], streams[1]).use { joined ->
-        ZipInputStream(BufferedInputStream(joined)).use { zip ->
-            var entry = zip.nextEntry
-            while (entry != null) {
-                if (!entry.isDirectory && entry.name.endsWith(".task")) {
-                    // ---- 3️⃣ copy the single entry out to cacheDir ----
-                    target.outputStream().use { out ->
-                        zip.copyTo(out, bufferSize = 1 shl 16)
-                    }
-                    Timber.i("Gemma model extracted to ${target.absolutePath}")
-                    break
-                }
-                entry = zip.nextEntry
-            }
-        }
-    }
-
-    require(target.exists()) { "Failed to extract Gemma .task from split zip" }
-    target.absolutePath
 }

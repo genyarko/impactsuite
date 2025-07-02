@@ -3,6 +3,7 @@ package com.example.mygemma3n.gemma
 import android.content.Context
 import android.os.Build
 import com.example.mygemma3n.shared_utilities.PerformanceMonitor
+import com.example.mygemma3n.shared_utilities.loadTfliteAsset
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import org.tensorflow.lite.Delegate
@@ -19,7 +20,6 @@ import java.nio.channels.FileChannel
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.exp
-import kotlin.math.ln
 import kotlin.random.Random
 
 @Singleton
@@ -113,15 +113,22 @@ class GemmaEngine @Inject constructor(
             cleanup() // Clean up any existing interpreter
 
             currentConfig = config
-            val modelBuffer = loadModelBuffer(config.modelPath)
 
+            // 1) Load each TFLite shard directly from assets/models/*.tflite
+            val embedderBuf       = loadTfliteAsset(context, "models/TF_LITE_EMBEDDER")
+            val perLayerBuf       = loadTfliteAsset(context, "models/TF_LITE_PER_LAYER_EMBEDDER")
+            val prefillDecodeBuf  = loadTfliteAsset(context, "models/TF_LITE_PREFILL_DECODE")
+            val visionAdapterBuf  = loadTfliteAsset(context, "models/TF_LITE_VISION_ADAPTER")
+            val visionEncoderBuf  = loadTfliteAsset(context, "models/TF_LITE_VISION_ENCODER")
+            val tokenizerModelBuf = loadTfliteAsset(context, "models/TOKENIZER_MODEL")
+
+            // 2) Build Interpreter options (threads, delegates, etc.)
             val options = Interpreter.Options().apply {
                 setNumThreads(config.numThreads)
 
-                // Enable GPU acceleration if available
                 if (config.useGpu) {
-                    try {
-                        val gpuDelegate = GpuDelegate(
+                    runCatching {
+                        GpuDelegate(
                             GpuDelegate.Options().apply {
                                 setPrecisionLossAllowed(true)
                                 setQuantizedModelsAllowed(true)
@@ -129,18 +136,13 @@ class GemmaEngine @Inject constructor(
                                     GpuDelegate.Options.INFERENCE_PREFERENCE_SUSTAINED_SPEED
                                 )
                             }
-                        )
-                        addDelegate(gpuDelegate)
-                        delegates.add(gpuDelegate)
-                    } catch (e: Exception) {
-                        Timber.w(e, "GPU delegate not available")
-                    }
+                        ).also { addDelegate(it); delegates.add(it) }
+                    }.onFailure { Timber.w(it, "GPU delegate not available") }
                 }
 
-                // Enable NNAPI for neural accelerator support
-                if (config.useNnapi && android.os.Build.VERSION.SDK_INT >= 27) {
-                    try {
-                        val nnapiDelegate = NnApiDelegate(
+                if (config.useNnapi && Build.VERSION.SDK_INT >= 27) {
+                    runCatching {
+                        NnApiDelegate(
                             NnApiDelegate.Options().apply {
                                 setAllowFp16(true)
                                 setExecutionPreference(
@@ -148,76 +150,56 @@ class GemmaEngine @Inject constructor(
                                 )
                                 if (Build.VERSION.SDK_INT >= 29) {
                                     setCacheDir(context.cacheDir.absolutePath)
-                                    setModelToken("gemma_3n_${config.modelPath.hashCode()}")
+                                    setModelToken("gemma_3n_${config.hashCode()}")
                                 }
                             }
-                        )
-                        addDelegate(nnapiDelegate)
-                        delegates.add(nnapiDelegate)
-                    } catch (e: Exception) {
-                        Timber.w(e, "NNAPI delegate not available")
-                    }
+                        ).also { addDelegate(it); delegates.add(it) }
+                    }.onFailure { Timber.w(it, "NNAPI delegate not available") }
                 }
 
-                // Enable optimizations
                 setAllowFp16PrecisionForFp32(true)
-                setUseXNNPACK(true) // Enable XNNPACK delegate for CPU optimization
+                setUseXNNPACK(true)
             }
 
-            interpreter = Interpreter(modelBuffer, options)
+            // 3) Initialize the Interpreter with the embedder buffer (or your multi-buffer loader)
+            interpreter = Interpreter(embedderBuf, options)
 
-            // Allocate tensors
+            // 4) Allocate tensors and initialize PLE
             interpreter?.allocateTensors()
-
-            // Initialize KV cache for PLE optimization
-            if (config.enablePLE) {
-                initializePLECache()
-            }
+            if (config.enablePLE) initializePLECache()
 
         } catch (e: Exception) {
-            Timber.e(e, "Failed to initialize Gemma engine (Ask Gemini)")
+            Timber.e(e, "Failed to initialize Gemma engine")
             throw e
         }
     }
+
 
     /**
      * FIXED: Handle large model files (>2GB) by either direct mapping or chunking
      */
     private fun loadModelBuffer(modelPath: String): MappedByteBuffer {
         val modelFile = File(modelPath)
-        require(modelFile.exists()) { "Model file not found: $modelPath" }
+        require(modelFile.exists()) { "Model file not found: $modelPath" } //
 
-        FileInputStream(modelFile).channel.use { fc ->
-            val fileSize = fc.size()
+        FileInputStream(modelFile).channel.use { fc -> //
+            val fileSize = fc.size() //
 
-            // For files smaller than 2GB, use direct memory mapping
-            if (fileSize <= Int.MAX_VALUE.toLong()) {
-                return fc.map(FileChannel.MapMode.READ_ONLY, 0, fileSize)
-            }
+            // The 'chunked loading' logic below is flawed for allocateDirect
+            // Instead of trying to allocate a single giant ByteBuffer,
+            // we should rely on MappedByteBuffer's ability to handle large files.
+            // If the model is truly >2GB, you cannot use allocateDirect for the whole thing.
 
-            // For files larger than 2GB, use chunked loading
-            Timber.w("Model file is larger than 2GB, using chunked loading approach")
+            // The simplest and most common way to load large TFLite models is via MappedByteBuffer
+            // which can handle sizes up to the addressable memory space (often much larger than 2GB).
+            // If this still fails for extremely large files, it's an OS or TFLite limitation.
 
-            // Allocate a direct ByteBuffer large enough for the entire file
-            val bigBuffer = ByteBuffer.allocateDirect(fileSize.toInt())
-                .order(ByteOrder.nativeOrder())
+            // Remove the flawed 'if (fileSize <= Int.MAX_VALUE.toLong())' check
+            // and the subsequent 'chunked loading' allocation, and just return the map.
+            // MappedByteBuffer is designed for this.
 
-            // Read the file in chunks
-            val sliceSize = 1_900_000_000L // 1.9 GB per slice
-            var offset = 0L
-
-            while (offset < fileSize) {
-                val len = minOf(sliceSize, fileSize - offset)
-                val slice = fc.map(FileChannel.MapMode.READ_ONLY, offset, len)
-                bigBuffer.put(slice)
-                offset += len
-            }
-
-            bigBuffer.rewind()
-
-            // Cast ByteBuffer to MappedByteBuffer (works on Android)
-            @Suppress("CAST_NEVER_SUCCEEDS")
-            return bigBuffer as MappedByteBuffer
+            // Just return the memory-mapped buffer for any size (within OS limits)
+            return fc.map(FileChannel.MapMode.READ_ONLY, 0, fileSize) //
         }
     }
 
