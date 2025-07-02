@@ -1,6 +1,5 @@
 package com.example.mygemma3n
 
-
 import android.app.Application
 import dagger.hilt.android.HiltAndroidApp
 import timber.log.Timber
@@ -11,12 +10,12 @@ class Gemma3nApplication : Application() {
     override fun onCreate() {
         super.onCreate()
 
-        // Initialize Timber for logging
+        // 1. Init Timber for debug logging
         if (BuildConfig.DEBUG) {
             Timber.plant(Timber.DebugTree())
         }
 
-        // Initialize any other app-wide components here
+        // 2. Application is ready—.tflite assets will be loaded on demand
         Timber.d("Gemma3nApplication initialized")
     }
 }

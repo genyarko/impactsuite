@@ -24,7 +24,6 @@ import com.example.mygemma3n.feature.plant.PlantScannerViewModel
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.example.mygemma3n.shared_utilities.ensureGemmaTaskOnDisk
 import com.google.android.play.core.assetpacks.AssetPackManagerFactory
 import com.google.android.play.core.assetpacks.AssetPackStateUpdateListener
 import com.google.android.play.core.assetpacks.model.AssetPackStatus
@@ -125,15 +124,16 @@ fun HomeScreen(navController: androidx.navigation.NavHostController) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
 
+    // in MainActivity.kt, inside HomeScreen’s LaunchedEffect:
     LaunchedEffect(Unit) {
-        // Check if model exists in assets or needs to be downloaded
         checkModelAvailability(context) { progress, ready, preparing, error ->
             downloadProgress = progress
-            isModelReady = ready
-            isPreparingModel = preparing
-            errorMessage = error
+            isModelReady    = ready
+            isPreparingModel= preparing
+            errorMessage    = error
         }
     }
+
 
     Column(
         modifier = Modifier
@@ -266,63 +266,33 @@ fun checkModelAvailability(
 ) {
     CoroutineScope(Dispatchers.IO).launch {
         try {
-            /* ---------- DEBUG / local build ---------- */
-            if (BuildConfig.DEBUG) {
-                // stitch the *.part? pieces once, then signal ready
-                onStatusUpdate(0f, false, true, null)            // "preparing…"
+            // Always ready if all .tflite shards are in assets/models/
+            val assetsDir = "models"
+            val needed = listOf(
+                "TF_LITE_EMBEDDER.tflite",
+                "TF_LITE_PER_LAYER_EMBEDDER.tflite",
+                "TF_LITE_PREFILL_DECODE.tflite",
+                "TF_LITE_VISION_ADAPTER.tflite",
+                "TF_LITE_VISION_ENCODER.tflite",
+                "TOKENIZER_MODEL.tflite"
+            )
+            val available = ctx.assets.list(assetsDir)?.toList() ?: emptyList()
+            val missing = needed.filterNot { available.contains(it) }
 
-                try {
-                    val modelPath = ctx.ensureGemmaTaskOnDisk()
-                    Timber.i("Local model ready at $modelPath")
-                    onStatusUpdate(100f, true, false, null)
-                } catch (e: Exception) {
-                    Timber.e(e, "Failed to prepare model")
-                    val errorMsg = when {
-                        e.message?.contains("Size exceeds") == true ->
-                            "Model file is too large. Please use a smaller model variant."
-                        e.message?.contains("not found") == true ->
-                            "Model file not found in assets. Please check your build configuration."
-                        else ->
-                            "Failed to load model: ${e.message}"
-                    }
-                    onStatusUpdate(0f, false, false, errorMsg)
-                }
-
-                return@launch
-            }
-
-            /* ---------- PRODUCTION / play-store path ---------- */
-            // 1. bundled fallback?
-            val hasAsset = checkAssetModel(ctx)
-            if (hasAsset) {
-                onStatusUpdate(0f, false, true, null)
-                try {
-                    copyAssetModelToCache(ctx)?.let {
-                        Timber.i("Model ready from assets → $it")
-                        onStatusUpdate(100f, true, false, null)
-                        return@launch
-                    }
-                } catch (e: Exception) {
-                    Timber.e(e, "Failed to copy model from assets")
-                    onStatusUpdate(0f, false, false, "Failed to prepare model: ${e.message}")
-                    return@launch
-                }
-            }
-
-            // 2. try the Play-Asset-Pack
-            if (isPlayStoreAvailable(ctx)) {
-                checkAndDownloadFromPlay(ctx) { progress, ready ->
-                    onStatusUpdate(progress, ready, false, null)
-                }
+            if (missing.isEmpty()) {
+                onStatusUpdate(100f, true, false, null)  // ready
             } else {
-                onStatusUpdate(100f, hasAsset, false, null)      // offline side-load
+                onStatusUpdate(
+                    0f, false, false,
+                    "Missing assets: ${missing.joinToString()}"
+                )
             }
-        } catch (t: Throwable) {
-            Timber.e(t, "Model availability check failed")
-            onStatusUpdate(100f, checkAssetModel(ctx), false, "Model check failed: ${t.message}")
+        } catch (e: Exception) {
+            onStatusUpdate(0f, false, false, "Error checking assets: ${e.message}")
         }
     }
 }
+
 
 // ---- checkAssetModel -------------------------------------------------
 private fun checkAssetModel(ctx: Context): Boolean = try {
