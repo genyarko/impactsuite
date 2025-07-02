@@ -27,7 +27,9 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
+import java.util.Random
 import javax.inject.Inject
+import kotlin.math.sqrt
 
 /**
  * ViewModel responsible for generating adaptive quizzes using an on‑device Gemma model.
@@ -642,28 +644,43 @@ class QuizGeneratorViewModel @Inject constructor(
     }
      // cached interpreter
 
-    private suspend fun generateEmbedding(text: String): FloatArray =
-        withContext(Dispatchers.Default) {
-            try {
-                // 1. read the user’s current choice from DataStore (suspend)
-                val choice = settingsRepo.embedderFlow.first()   // <-- no error: through repo
+    // Safe embedding generation with fallback
+    private suspend fun generateEmbedding(text: String): FloatArray {
+        return try {
+            // Try to load the embedder if not already loaded
+            if (!embedderManager.isLoaded()) {
+                // Check available models
+                val availableModels = embedderManager.getAvailableModels()
+                if (availableModels.isEmpty()) {
+                    Timber.e("No embedding models available in assets")
+                    return generateFallbackEmbedding(text)
+                }
 
-                // 2. load / hot-swap the model lazily
-                embedderManager.load(
-                    when (choice) {
-                        EmbedderModel.MOBILE_BERT -> EmbedderManager.Model.MOBILE_BERT
-                        EmbedderModel.AVG_WORD   -> EmbedderManager.Model.AVG_WORD
-                    },
-                    useGpu = false
-                )
+                // Try to load the smallest model first (AVG_WORD)
+                val modelToLoad = if (availableModels.contains(EmbedderManager.Model.AVG_WORD)) {
+                    EmbedderManager.Model.AVG_WORD
+                } else {
+                    availableModels.first()
+                }
 
-                // 3. embed + L2-normalise (manager already does the normalisation)
-                embedderManager.embed(text)
-            } catch (e: Exception) {
-                Timber.e(e, "Embedding failed, returning zero vector")
-                FloatArray(GemmaModelManager.EMBEDDING_DIM) { 0f }
+                try {
+                    embedderManager.load(modelToLoad, useGpu = false) // Start with CPU
+                    Timber.d("Successfully loaded embedder: $modelToLoad")
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to load embedder model")
+                    return generateFallbackEmbedding(text)
+                }
             }
+
+            // Generate embedding
+            embedderManager.embed(text)
+
+        } catch (e: Exception) {
+            Timber.e(e, "Embedding generation failed, using fallback")
+            generateFallbackEmbedding(text)
         }
+    }
+
 
     /*──────────────────────────────────────────────────────────────────────────*/
     /* ── Progress & feedback helpers ── */
@@ -703,6 +720,48 @@ class QuizGeneratorViewModel @Inject constructor(
         gemmaEngine.generateText(prompt, generationConfig).toList().joinToString("")
     } catch (e: Exception) {
         if (isCorrect) "Great job! You got it right." else "Not quite. The correct answer is ${question.correctAnswer}. ${question.explanation}"
+    }
+
+
+    // Fallback embedding generation (simple hash-based approach)
+    private fun generateFallbackEmbedding(text: String): FloatArray {
+        val dimension = 512
+        val embedding = FloatArray(dimension)
+
+        // Deterministic seed
+        val random = java.util.Random(text.hashCode().toLong())
+
+        // Fill with pseudo-random values
+        for (i in embedding.indices) {
+            embedding[i] = random.nextGaussian().toFloat()
+        }
+
+        // L2-normalise
+        var norm = 0f
+        for (v in embedding) norm += v * v
+        if (norm > 0f) {
+            val scale = 1f / sqrt(norm)
+            for (i in embedding.indices) embedding[i] *= scale
+        }
+        return embedding
+    }
+
+
+    // Safe similarity computation
+    private fun computeSimilarity(embedding1: FloatArray, embedding2: FloatArray): Float {
+        if (embedding1.isEmpty() || embedding2.isEmpty()) return 0f
+        if (embedding1.size != embedding2.size) {
+            Timber.w("Embedding dimension mismatch: ${embedding1.size} vs ${embedding2.size}")
+            return 0f
+        }
+
+        var dotProduct = 0f
+        for (i in embedding1.indices) {
+            dotProduct += embedding1[i] * embedding2[i]
+        }
+
+        // Clamp to valid cosine similarity range
+        return dotProduct.coerceIn(-1f, 1f)
     }
 
 }

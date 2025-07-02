@@ -17,6 +17,11 @@ android {
     compileSdk = 36
     assetPacks += listOf(":gemma3n_assetpack")
 
+    androidResources {        // AGP 8.0+
+        noCompress += "tflite"
+    }
+
+
     defaultConfig {
         applicationId = "com.example.mygemma3n"
         minSdk = 27

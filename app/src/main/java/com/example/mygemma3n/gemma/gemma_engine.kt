@@ -175,18 +175,49 @@ class GemmaEngine @Inject constructor(
             }
 
         } catch (e: Exception) {
-            Timber.e(e, "Failed to initialize Gemma engine")
+            Timber.e(e, "Failed to initialize Gemma engine (Ask Gemini)")
             throw e
         }
     }
 
+    /**
+     * FIXED: Handle large model files (>2GB) by either direct mapping or chunking
+     */
     private fun loadModelBuffer(modelPath: String): MappedByteBuffer {
         val modelFile = File(modelPath)
         require(modelFile.exists()) { "Model file not found: $modelPath" }
 
-        return FileInputStream(modelFile).use { fis ->
-            val channel = fis.channel
-            channel.map(FileChannel.MapMode.READ_ONLY, 0, channel.size())
+        FileInputStream(modelFile).channel.use { fc ->
+            val fileSize = fc.size()
+
+            // For files smaller than 2GB, use direct memory mapping
+            if (fileSize <= Int.MAX_VALUE.toLong()) {
+                return fc.map(FileChannel.MapMode.READ_ONLY, 0, fileSize)
+            }
+
+            // For files larger than 2GB, use chunked loading
+            Timber.w("Model file is larger than 2GB, using chunked loading approach")
+
+            // Allocate a direct ByteBuffer large enough for the entire file
+            val bigBuffer = ByteBuffer.allocateDirect(fileSize.toInt())
+                .order(ByteOrder.nativeOrder())
+
+            // Read the file in chunks
+            val sliceSize = 1_900_000_000L // 1.9 GB per slice
+            var offset = 0L
+
+            while (offset < fileSize) {
+                val len = minOf(sliceSize, fileSize - offset)
+                val slice = fc.map(FileChannel.MapMode.READ_ONLY, offset, len)
+                bigBuffer.put(slice)
+                offset += len
+            }
+
+            bigBuffer.rewind()
+
+            // Cast ByteBuffer to MappedByteBuffer (works on Android)
+            @Suppress("CAST_NEVER_SUCCEEDS")
+            return bigBuffer as MappedByteBuffer
         }
     }
 

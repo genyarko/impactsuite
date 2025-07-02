@@ -24,6 +24,7 @@ import com.example.mygemma3n.feature.plant.PlantScannerViewModel
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.mygemma3n.shared_utilities.ensureGemmaTaskOnDisk
 import com.google.android.play.core.assetpacks.AssetPackManagerFactory
 import com.google.android.play.core.assetpacks.AssetPackStateUpdateListener
 import com.google.android.play.core.assetpacks.model.AssetPackStatus
@@ -121,14 +122,16 @@ fun HomeScreen(navController: androidx.navigation.NavHostController) {
     var downloadProgress by remember { mutableStateOf(0f) }
     var isModelReady by remember { mutableStateOf(false) }
     var isPreparingModel by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
 
     LaunchedEffect(Unit) {
         // Check if model exists in assets or needs to be downloaded
-        checkModelAvailability(context) { progress, ready, preparing ->
+        checkModelAvailability(context) { progress, ready, preparing, error ->
             downloadProgress = progress
             isModelReady = ready
             isPreparingModel = preparing
+            errorMessage = error
         }
     }
 
@@ -147,6 +150,30 @@ fun HomeScreen(navController: androidx.navigation.NavHostController) {
 
         // Show appropriate status
         when {
+            errorMessage != null -> {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Text(
+                            "Error loading model:",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        Text(
+                            errorMessage!!,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
             isPreparingModel -> {
                 LinearProgressIndicator(
                     modifier = Modifier.fillMaxWidth(),
@@ -232,21 +259,35 @@ fun CrisisHandbookScreen() {
     Text("Crisis Handbook Screen")
 }
 
-// Updated model availability check
-// ---- checkModelAvailability -----------------------------------------
+// Updated model availability check with error handling
 fun checkModelAvailability(
     ctx: Context,
-    onStatusUpdate: (progress: Float, ready: Boolean, preparing: Boolean) -> Unit
+    onStatusUpdate: (progress: Float, ready: Boolean, preparing: Boolean, error: String?) -> Unit
 ) {
     CoroutineScope(Dispatchers.IO).launch {
         try {
             /* ---------- DEBUG / local build ---------- */
             if (BuildConfig.DEBUG) {
                 // stitch the *.part? pieces once, then signal ready
-                onStatusUpdate(0f, false, true)            // “preparing…”
-                val modelPath = ensureLargeModelOnDisk(ctx) // <─ HERE
-                Timber.i("Local model ready at $modelPath")
-                onStatusUpdate(100f, true, false)
+                onStatusUpdate(0f, false, true, null)            // "preparing…"
+
+                try {
+                    val modelPath = ctx.ensureGemmaTaskOnDisk()
+                    Timber.i("Local model ready at $modelPath")
+                    onStatusUpdate(100f, true, false, null)
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to prepare model")
+                    val errorMsg = when {
+                        e.message?.contains("Size exceeds") == true ->
+                            "Model file is too large. Please use a smaller model variant."
+                        e.message?.contains("not found") == true ->
+                            "Model file not found in assets. Please check your build configuration."
+                        else ->
+                            "Failed to load model: ${e.message}"
+                    }
+                    onStatusUpdate(0f, false, false, errorMsg)
+                }
+
                 return@launch
             }
 
@@ -254,26 +295,34 @@ fun checkModelAvailability(
             // 1. bundled fallback?
             val hasAsset = checkAssetModel(ctx)
             if (hasAsset) {
-                onStatusUpdate(0f, false, true)
-                copyAssetModelToCache(ctx)?.let {
-                    Timber.i("Model ready from assets → $it")
-                    onStatusUpdate(100f, true, false)
+                onStatusUpdate(0f, false, true, null)
+                try {
+                    copyAssetModelToCache(ctx)?.let {
+                        Timber.i("Model ready from assets → $it")
+                        onStatusUpdate(100f, true, false, null)
+                        return@launch
+                    }
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to copy model from assets")
+                    onStatusUpdate(0f, false, false, "Failed to prepare model: ${e.message}")
                     return@launch
                 }
             }
 
             // 2. try the Play-Asset-Pack
-            if (isPlayStoreAvailable(ctx))
-                checkAndDownloadFromPlay(ctx, onStatusUpdate)
-            else
-                onStatusUpdate(100f, hasAsset, false)      // offline side-load
+            if (isPlayStoreAvailable(ctx)) {
+                checkAndDownloadFromPlay(ctx) { progress, ready ->
+                    onStatusUpdate(progress, ready, false, null)
+                }
+            } else {
+                onStatusUpdate(100f, hasAsset, false, null)      // offline side-load
+            }
         } catch (t: Throwable) {
             Timber.e(t, "Model availability check failed")
-            onStatusUpdate(100f, checkAssetModel(ctx), false)
+            onStatusUpdate(100f, checkAssetModel(ctx), false, "Model check failed: ${t.message}")
         }
     }
 }
-
 
 // ---- checkAssetModel -------------------------------------------------
 private fun checkAssetModel(ctx: Context): Boolean = try {
@@ -319,7 +368,7 @@ private fun isPlayStoreAvailable(context: Context): Boolean {
 // Original Google Play asset pack download (with error handling)
 fun checkAndDownloadFromPlay(
     context: Context,
-    onProgressUpdate: (progress: Float, ready: Boolean, preparing: Boolean) -> Unit
+    onProgressUpdate: (progress: Float, ready: Boolean) -> Unit
 ) {
     val assetPackManager = AssetPackManagerFactory.getInstance(context)
     val packName = "gemma3n_assetpack"
@@ -332,26 +381,26 @@ fun checkAndDownloadFromPlay(
 
             when (packState?.status()) {
                 AssetPackStatus.COMPLETED -> {
-                    onProgressUpdate(100f, true, false)
+                    onProgressUpdate(100f, true)
                     Timber.d("Asset pack already installed")
                 }
                 AssetPackStatus.DOWNLOADING -> {
                     // Monitor download progress
                     monitorDownload(assetPackManager, packName) { progress, ready ->
-                        onProgressUpdate(progress, ready, false)
+                        onProgressUpdate(progress, ready)
                     }
                 }
                 else -> {
                     // Start download
                     startDownload(assetPackManager, packName) { progress, ready ->
-                        onProgressUpdate(progress, ready, false)
+                        onProgressUpdate(progress, ready)
                     }
                 }
             }
         } catch (e: Exception) {
             Timber.e(e, "Asset pack not available, falling back to bundled model")
             // Don't fail, just use bundled model
-            onProgressUpdate(100f, checkAssetModel(context), false)
+            onProgressUpdate(100f, checkAssetModel(context))
         }
     }
 }
@@ -436,19 +485,36 @@ fun getModelFilePath(ctx: Context): String? {
     return null
 }
 
+// FIXED: Better error handling for large model extraction
 suspend fun ensureLargeModelOnDisk(ctx: Context): String = withContext(Dispatchers.IO) {
     val target = File(ctx.cacheDir, "gemma-3n-E2B-it-int4.task")
     if (target.exists()) return@withContext target.path          // already done
 
-    ctx.assets.list("models")!!
-        .filter { it.startsWith("gemma-3n-E2B-it-int4.part") }
-        .sorted()                                               // part0, part1, …
-        .forEach { partName ->
-            ctx.assets.open("models/$partName").use { input ->
-                target.outputStream().use { output ->
+    try {
+        val modelParts = ctx.assets.list("models")!!
+            .filter { it.startsWith("gemma-3n-E2B-it-int4.part") }
+            .sorted()                                               // part0, part1, …
+
+        if (modelParts.isEmpty()) {
+            throw IllegalStateException("No model parts found in assets/models/")
+        }
+
+        Timber.d("Found ${modelParts.size} model parts to concatenate")
+
+        // Use append mode to avoid keeping everything in memory
+        target.outputStream().use { output ->
+            modelParts.forEach { partName ->
+                Timber.d("Processing $partName...")
+                ctx.assets.open("models/$partName").use { input ->
                     input.copyTo(output)
                 }
             }
         }
-    target.path
+
+        Timber.i("Model assembled successfully at ${target.absolutePath}")
+        target.path
+    } catch (e: Exception) {
+        Timber.e(e, "Failed to assemble model from parts")
+        throw e
+    }
 }
