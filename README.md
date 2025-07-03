@@ -117,3 +117,7 @@ db.quizDao().unsynced().forEach { supabase.upsert(it) }
 return Result.success()
 }
 }
+
+## Model assets
+All `.tflite` shards must be placed in `app/src/main/assets/models/` with the exact filenames used by `checkModelAvailability`.
+The `.gitignore` file excludes this folder, so each developer needs to provide the files locally.
