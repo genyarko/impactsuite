@@ -1,123 +1,66 @@
-2 :edge_ai — LiteRT bootstrap & model-swap
-object AiRepo {
-private const val TWO_B = "gemma_3n_2b.gemma"
-private const val FOUR_B = "gemma_3n_4b.gemma"
+# ImpactSuite
 
-private val prefs = PreferenceDataStoreFactory
-.create { context.dataStoreFile("ai_prefs") }
+ImpactSuite is an Android application showcasing how on‑device generative AI models can power helpful
+experiences entirely offline.  The app is written in Kotlin using Jetpack Compose and leverages
+Google's **Gemma 3n** models via Google AI Edge LiteRT and MediaPipe.
 
-private suspend fun activeModel() =
-prefs.data.first()[booleanPreferencesKey("use4B")] ?: false
+## Features
 
-suspend fun interpreter(context: Context): InterpreterApi {
-val modelFile = File(context.filesDir, if (activeModel()) FOUR_B else TWO_B)
+- **Live Caption & Translation** – streams microphone audio into a lightweight Gemma model to
+  produce captions with optional translation.
+- **Offline Quiz Generator** – generates multiple choice quizzes from a topic using Gemma and
+  stores results in Room.
+- **Voice CBT Coach** – records audio, detects emotion and suggests Cognitive Behavioural
+  Therapy techniques while maintaining a local conversation history.
+- **Plant Disease Scanner** – uses CameraX with a TensorFlow Lite classifier to recognise plant
+  diseases in real‑time.
+- **Crisis Handbook** – answers safety questions and links to local resources using function
+  calling.
 
-    val opts = InterpreterApi.Options().apply {
-      setRuntime(Runtime.GOOGLE_PLAY_SERVICES) // automatic GPU / NNAPI match
-      addDelegate(GpuDelegate.Options())       // GPU fall-back :contentReference[oaicite:6]{index=6}
-      setCacheDir(File(context.cacheDir, "ple_cache")) // PLE reuse :contentReference[oaicite:7]{index=7}
-    }
+The app is a single module project (`:app`) with an additional dynamic asset pack
+(`:gemma3n_assetpack`) used for delivering large AI models on demand.
 
-    return InterpreterApi.createFromFile(modelFile, opts)
-}
-}
+## Building
 
+1. Clone the repository and open it in Android Studio **Giraffe** or newer.
+2. Ensure that the Android SDK for API 36 is installed.
+3. Because model files are tracked with Git&nbsp;LFS, run `git lfs install` if required.
+4. Place the required `.tflite` or `.task` files into
+   `app/src/main/assets/models/` (the directory is excluded from git).  The exact
+   filenames must match those expected by `checkModelAvailability` in
+   `MainActivity.kt`.
+5. Connect an Android device or start an emulator and run the **app** configuration.
 
-3 Feature slices (Compose)
-3.1 Live Caption + Translation (:feature_caption)
-kotlin
-Copy
-Edit
-@Composable
-fun CaptionScreen(viewModel: CaptionVM = hiltViewModel()) {
-val state by viewModel.state.collectAsState()
-Surface { Text(state.caption, style = MaterialTheme.typography.titleLarge) }
-}
+If Google Play services are available the model can also be delivered via the
+`gemma3n_assetpack` dynamic feature at first launch.
 
-class CaptionVM @Inject constructor(
-private val ai: AiRepo, private val audio: MicStream
-) : ViewModel() {
-val state = MutableStateFlow(CaptionState())
+## Project Structure
 
-init {
-viewModelScope.launch {
-ai.interpreter(appContext).use { model ->
-audio.frames.collect { wav ->
-val result = model.run(wav) as GemmaCaptionOutput
-state.update { it.copy(caption = result.text) }
-}
-}
-}
-}
-}
-Send partial 1-second WAV windows to 2 B model for ≤ 300 ms E2E latency on Tensor /G3 class devices.
-ai.google.dev
-ai.google.dev
+```
+app/                  Main application module with Compose UI and feature code
+  └─ src/main/java/com/example/mygemma3n
+                        ├─ feature/...
+                        ├─ gemma/...
+                        └─ repository/... etc.
 
-Switch to 4 B for post-processing translation when device is idle.
+gemma3n_assetpack/    Dynamic asset pack containing optional model files
+```
 
-3.2 Offline quiz generator (:feature_quiz)
-kotlin
-Copy
-Edit
-suspend fun generateQuiz(topic: String): List<FlashCard> =
-ai.interpreter(appCtx).use { model ->
-val prompt = "Generate five MCQs on $topic with answers only."
-model.run(prompt).parseFlashCards()
-}
-Persist to Room; a WorkManager periodic task uploads when network ↔ Supabase available.
-developer.android.com
-github.com
+Important libraries used include:
 
-3.3 Voice CBT coach (:feature_coach)
-Android SpeechRecognizer → Gemma 3n dialogue → TextToSpeech.
+- **Jetpack Compose** for UI
+- **Hilt** for dependency injection
+- **Room** and **DataStore** for local persistence
+- **WorkManager** for background tasks
+- **TensorFlow Lite**, **MediaPipe** and **Google AI Edge** for model execution
 
-Keep conversation history in DataStore Proto for privacy-first storage.
-developer.android.com
+## Model Assets
 
-3.4 CameraX plant-disease scanner (:feature_scanner)
-kotlin
-Copy
-Edit
-val analysis = ImageAnalysis.Builder()
-.setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-.build().also {
-it.setAnalyzer(executor) { imageProxy ->
-val bitmap = imageProxy.toBitmap()
-val result = plantModel.run(bitmap).bestLabel()
-onResult(result)
-imageProxy.close()
-}
-}
-Leverage an existing TFLite leaf-disease model (≤ 72 MB) and LiteRT interpreter in GPU FP16 mode for 30 fps preview.
-github.com
-developers.googleblog.com
-link.springer.com
+All `.tflite` shards or `.task` bundles must be placed in
+`app/src/main/assets/models/` using the filenames referenced by the application.
+These files are ignored by git, so each developer must supply them locally.
+Large model files are configured for Git LFS to avoid bloating the repository.
 
-3.5 Crisis handbook Q&A (:feature_handbook)
-Gemma 3n’s function-calling schema lets you map answers to openHandbook(sectionId) or callHotline(code) for local de-escalation steps.
-developers.googleblog.com
+## License
 
-4 :data layer
-kotlin
-Copy
-Edit
-@Entity
-data class Quiz(
-@PrimaryKey(autoGenerate = true) val id: Long = 0,
-val topic: String,
-val questionsJson: String,
-val synced: Boolean = false
-)
-
-class SyncWorker(ctx: Context, params: WorkerParameters) :
-CoroutineWorker(ctx, params) {
-override suspend fun doWork(): Result {
-db.quizDao().unsynced().forEach { supabase.upsert(it) }
-return Result.success()
-}
-}
-
-## Model assets
-All `.tflite` shards must be placed in `app/src/main/assets/models/` with the exact filenames used by `checkModelAvailability`.
-The `.gitignore` file excludes this folder, so each developer needs to provide the files locally.
+This project is provided for educational purposes and has no specific license.
