@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -18,39 +17,41 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.example.mygemma3n.ui.theme.Gemma3nTheme
-import com.example.mygemma3n.feature.caption.LiveCaptionScreen
-import com.example.mygemma3n.feature.quiz.QuizScreen
-import com.example.mygemma3n.feature.plant.PlantScannerScreen
-import com.example.mygemma3n.feature.plant.PlantScannerViewModel
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
-import androidx.hilt.navigation.compose.hiltViewModel
-// Commented out local model imports
-// import com.google.android.play.core.assetpacks.AssetPackManagerFactory
-// import com.google.android.play.core.assetpacks.AssetPackStateUpdateListener
-// import com.google.android.play.core.assetpacks.model.AssetPackStatus
-// import com.google.android.play.core.assetpacks.AssetPackManager
 import dagger.hilt.android.AndroidEntryPoint
-import java.io.File
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-// import kotlinx.coroutines.tasks.await
-import kotlinx.coroutines.withContext
-import timber.log.Timber
-import androidx.datastore.preferences.preferencesDataStore
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.stringPreferencesKey
-import com.example.mygemma3n.data.GeminiApiService
-import com.example.mygemma3n.data.validateApiKey
+import javax.inject.Inject
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import javax.inject.Inject
+import kotlinx.coroutines.launch
+import androidx.datastore.preferences.preferencesDataStore
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.core.DataStore
+import com.example.mygemma3n.data.GeminiApiService
+import com.example.mygemma3n.data.validateApiKey
+import com.example.mygemma3n.feature.caption.LiveCaptionScreen
+import com.example.mygemma3n.feature.quiz.QuizScreen
+import com.example.mygemma3n.feature.cbt.CBTCoachScreen
+import com.example.mygemma3n.feature.plant.PlantScannerScreen
+import com.example.mygemma3n.feature.crisis.CrisisHandbookScreen
 
-// DataStore for API key storage
+import com.example.mygemma3n.ui.theme.Gemma3nTheme
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
 
+// DataStore extension
+
+// DataStore keys
 val API_KEY = stringPreferencesKey("gemini_api_key")
+val MAPS_API_KEY = stringPreferencesKey("google_maps_api_key")
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -61,6 +62,20 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+
+        // Initialize Gemini API service with stored API key
+        lifecycleScope.launch {
+            val apiKey = dataStore.data.map { it[API_KEY].orEmpty() }.first()
+            if (apiKey.isNotBlank()) {
+                try {
+                    geminiApiService.initialize(
+                        GeminiApiService.Companion.ApiConfig(apiKey = apiKey)
+                    )
+                } catch (e: Exception) {
+                    // Log initialization error
+                }
+            }
+        }
 
         setContent {
             Gemma3nTheme {
@@ -124,10 +139,7 @@ fun Gemma3nNavigation(
             CBTCoachScreen()
         }
         composable("plant_scanner") {
-            val vm: PlantScannerViewModel = hiltViewModel()
-            PlantScannerScreen(onScanClick = { bitmap ->
-                vm.analyzeImage(bitmap)
-            })
+            PlantScannerScreen()
         }
         composable("crisis_handbook") {
             CrisisHandbookScreen()
@@ -308,18 +320,22 @@ fun HomeScreen(
     }
 }
 
-// New API Settings Screen
+// Updated API Settings Screen with both API keys
 @Composable
 fun ApiSettingsScreen(geminiApiService: GeminiApiService) {
     var apiKey by remember { mutableStateOf("") }
+    var mapsApiKey by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     var validationMessage by remember { mutableStateOf<String?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
 
-    // Load existing API key
+    // Load existing API keys
     LaunchedEffect(Unit) {
         context.dataStore.data.map { it[API_KEY] }.first()?.let {
             apiKey = it
+        }
+        context.dataStore.data.map { it[MAPS_API_KEY] }.first()?.let {
+            mapsApiKey = it
         }
     }
 
@@ -336,12 +352,13 @@ fun ApiSettingsScreen(geminiApiService: GeminiApiService) {
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = "Enter your Gemini API key to enable all features",
+            text = "Enter your API keys to enable all features",
             style = MaterialTheme.typography.bodyMedium
         )
 
         Spacer(modifier = Modifier.height(24.dp))
 
+        // Gemini API Key
         OutlinedTextField(
             value = apiKey,
             onValueChange = { apiKey = it },
@@ -350,6 +367,20 @@ fun ApiSettingsScreen(geminiApiService: GeminiApiService) {
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             enabled = !isLoading
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Google Maps API Key
+        OutlinedTextField(
+            value = mapsApiKey,
+            onValueChange = { mapsApiKey = it },
+            label = { Text("Google Maps API Key (Optional)") },
+            placeholder = { Text("AIza...") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            enabled = !isLoading,
+            supportingText = { Text("Required for Crisis Handbook map feature") }
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -364,18 +395,33 @@ fun ApiSettingsScreen(geminiApiService: GeminiApiService) {
                     validationMessage = null
                     CoroutineScope(Dispatchers.IO).launch {
                         try {
-                            if (geminiApiService.validateApiKey(apiKey)) {
-                                // Save API key
+                            var allValid = true
+                            var messages = mutableListOf<String>()
+
+                            // Validate Gemini API key
+                            if (apiKey.isNotBlank()) {
+                                if (geminiApiService.validateApiKey(apiKey)) {
+                                    // Save API key
+                                    context.dataStore.edit { settings ->
+                                        settings[API_KEY] = apiKey
+                                    }
+                                    messages.add("✓ Gemini API key validated")
+                                } else {
+                                    messages.add("✗ Invalid Gemini API key")
+                                    allValid = false
+                                }
+                            }
+
+                            // Save Maps API key (no validation for now)
+                            if (mapsApiKey.isNotBlank()) {
                                 context.dataStore.edit { settings ->
-                                    settings[API_KEY] = apiKey
+                                    settings[MAPS_API_KEY] = mapsApiKey
                                 }
-                                withContext(Dispatchers.Main) {
-                                    validationMessage = "API key validated successfully!"
-                                }
-                            } else {
-                                withContext(Dispatchers.Main) {
-                                    validationMessage = "Invalid API key"
-                                }
+                                messages.add("✓ Maps API key saved")
+                            }
+
+                            withContext(Dispatchers.Main) {
+                                validationMessage = messages.joinToString("\n")
                             }
                         } catch (e: Exception) {
                             withContext(Dispatchers.Main) {
@@ -388,7 +434,7 @@ fun ApiSettingsScreen(geminiApiService: GeminiApiService) {
                         }
                     }
                 },
-                enabled = apiKey.isNotBlank() && !isLoading,
+                enabled = (apiKey.isNotBlank() || mapsApiKey.isNotBlank()) && !isLoading,
                 modifier = Modifier.weight(1f)
             ) {
                 if (isLoading) {
@@ -404,16 +450,18 @@ fun ApiSettingsScreen(geminiApiService: GeminiApiService) {
             OutlinedButton(
                 onClick = {
                     apiKey = ""
+                    mapsApiKey = ""
                     CoroutineScope(Dispatchers.IO).launch {
                         context.dataStore.edit { settings ->
                             settings.remove(API_KEY)
+                            settings.remove(MAPS_API_KEY)
                         }
                     }
-                    validationMessage = "API key cleared"
+                    validationMessage = "API keys cleared"
                 },
                 enabled = !isLoading
             ) {
-                Text("Clear")
+                Text("Clear All")
             }
         }
 
@@ -422,19 +470,23 @@ fun ApiSettingsScreen(geminiApiService: GeminiApiService) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (message.contains("success", ignoreCase = true))
+                    containerColor = if (message.contains("✓") && !message.contains("✗"))
                         MaterialTheme.colorScheme.secondaryContainer
-                    else
+                    else if (message.contains("✗"))
                         MaterialTheme.colorScheme.errorContainer
+                    else
+                        MaterialTheme.colorScheme.surfaceVariant
                 )
             ) {
                 Text(
                     text = message,
                     modifier = Modifier.padding(16.dp),
-                    color = if (message.contains("success", ignoreCase = true))
+                    color = if (message.contains("✓") && !message.contains("✗"))
                         MaterialTheme.colorScheme.onSecondaryContainer
-                    else
+                    else if (message.contains("✗"))
                         MaterialTheme.colorScheme.onErrorContainer
+                    else
+                        MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -442,97 +494,23 @@ fun ApiSettingsScreen(geminiApiService: GeminiApiService) {
         Spacer(modifier = Modifier.height(24.dp))
 
         Text(
-            text = "Get your API key from:",
+            text = "Get your API keys from:",
             style = MaterialTheme.typography.bodySmall
         )
         Text(
-            text = "https://makersuite.google.com/app/apikey",
+            text = "Gemini: https://makersuite.google.com/app/apikey",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Text(
+            text = "Maps: https://console.cloud.google.com/",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.primary
         )
     }
 }
 
-
-
 @Composable
 fun CBTCoachScreen() {
     Text("CBT Coach Screen")
 }
-
-@Composable
-fun CrisisHandbookScreen() {
-    Text("Crisis Handbook Screen")
-}
-
-/* Commented out all local model checking code below */
-
-/*
-// Updated model availability check with error handling
-fun checkModelAvailability(
-    ctx: Context,
-    onStatusUpdate: (progress: Float, ready: Boolean, preparing: Boolean, error: String?) -> Unit
-) {
-    CoroutineScope(Dispatchers.IO).launch {
-        try {
-            val root = File("C:\\Users\\genya\\Downloads\\MyGemma3N")
-
-            val requiredPaths = listOf(
-                "app/src/main/ml/TF_LITE_EMBEDDER.tflite",
-                "app/src/main/ml/TF_LITE_PER_LAYER_EMBEDDER.tflite",
-                "app/src/main/ml/TF_LITE_PREFILL_DECODE.tflite",
-                "app/src/main/ml/TF_LITE_VISION_ADAPTER.tflite",
-                "app/src/main/ml/TF_LITE_VISION_ENCODER.tflite",
-                "app/src/main/ml/TOKENIZER_MODEL.tflite"
-            )
-
-            val missing = requiredPaths.filterNot { rel ->
-                File(root, rel).exists()
-            }
-
-            if (missing.isEmpty()) {
-                onStatusUpdate(100f, true, false, null)
-            } else {
-                onStatusUpdate(
-                    0f, false, false,
-                    "Missing model files:\n${missing.joinToString("\n")}"
-                )
-            }
-        } catch (e: Exception) {
-            onStatusUpdate(
-                0f, false, false,
-                "Error checking model files: ${e.localizedMessage}"
-            )
-        }
-    }
-}
-
-private fun checkAssetModel(ctx: Context): Boolean = try {
-    val dir = "models"
-    ctx.assets.list(dir)?.any {
-        it == "gemma-3n-E2B-it-int4.task" || it == "gemma-3n-E4B-it-int4.task"
-    } ?: false
-} catch (e: Exception) {
-    Timber.e(e, "Error checking asset model")
-    false
-}
-
-private suspend fun copyAssetModelToCache(ctx: Context): String? = withContext(Dispatchers.IO) {
-    val names = listOf("gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
-    for (name in names) {
-        try {
-            val cacheFile = File(ctx.cacheDir, name)
-            if (!cacheFile.exists()) {
-                ctx.assets.open("models/$name").use { input ->
-                    cacheFile.outputStream().use { output -> input.copyTo(output) }
-                }
-            }
-            return@withContext cacheFile.absolutePath
-        } catch (_: Exception) { }
-    }
-    Timber.e("No model found in assets")
-    null
-}
-
-// ... rest of the commented local model code ...
-*/

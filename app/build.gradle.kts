@@ -219,6 +219,8 @@ dependencies {
 
     implementation(libs.androidx.datastore.preferences.v110)
 
+
+
 }
 
 // Enable Gemma 3n model optimizations

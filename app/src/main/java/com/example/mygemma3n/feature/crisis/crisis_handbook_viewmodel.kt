@@ -1,24 +1,26 @@
-package com.example.mygemma3n.feature
+package com.example.mygemma3n.feature.crisis
 
 import android.location.Location
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.mygemma3n.feature.caption.toList
-import com.example.mygemma3n.feature.crisis.*
-import com.example.mygemma3n.gemma.GemmaEngine
+import com.example.mygemma3n.data.GeminiApiService
 import com.example.mygemma3n.remote.Hospital
 import com.example.mygemma3n.shared_utilities.CrisisFunctionCalling
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import javax.inject.Inject
 
 @HiltViewModel
 class CrisisHandbookViewModel @Inject constructor(
-    private val gemmaEngine: GemmaEngine,
+    private val geminiApiService: GeminiApiService,  // Changed from GemmaEngine
     private val functionCalling: CrisisFunctionCalling,
     private val offlineMapService: OfflineMapService,
     private val emergencyContacts: EmergencyContactsRepository
@@ -155,14 +157,7 @@ class CrisisHandbookViewModel @Inject constructor(
         """.trimIndent()
 
         return try {
-            gemmaEngine.generateText(
-                prompt = prompt,
-                config = GemmaEngine.GenerationConfig(
-                    maxNewTokens = 200,
-                    temperature = 0.3f,
-                    doSample = false // Use greedy decoding for consistency in emergencies
-                )
-            ).toList().joinToString("")
+            geminiApiService.generateTextComplete(prompt)
         } catch (e: Exception) {
             "Error generating response. Please call emergency services: 112"
         }
@@ -176,7 +171,7 @@ class CrisisHandbookViewModel @Inject constructor(
 
         return """
             Location: Accra, Ghana
-            Time: ${java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())}
+            Time: ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())}
             Emergency services: $emergencyNumbers
             Nearest hospitals: Korle Bu Teaching Hospital, Ridge Hospital, 37 Military Hospital
             Weather: Clear (assumed)
@@ -258,9 +253,5 @@ class CrisisHandbookViewModel @Inject constructor(
     )
 }
 
-// Extension function for Flow
-suspend fun <T> kotlinx.coroutines.flow.Flow<T>.toList(): List<T> {
-    val list = mutableListOf<T>()
-    collect { list.add(it) }
-    return list
-}
+// Extension function for Flow - this is now removed since we're not using streaming
+// The function in the original file wasn't actually being used properly anyway

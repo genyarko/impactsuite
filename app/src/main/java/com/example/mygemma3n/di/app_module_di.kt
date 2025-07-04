@@ -110,8 +110,10 @@ object AppModule {
     ): ModelDownloadManager = ModelDownloadManager(ctx, workManager, modelRepository)
 
     @Provides @Singleton
-    fun provideSessionRepository(db: CBTDatabase): SessionRepository =
-        SessionRepository(db)
+    fun provideSessionRepository(
+        database: CBTDatabase,
+        cbtTechniques: CBTTechniques  // Add this dependency
+    ): SessionRepository = SessionRepository(database, cbtTechniques)
 
     @Provides @Singleton
     fun provideEducationalContentRepository(db: QuizDatabase): EducationalContentRepository =
@@ -191,23 +193,46 @@ object AppModule {
     @Provides @Singleton
     fun provideOfflineMapService(): OfflineMapService = OfflineMapService()
 
-    @Provides @Singleton
-    fun provideEmotionDetector(): EmotionDetector = EmotionDetector()
 
     @Provides @Singleton
     fun provideCBTTechniques(): CBTTechniques = CBTTechniques()
 
-    @Provides @Singleton
+    @Provides
+    @Singleton
     fun provideCrisisFunctionCalling(
-        @ApplicationContext ctx: Context,
+        @ApplicationContext context: Context,
         locationService: LocationService,
         emergencyDatabase: EmergencyDatabase,
-        gemmaEngine: GemmaEngine
-    ): CrisisFunctionCalling =
-        CrisisFunctionCalling(ctx, locationService, emergencyDatabase, gemmaEngine)
+        geminiApiService: GeminiApiService // Changed from GemmaEngine
+    ): CrisisFunctionCalling {
+        return CrisisFunctionCalling(
+            context,
+            locationService,
+            emergencyDatabase,
+            geminiApiService
+        )
+    }
 
     /* ------------------------------------------------------------------ *
-     * (Feature-specific providers such as AudioCapture, TranslationCache *
-     *  etc. can be added here when needed.)                              *
+     * Cbt                          *
      * ------------------------------------------------------------------ */
+
+    @Provides @Singleton
+    fun provideEmotionDetector(
+        geminiApiService: GeminiApiService  // Add this dependency
+    ): EmotionDetector = EmotionDetector(geminiApiService)
+
+    @Provides @Singleton
+    fun provideCBTSessionManager(
+        sessionRepository: SessionRepository,
+        vectorDatabase: VectorDatabase,
+        geminiApiService: GeminiApiService,
+        cbtTechniques: CBTTechniques
+    ): CBTSessionManager = CBTSessionManager(
+        sessionRepository,
+        vectorDatabase,
+        geminiApiService,
+        cbtTechniques
+    )
+
 }

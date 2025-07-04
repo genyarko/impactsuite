@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mygemma3n.data.GeminiApiService
 import com.example.mygemma3n.repository.SettingsRepository
+import com.example.mygemma3n.shared_utilities.stripFences
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -140,14 +141,6 @@ class QuizGeneratorViewModel @Inject constructor(
         }
     }
 
-    /* ───────── helpers ───────── */
-
-    private fun stripFences(s: String): String =
-        s.trim()
-            .removePrefix("```json")       // Kotlin stdlib removePrefix :contentReference[oaicite:0]{index=0}
-            .removePrefix("```")
-            .removeSuffix("```")
-            .trim()
 
     /* ───── Question generation (now takes List<String>) ───── */
     /* ─────────────────────── Question generation ─────────────────────── */

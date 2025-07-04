@@ -2,7 +2,7 @@ package com.example.mygemma3n.shared_utilities
 
 import android.content.Context
 import android.location.Location
-import com.example.mygemma3n.gemma.GemmaEngine
+import com.example.mygemma3n.data.GeminiApiService
 import com.example.mygemma3n.remote.EmergencyDatabase
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
@@ -12,7 +12,6 @@ import kotlinx.coroutines.withContext
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
-import com.example.mygemma3n.gemma.GemmaEngine.ModelVariant
 
 
 // Function definitions
@@ -92,7 +91,7 @@ class CrisisFunctionCalling @Inject constructor(
     private val context: Context,
     private val locationService: LocationService,
     private val emergencyDb: EmergencyDatabase,
-    private val gemmaEngine: GemmaEngine
+    private val geminiApiService: GeminiApiService  // Changed from GemmaEngine
 ) {
     private val functionRegistry = FunctionRegistry()
     private val gson = Gson()
@@ -179,13 +178,8 @@ class CrisisFunctionCalling @Inject constructor(
                 // 1️⃣ Build prompt
                 val prompt = buildFunctionPrompt(query)
 
-                // 2️⃣ Run Gemma (fast 2-B)
-                val response = gemmaEngine.generateWithModel(
-                    prompt = prompt,
-                    modelVariant = ModelVariant.FAST_2B,
-                    maxTokens = 256,
-                    temperature = 0.1f      // deterministic calls
-                )
+                // 2️⃣ Run Gemini API
+                val response = geminiApiService.generateTextComplete(prompt)
 
                 // 3️⃣ Parse & execute function call if present
                 val functionCall = parseFunctionCall(response)
@@ -274,7 +268,7 @@ class CrisisFunctionCalling @Inject constructor(
 
         return if (contact != null) {
             """
-            ${service.uppercase()} Emergency Contact:
+            Emergency Contact: ${service.uppercase()}
             Primary: ${contact.primaryNumber}
             Secondary: ${contact.secondaryNumber ?: "N/A"}
             SMS: ${contact.smsNumber ?: "N/A"}
@@ -307,7 +301,7 @@ class CrisisFunctionCalling @Inject constructor(
     private suspend fun performSafetyCheck(args: Map<String, Any>): String {
         val situation = args["situation"] as? String ?: return "Situation description required"
 
-        // Use Gemma to analyze the situation
+        // Use Gemini API to analyze the situation
         val analysisPrompt = """
             Analyze this emergency situation and provide a safety assessment:
             "$situation"
@@ -316,10 +310,6 @@ class CrisisFunctionCalling @Inject constructor(
             Be concise and action-oriented.
         """.trimIndent()
 
-        return gemmaEngine.generateWithModel(
-            prompt = analysisPrompt,
-            modelVariant = GemmaEngine.ModelVariant.FAST_2B,
-            maxTokens = 150
-        )
+        return geminiApiService.generateTextComplete(analysisPrompt)
     }
 }

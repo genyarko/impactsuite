@@ -35,7 +35,7 @@ class GeminiApiService @Inject constructor(
         const val PRIMARY_GENERATION_MODEL = "gemma-3n-e4b-it" // Gemma 3n as core generative model
         const val GEMINI_PRO_MODEL   = "gemini-1.5-pro"   // Still available if needed for specific use cases
         const val GEMINI_FLASH_MODEL = "gemini-1.5-flash" // Still available if needed for specific use cases
-        const val EMBEDDING_MODEL    = "gemma-3n-e4b-it"    // Gemma 3n for embeddings
+        const val EMBEDDING_MODEL = "embedding-001" // This is the key!
         // (often the same IT model works fine for both)
 
         data class ApiConfig(
@@ -75,6 +75,8 @@ class GeminiApiService @Inject constructor(
      */
     fun isInitialized(): Boolean = generativeModel != null
 
+    // In GeminiApiService.kt
+
     /* ─────────── embeddings (REST API using OkHttpClient) ─────────── */
     /**
      * Generates embeddings for the given text using the specified model.
@@ -82,21 +84,26 @@ class GeminiApiService @Inject constructor(
      */
     suspend fun embedText(
         text: String,
-        model: String = EMBEDDING_MODEL
+        // Remove the 'model: String = EMBEDDING_MODEL' parameter
+        // or ensure it's ALWAYS EMBEDDING_MODEL if you keep it.
+        // For absolute certainty, hardcode it here.
     ): FloatArray = withContext(Dispatchers.IO) {
         val key = apiKey ?: error("Gemini API not initialised. Call initialize() first.")
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:embedContent"
+        // FORCE the embedding model here
+        val embeddingModelToUse = EMBEDDING_MODEL // This ensures "embedding-001" is always used
+
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$embeddingModelToUse:embedContent"
 
         // Use JSONObject.quote to correctly escape the text for JSON
         val bodyJson = """
-            {
-              "model":"models/$model",
-              "content":{"parts":[{"text":${JSONObject.quote(text)} }]}
-            }
-        """.trimIndent()
+        {
+          "model":"models/$embeddingModelToUse", // Use the forced embedding model here too
+          "content":{"parts":[{"text":${JSONObject.quote(text)} }]}
+        }
+    """.trimIndent()
 
         val req = okhttp3.Request.Builder()
-            .url("$url?key=$key") // API key directly in URL for simplicity, but consider auth header for production
+            .url("$url?key=$key")
             .post(bodyJson.toRequestBody("application/json".toMediaType()))
             .build()
 
@@ -107,11 +114,8 @@ class GeminiApiService @Inject constructor(
                 error("Embed call failed: ${resp.code} - $errorBody")
             }
             val jsonResponse = JSONObject(resp.body!!.string())
-            // The structure for Gemma 3n embeddings via the API will likely be standard
-            // as of July 2025. It typically nests the array under "embedding" and then "value".
-            // Example: { "embedding": { "value": [0.1, 0.2, ...] } }
-            val embeddingObject = jsonResponse.getJSONObject("embedding") // Get the "embedding" object
-            val arr = embeddingObject.getJSONArray("value") // The actual array of floats is under "value"
+            val embeddingObject = jsonResponse.getJSONObject("embedding")
+            val arr = embeddingObject.getJSONArray("value")
 
             FloatArray(arr.length()) { i -> arr.getDouble(i).toFloat() }
         }
@@ -153,8 +157,17 @@ class GeminiApiService @Inject constructor(
      * Generates text based on a prompt and an image.
      * Uses the model initialized with [initialize].
      */
-    suspend fun generateContentWithImage(prompt: String, image: Bitmap): String =
-        generateContent(content { image(image); text(prompt) })
+    // Option 1: Modify generateContentWithImage to include resizing (less ideal for separation of concerns)
+    suspend fun generateContentWithImage(prompt: String, image: Bitmap): String {
+        // Choose your target resolution (e.g., 512x512)
+        val targetWidth = 512
+        val targetHeight = 512
+
+        // Resize the bitmap
+        val resizedImage = Bitmap.createScaledBitmap(image, targetWidth, targetHeight, true)
+
+        return generateContent(content { image(resizedImage); text(prompt) })
+    }
 
     /**
      * Generates quiz questions in JSON format.
@@ -170,6 +183,46 @@ class GeminiApiService @Inject constructor(
             """.trimIndent()
         )
 
+
+    // Add this new function inside your GeminiApiService class
+
+    /**
+     * Generates content from a prompt and image using a SPECIFIC model.
+     * This creates a temporary model instance for the call, leaving the default unchanged.
+     *
+     * @param modelName The specific model to use for this request (e.g., "gemini-1.5-flash").
+     * @param prompt The text prompt to send with the image.
+     * @param image The bitmap image to analyze.
+     * @return The generated text response from the model.
+     */
+    suspend fun generateContentWithImageAndModel(modelName: String, prompt: String, image: Bitmap): String = withContext(Dispatchers.IO) {
+        // Ensure API key is available
+        val key = apiKey ?: error("Gemini API not initialised. Call initialize() first.")
+
+        // Use the default generation config from the singleton model, or create a new default one
+        val config = generativeModel?.generationConfig ?: generationConfig {
+            temperature = 0.7f
+            topK = 40
+            topP = 0.95f
+            maxOutputTokens = 512
+        }
+
+        // Create a temporary, specific GenerativeModel instance for this call
+        val specificModel = GenerativeModel(
+            modelName = modelName,
+            apiKey = key,
+            generationConfig = config
+        )
+
+        // Prepare the content with the image and text
+        val content = content {
+            image(image)
+            text(prompt)
+        }
+
+        // Make the API call with the specific model
+        specificModel.generateContent(content).text ?: ""
+    }
     /**
      * Translates text to a target language.
      * Uses the model initialized with [initialize].
