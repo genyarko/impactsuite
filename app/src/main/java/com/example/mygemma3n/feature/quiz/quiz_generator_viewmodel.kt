@@ -1,9 +1,7 @@
 /**
  * QuizGeneratorViewModel.kt
  *
- * _Cloud-only_ version — every reference to on-device Gemma, local model
- * shards, ModelDownloadManager, ModelRepository, Vector DB, and MediaPipe
- * embedder has been removed or replaced with Gemini API calls.
+ * Cloud-only version — no on-device models.
  */
 package com.example.mygemma3n.feature.quiz
 
@@ -23,18 +21,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import javax.inject.Inject
-import kotlin.math.ceil
 
 @HiltViewModel
 class QuizGeneratorViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val geminiApi: GeminiApiService,              // ← cloud only
+    private val geminiApi: GeminiApiService,
     private val educationalContent: EducationalContentRepository,
     private val quizRepo: QuizRepository,
     private val settingsRepo: SettingsRepository
 ) : ViewModel() {
 
-    /* ─────────────────────────── UI state ────────────────────────── */
+    /* ───────── UI state ───────── */
 
     private val _state = MutableStateFlow(QuizState())
     val state: StateFlow<QuizState> = _state.asStateFlow()
@@ -49,7 +46,7 @@ class QuizGeneratorViewModel @Inject constructor(
         val error: String? = null
     )
 
-    /* ─────────────────────────── Init ────────────────────────── */
+    /* ───────── Init ───────── */
 
     init {
         viewModelScope.launch {
@@ -65,30 +62,43 @@ class QuizGeneratorViewModel @Inject constructor(
         }
     }
 
-    /* ─────────────────────────── Public API ────────────────────────── */
+    /* ───────── Public API ───────── */
 
     fun completeQuiz() =
         _state.update { it.copy(currentQuiz = null, questionsGenerated = 0, error = null) }
 
+    /** Create a quiz, avoiding duplicates from previous _subject + topic_ quizzes. */
     fun generateAdaptiveQuiz(
         subject: Subject,
         topic: String,
         questionCount: Int = 10
     ) = viewModelScope.launch {
+
+        // reset UI
         _state.update { it.copy(isGenerating = true, questionsGenerated = 0, error = null) }
 
         try {
+            /* ① collect every previous question for this subject + topic */
+            val historyTexts: List<String> = quizRepo
+                .getQuizzesFor(subject, topic)           // <- DAO helper
+                .flatMap { it.questions }
+                .map { it.questionText }                 // List<String>
+
             val questions = mutableListOf<Question>()
+
+            /* ② generate new, non-duplicate questions */
             repeat(questionCount) { idx ->
                 val q = generateQuestion(
-                    difficulty = _state.value.difficulty,
-                    previousQuestions = questions,
-                    questionType = selectQuestionType(idx + 1)
+                    difficulty        = _state.value.difficulty,
+                    previousQuestions = historyTexts +              // all past text
+                            questions.map { it.questionText },  // plus ones just made
+                    questionType      = selectQuestionType(idx + 1)
                 )
                 questions += q
                 _state.update { it.copy(questionsGenerated = questions.size) }
             }
 
+            /* ③ persist the quiz and expose to UI */
             val quiz = Quiz(
                 id         = java.util.UUID.randomUUID().toString(),
                 subject    = subject,
@@ -98,6 +108,7 @@ class QuizGeneratorViewModel @Inject constructor(
                 createdAt  = System.currentTimeMillis()
             )
             quizRepo.saveQuiz(quiz)
+
             _state.update { it.copy(isGenerating = false, currentQuiz = quiz) }
 
         } catch (e: Exception) {
@@ -105,6 +116,7 @@ class QuizGeneratorViewModel @Inject constructor(
             _state.update { it.copy(isGenerating = false, error = e.message) }
         }
     }
+
 
     fun submitAnswer(qId: String, answer: String) {
         viewModelScope.launch {
@@ -128,43 +140,53 @@ class QuizGeneratorViewModel @Inject constructor(
         }
     }
 
+    /* ───────── helpers ───────── */
+
+    private fun stripFences(s: String): String =
+        s.trim()
+            .removePrefix("```json")       // Kotlin stdlib removePrefix :contentReference[oaicite:0]{index=0}
+            .removePrefix("```")
+            .removeSuffix("```")
+            .trim()
+
+    /* ───── Question generation (now takes List<String>) ───── */
     /* ─────────────────────── Question generation ─────────────────────── */
 
     private suspend fun generateQuestion(
         difficulty: Difficulty,
-        previousQuestions: List<Question>,
+        previousQuestions: List<String>,        // <-- strings only
         questionType: QuestionType
     ): Question = withContext(Dispatchers.IO) {
+
         val prompt = """
-            Generate a $questionType quiz question in JSON with keys:
-            question, options, correctAnswer, explanation.
-            Difficulty: ${difficulty.name}. Previous: ${
-            previousQuestions.joinToString { it.questionText }
-        }
-        """.trimIndent()
+        Generate one **$questionType** quiz question in JSON with keys:
+          question, options, correctAnswer, explanation.
+        Difficulty: ${difficulty.name}.
+
+        **Do NOT duplicate** any of these prior questions:
+        ${previousQuestions.joinToString("\n")}
+    """.trimIndent()
 
         try {
             val raw = geminiApi.generateTextComplete(prompt)
             parseQuestionFromJson(raw, questionType, difficulty)
         } catch (e: Exception) {
-            Timber.e(e, "Gemini API failed, using basic question")
+            Timber.e(e, "Gemini API failed – falling back")
             generateBasicQuestion(difficulty, questionType)
         }
     }
 
-    /* ─────────────────────── Feedback generation ─────────────────────── */
 
     private suspend fun generateFeedback(
         q: Question,
         answer: String,
         correct: Boolean
     ): String = withContext(Dispatchers.IO) {
-        val prompt = if (correct) {
+        val prompt = if (correct)
             "Encourage the student for correctly answering: \"${q.questionText}\""
-        } else {
+        else
             "Explain in ≤75 words why \"$answer\" is wrong and \"${q.correctAnswer}\" is right " +
                     "for the question \"${q.questionText}\"."
-        }
         try {
             geminiApi.generateTextComplete(prompt)
         } catch (_: Exception) {
@@ -172,83 +194,74 @@ class QuizGeneratorViewModel @Inject constructor(
         }
     }
 
-    /* ─────────────────────── Utilities & fallbacks ─────────────────────── */
-
-    private fun generateBasicQuestion(
-        diff: Difficulty,
-        qt: QuestionType
-    ): Question = when (qt) {
-        QuestionType.MULTIPLE_CHOICE -> Question(
-            questionText   = "What is 2 + 2?",
-            questionType   = qt,
-            options        = listOf("A) 3", "B) 4", "C) 5", "D) 6"),
-            correctAnswer  = "B",
-            explanation    = "2 + 2 equals 4.",
-            difficulty     = diff
-        )
-
-        QuestionType.TRUE_FALSE -> Question(
-            questionText   = "The Earth revolves around the Sun.",
-            questionType   = qt,
-            options        = listOf("True", "False"),
-            correctAnswer  = "True",
-            explanation    = "Basic astronomy fact.",
-            difficulty     = diff
-        )
-
-        else -> Question(
-            questionText   = "Complete: The capital of France is _____.",
-            questionType   = QuestionType.FILL_IN_BLANK,
-            options        = emptyList(),
-            correctAnswer  = "Paris",
-            explanation    = "Paris is France's capital.",
-            difficulty     = diff
-        )
-    }
+    /* ───── JSON parsing & fallbacks ───── */
 
     private fun parseQuestionFromJson(
         raw: String,
         qt: QuestionType,
         diff: Difficulty
     ): Question = try {
-        val json  = org.json.JSONObject(raw.trim())
-        val opts  = json.optJSONArray("options")?.let { arr ->
-            List(arr.length()) { i -> arr.getString(i) }
+        val obj  = org.json.JSONObject(stripFences(raw))
+        val opts = obj.optJSONArray("options")?.let { arr ->
+            List(arr.length()) { arr.getString(it) }
         } ?: emptyList()
 
         Question(
-            questionText   = json.getString("question"),
-            questionType   = qt,
-            options        = opts,
-            correctAnswer  = json.getString("correctAnswer"),
-            explanation    = json.optString("explanation", ""),
-            difficulty     = diff
+            questionText  = obj.getString("question"),
+            questionType  = qt,
+            options       = opts,
+            correctAnswer = obj.getString("correctAnswer"),
+            explanation   = obj.optString("explanation", ""),
+            difficulty    = diff
         )
     } catch (e: Exception) {
-        Timber.e(e, "JSON parse error – falling back to basic question")
+        Timber.e(e, "JSON parse error – fallback")
         generateBasicQuestion(diff, qt)
     }
 
-    private fun selectQuestionType(i: Int): QuestionType =
-        when (i % 3) {
-            0  -> QuestionType.MULTIPLE_CHOICE
-            1  -> QuestionType.TRUE_FALSE
-            else -> QuestionType.FILL_IN_BLANK
-        }
+    private fun generateBasicQuestion(diff: Difficulty, qt: QuestionType): Question = when (qt) {
+        QuestionType.MULTIPLE_CHOICE -> Question(
+            questionText  = "What is 2 + 2?",
+            questionType  = qt,
+            options       = listOf("A) 3", "B) 4", "C) 5", "D) 6"),
+            correctAnswer = "B",
+            explanation   = "2 + 2 equals 4.",
+            difficulty    = diff
+        )
+        QuestionType.TRUE_FALSE -> Question(
+            questionText  = "The Earth revolves around the Sun.",
+            questionType  = qt,
+            options       = listOf("True", "False"),
+            correctAnswer = "True",
+            explanation   = "Basic astronomy fact.",
+            difficulty    = diff
+        )
+        else -> Question(
+            questionText  = "Complete: The capital of France is _____.",
+            questionType  = QuestionType.FILL_IN_BLANK,
+            options       = emptyList(),
+            correctAnswer = "Paris",
+            explanation   = "Paris is France's capital.",
+            difficulty    = diff
+        )
+    }
 
-    private fun updateUserProgress(
-        sub: Subject,
-        diff: Difficulty,
-        correct: Boolean
-    ) {
+    private fun selectQuestionType(i: Int): QuestionType =
+        when (i % 3) { 0 -> QuestionType.MULTIPLE_CHOICE; 1 -> QuestionType.TRUE_FALSE; else -> QuestionType.FILL_IN_BLANK }
+
+    private fun updateUserProgress(sub: Subject, diff: Difficulty, correct: Boolean) {
         _state.update { s ->
             val total = s.questionsGenerated.coerceAtLeast(1)
             val prev  = s.userProgress[sub] ?: 0f
             val new   = if (correct) (prev * (total - 1) + 1f) / total
-            else          (prev * (total - 1))      / total
+            else         (prev * (total - 1))      / total
             s.copy(userProgress = s.userProgress + (sub to new))
         }
     }
 
+    /* Optional helper: still available if ViewModel needs it elsewhere */
+    private suspend fun previousQuestionsFor(subject: Subject, topic: String): List<String> =
+        quizRepo.getQuizzesFor(subject, topic)   // DAO layer; see Room docs :contentReference[oaicite:1]{index=1}
+            .flatMap { it.questions }
+            .map { it.questionText }
 }
-

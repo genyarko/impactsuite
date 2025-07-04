@@ -35,7 +35,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ProgressIndicatorDefaults
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -136,26 +138,33 @@ private fun GenerationProgress(done: Int, modifier: Modifier = Modifier) { // Ad
  * ──────────────────────────────────────────────────────────────────────── */
 
 @Composable
-fun EmptyStateQuizSetup(onGenerateQuiz: (Subject, String, Int) -> Unit) {
-    var subject      by remember { mutableStateOf<Subject?>(null) }
-    var topicText    by remember { mutableStateOf("") }
-    var questionCnt  by remember { mutableStateOf(10f) }
-    val subjects = remember { OfflineRAG.Subject.entries }
+fun EmptyStateQuizSetup(
+    onGenerateQuiz: (Subject, String, Int) -> Unit
+) {
+    /* local UI state */
+    var subject     by remember { mutableStateOf<Subject?>(null) }
+    var topicText   by remember { mutableStateOf("") }
+    var questionCnt by remember { mutableStateOf(10f) }
+
+    /* the enum you own, not OfflineRAG */
+    val subjects = remember { Subject.values().toList() }
 
     Column(
         modifier = Modifier
-            .verticalScroll(rememberScrollState())            // NEW
+            .verticalScroll(rememberScrollState())   // make the whole screen scroll
             .fillMaxSize()
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text("Create a new adaptive quiz", style = MaterialTheme.typography.headlineSmall)
-        Text("No educational content loaded. You can still create a quiz!",
+        Text(
+            "No educational content loaded. You can still create a quiz!",
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
 
-        /* subject chooser (radio list) */
+        /* subject chooser */
         Card(
             modifier = Modifier.fillMaxWidth(),
             elevation = CardDefaults.cardElevation(4.dp)
@@ -170,7 +179,7 @@ fun EmptyStateQuizSetup(onGenerateQuiz: (Subject, String, Int) -> Unit) {
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        androidx.compose.material3.RadioButton(
+                        RadioButton(
                             selected = subject == s,
                             onClick  = { subject = s }
                         )
@@ -191,7 +200,7 @@ fun EmptyStateQuizSetup(onGenerateQuiz: (Subject, String, Int) -> Unit) {
 
         Column(Modifier.fillMaxWidth()) {
             Text("Number of questions: ${questionCnt.toInt()}")
-            androidx.compose.material3.Slider(
+            Slider(
                 value       = questionCnt,
                 onValueChange = { questionCnt = it },
                 valueRange  = 5f..20f,
@@ -200,18 +209,19 @@ fun EmptyStateQuizSetup(onGenerateQuiz: (Subject, String, Int) -> Unit) {
         }
 
         Button(
-            onClick  = {
+            onClick = {
                 subject?.let { onGenerateQuiz(it, topicText.trim(), questionCnt.toInt()) }
             },
-            enabled  = subject != null,
+            enabled = subject != null,
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("Generate Quiz")
             Spacer(Modifier.width(4.dp))
-            Icon(Icons.AutoMirrored.Filled.ArrowForward, null)
+            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
         }
     }
 }
+
 
 @Composable
 fun QuizSetupScreen(

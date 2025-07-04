@@ -144,11 +144,6 @@ fun HomeScreen(
     navController: androidx.navigation.NavHostController,
     geminiApiService: GeminiApiService
 ) {
-    // Commented out local model states
-    // var downloadProgress by remember { mutableStateOf(0f) }
-    // var isModelReady by remember { mutableStateOf(false) }
-    // var isPreparingModel by remember { mutableStateOf(false) }
-
     var isApiReady by remember { mutableStateOf(false) }
     var isCheckingApi by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -159,10 +154,12 @@ fun HomeScreen(
         val apiKey = context.dataStore.data.map { it[API_KEY] }.first()
         if (!apiKey.isNullOrBlank()) {
             try {
+                // Initialize the API service.
+                // By omitting the 'modelName' parameter, ApiConfig will use its default,
+                // which is now PRIMARY_GENERATION_MODEL (Gemma 3n).
                 geminiApiService.initialize(
-                    GeminiApiService.ApiConfig(
-                        apiKey = apiKey,
-                        modelName = GeminiApiService.GEMINI_FLASH_MODEL
+                    GeminiApiService.Companion.ApiConfig(
+                        apiKey = apiKey
                     )
                 )
                 isApiReady = true
@@ -177,17 +174,6 @@ fun HomeScreen(
         }
         isCheckingApi = false
     }
-
-    /* Commented out local model checking
-    LaunchedEffect(Unit) {
-        checkModelAvailability(context) { progress, ready, preparing, error ->
-            downloadProgress = progress
-            isModelReady    = ready
-            isPreparingModel= preparing
-            errorMessage    = error
-        }
-    }
-    */
 
     Column(
         modifier = Modifier
@@ -247,23 +233,6 @@ fun HomeScreen(
                 }
                 Spacer(modifier = Modifier.height(16.dp))
             }
-            /* Commented out local model UI
-            isPreparingModel -> {
-                LinearProgressIndicator(
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text("Preparing model for first use...")
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-            downloadProgress > 0 && downloadProgress < 100 && !isModelReady -> {
-                LinearProgressIndicator(
-                    progress = { downloadProgress / 100f },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text("Downloading model: ${downloadProgress.toInt()}%")
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-            */
         }
 
         Button(
