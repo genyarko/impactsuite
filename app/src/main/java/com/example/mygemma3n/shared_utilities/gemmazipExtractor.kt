@@ -21,8 +21,8 @@ import java.nio.channels.FileChannel
  * @return            a MappedByteBuffer ready to feed into Interpreter()
  */
 fun loadTfliteAsset(context: Context, modelName: String): MappedByteBuffer {
-    // e.g. modelName = "TF_LITE_EMBEDDER" → assets/models/TF_LITE_EMBEDDER.tflite
-    val assetPath = "models/$modelName.tflite"
+
+    val assetPath = "models/$modelName"
     val afd: AssetFileDescriptor = context.assets.openFd(assetPath)
     FileInputStream(afd.fileDescriptor).channel.use { channel ->
         return channel.map(
