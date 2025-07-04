@@ -33,7 +33,17 @@ class PlantScannerViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             try {
-                val modelFile = File(context.filesDir, "models/gemma-2b-it-fast.tflite")
+                // Copy Gemma 3n model from assets if it hasn't been extracted yet
+                val modelFile = File(context.cacheDir, "models/gemma-3n-E2B-it-int4.task")
+                if (!modelFile.exists()) {
+                    modelFile.parentFile?.mkdirs()
+                    context.assets.open("models/gemma-3n-E2B-it-int4.task").use { input ->
+                        modelFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                }
+
                 gemmaEngine.initialize(
                     GemmaEngine.InferenceConfig(
                         modelPath = modelFile.absolutePath,

@@ -551,32 +551,6 @@ class ModelDownloadManager @Inject constructor(
             .flowOn(Dispatchers.IO)
     }
 
-    // Example integration inside your ViewModel or service before inference or quiz generation
-
-    // Add this function in your ViewModel or service that handles quiz generation
-    suspend fun prepareAndGenerateQuiz(modelDownloadManager: ModelDownloadManager) {
-        val request = ModelDownloadManager.DownloadRequest(
-            url = "https://huggingface.co/google/gemma-3n-E4B-it-litert-preview/resolve/main/gemma-2b-it-fast.tflite",
-            name = "gemma-2b-it-fast",
-            type = "gemma-3n-2b"
-        )
-
-        val state = if (modelDownloadManager.isModelAvailable(request.name)) {
-            val info = modelDownloadManager.getAvailableModels().first { it.name == request.name }
-            ModelDownloadManager.DownloadState.Success(info.path, info.size)
-        } else {
-            var result: ModelDownloadManager.DownloadState = ModelDownloadManager.DownloadState.Idle
-            modelDownloadManager.downloadModel(request).collect { result = it }
-            result
-        }
-
-        if (state is ModelDownloadManager.DownloadState.Success) {
-            Timber.d("Model ready at ${state.modelPath}")
-            // Initialize model and proceed with inference/quiz
-        } else if (state is ModelDownloadManager.DownloadState.Error) {
-            Timber.e("Cannot proceed with quiz generation: ${state.message}")
-        }
-    }
 
 
     suspend fun ensureModelDownloaded(manager: ModelDownloadManager, request: ModelDownloadManager.DownloadRequest): ModelDownloadManager.DownloadState {
