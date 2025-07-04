@@ -152,6 +152,9 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
 
+    // Gemini API - THIS IS THE KEY ADDITION
+    implementation(libs.generativeai)
+
 // Permissions
     implementation(libs.accompanist.permissions)
 

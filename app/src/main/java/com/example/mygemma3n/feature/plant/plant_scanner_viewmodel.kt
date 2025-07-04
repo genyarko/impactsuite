@@ -31,23 +31,23 @@ class PlantScannerViewModel @Inject constructor(
     val scanState: StateFlow<PlantScanState> = _scanState.asStateFlow()
 
     init {
-//        viewModelScope.launch {
-//            try {
-//                val modelFile = File(context.filesDir, "models/gemma-2b-it-fast.tflite")
-//                gemmaEngine.initialize(
-//                    GemmaEngine.InferenceConfig(
-//                        modelPath = modelFile.absolutePath,
-//                        useGpu = true,
-//                        useNnapi = true,
-//                        numThreads = 4,
-//                        enablePLE = true
-//                    )
-//                )
-//                _modelReady.value = true
-//            } catch (e: Exception) {
-//                _scanState.update { it.copy(error = "Model init failed: ${e.localizedMessage}") }
-//            }
-//        }
+        viewModelScope.launch {
+            try {
+                val modelFile = File(context.filesDir, "models/gemma-2b-it-fast.tflite")
+                gemmaEngine.initialize(
+                    GemmaEngine.InferenceConfig(
+                        modelPath = modelFile.absolutePath,
+                        useGpu = true,
+                        useNnapi = true,
+                        numThreads = 4,
+                        enablePLE = true
+                    )
+                )
+                _modelReady.value = true
+            } catch (e: Exception) {
+                _scanState.update { it.copy(error = "Model init failed: ${e.localizedMessage}") }
+            }
+        }
     }
 
     fun analyzeImage(bitmap: Bitmap) {

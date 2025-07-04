@@ -1,272 +1,146 @@
+// Updated GemmaModelManager.kt to use Gemini API
 package com.example.mygemma3n.gemma
 
 import android.content.Context
-import android.os.Build
+import com.example.mygemma3n.API_KEY
+import com.example.mygemma3n.data.GeminiApiService
 import com.example.mygemma3n.data.ModelRepository
+import com.example.mygemma3n.dataStore
 import com.example.mygemma3n.shared_utilities.PerformanceMonitor
-
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import org.tensorflow.lite.Delegate
-import org.tensorflow.lite.Interpreter
-import org.tensorflow.lite.gpu.GpuDelegate
-import org.tensorflow.lite.nnapi.NnApiDelegate
-import org.tensorflow.lite.gpu.GpuDelegateFactory.Options
-
-
 import timber.log.Timber
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import java.nio.MappedByteBuffer
-import java.nio.channels.FileChannel
-import java.io.FileInputStream
-import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.apply
-import org.tensorflow.lite.gpu.GpuDelegateFactory.Options as GpuOptions
-
 
 
 @Singleton
 class GemmaModelManager @Inject constructor(
     private val context: Context,
     val modelRepository: ModelRepository,
-    private val performanceMonitor: PerformanceMonitor
+    private val performanceMonitor: PerformanceMonitor,
+    private val geminiApiService: GeminiApiService // Add this dependency
 ) {
+    /* Commented out local model caches
     private val modelCache = mutableMapOf<ModelConfig, Interpreter>()
     private val embeddingModelCache = mutableMapOf<String, Interpreter>()
-    private val cacheMutex = Mutex()
-    private val delegates: MutableMap<String, Delegate?> = mutableMapOf()
+    */
 
+    private val cacheMutex = Mutex()
+    private var currentModelConfig: ModelConfig? = null
+
+    /* Commented out local delegates
+    private val delegates: MutableMap<String, Delegate?> = mutableMapOf()
+    */
 
     companion object {
         const val TOKENIZER_VOCAB_SIZE = 256000
         const val MAX_SEQUENCE_LENGTH = 8192
         const val EMBEDDING_DIM = 768
 
-        // Model file names
-        const val MODEL_2B = "gemma_3n_2b_it"
-        const val MODEL_4B = "gemma_3n_4b_it"
-        const val MODEL_EMBEDDING = "gemma_3n_embedding"
+        // Model configurations mapped to Gemini API models
+        const val MODEL_2B = "gemini-1.5-flash"     // Fast model
+        const val MODEL_4B = "gemini-1.5-flash-8b"  // Balanced model
+        const val MODEL_EMBEDDING = "embedding-001"  // Embedding model
 
-        // Mix'n'match configurations
-        const val MIX_N_MATCH_2B_RATIO = 0.5f
-        const val MIX_N_MATCH_3B_RATIO = 0.75f
-        const val MIX_N_MATCH_4B_RATIO = 1.0f
+        // API-based configurations
+        const val API_2B_TOKENS = 2048
+        const val API_3B_TOKENS = 4096
+        const val API_4B_TOKENS = 8192
     }
 
     sealed class ModelConfig(
         val modelName: String,
         val activeParams: String,
-        val mixRatio: Float = 1.0f
+        val maxTokens: Int = API_2B_TOKENS
     ) {
-        object FAST_2B : ModelConfig(MODEL_2B, "2B", MIX_N_MATCH_2B_RATIO)
-        object BALANCED_3B : ModelConfig(MODEL_4B, "3B", MIX_N_MATCH_3B_RATIO) // 4B model with 3B active
-        object QUALITY_4B : ModelConfig(MODEL_4B, "4B", MIX_N_MATCH_4B_RATIO)
+        object FAST_2B : ModelConfig(MODEL_2B, "2B", API_2B_TOKENS)
+        object BALANCED_3B : ModelConfig(MODEL_4B, "3B", API_3B_TOKENS)
+        object QUALITY_4B : ModelConfig(MODEL_4B, "4B", API_4B_TOKENS)
 
         override fun toString(): String = activeParams
     }
 
-    suspend fun getModel(config: ModelConfig): Interpreter = cacheMutex.withLock {
-        modelCache.getOrPut(config) {
+    /**
+     * Get a configured API model instead of local interpreter
+     */
+    suspend fun getModel(config: ModelConfig): String = cacheMutex.withLock {
+        // Ensure API is initialized with the right configuration
+        if (!geminiApiService.isInitialized() || currentModelConfig != config) {
             withContext(Dispatchers.IO) {
-                loadModel(config)
+                initializeApiModel(config)
             }
+        }
+
+        // Return the model name for API calls
+        config.modelName
+    }
+
+    /**
+     * Get embedding model - now returns API embedding model name
+     */
+    suspend fun getEmbeddingModel(): String = cacheMutex.withLock {
+        if (!geminiApiService.isInitialized()) {
+            throw IllegalStateException("Gemini API not initialized")
+        }
+        MODEL_EMBEDDING
+    }
+
+    private suspend fun initializeApiModel(config: ModelConfig) = withContext(Dispatchers.IO) {
+        try {
+            // Get API key from storage or throw error
+            val apiKey = getStoredApiKey()
+                ?: throw IllegalStateException("API key not configured")
+
+            // Initialize Gemini API with the selected model
+            geminiApiService.initialize(
+                GeminiApiService.ApiConfig(
+                    apiKey = apiKey,
+                    modelName = config.modelName,
+                    maxOutputTokens = config.maxTokens,
+                    temperature = 0.7f,
+                    topK = 40,
+                    topP = 0.95f
+                )
+            )
+
+            currentModelConfig = config
+            Timber.d("Initialized Gemini API with model: ${config.modelName}")
+
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to initialize API model")
+            throw e
         }
     }
 
-    suspend fun getEmbeddingModel(): Interpreter = cacheMutex.withLock {
-        embeddingModelCache.getOrPut(MODEL_EMBEDDING) {
-            withContext(Dispatchers.IO) {
-                val modelPath = modelRepository.getModelPath(MODEL_EMBEDDING)
-                    ?: throw IllegalStateException("Embedding model not found")
-                loadModelFromPath(modelPath, useGpu = true)
-            }
-        }
-    }
-
-    private suspend fun loadModel(config: ModelConfig): Interpreter = withContext(Dispatchers.IO) {
-        val modelPath = modelRepository.getModelPath(config.modelName)
-            ?: throw IllegalStateException("Model ${config.modelName} not found")
-
-        when (config) {
-            is ModelConfig.FAST_2B -> {
-                loadModelFromPath(modelPath, useGpu = true, useNnapi = true)
-            }
-            is ModelConfig.BALANCED_3B -> {
-                // Mix'n'match: Load 4B model but activate only 3B parameters
-                loadMixNMatchModel(modelPath, config.mixRatio)
-            }
-            is ModelConfig.QUALITY_4B -> {
-                loadModelFromPath(modelPath, useGpu = true, useNnapi = true)
-            }
-        }
-    }
-
-    private fun loadModelFromPath(
-        modelPath: String,
-        useGpu: Boolean = true,
-        useNnapi: Boolean = true,
-        numThreads: Int = 4
-    ): Interpreter {
-        val modelBuffer = loadModelBuffer(modelPath)
-        // This map will hold delegates created specifically for this interpreter instance.
-        val newDelegates = mutableMapOf<String, Delegate>()
-
-        val options = Interpreter.Options().apply {
-            setNumThreads(numThreads)
-            // Consider device-specific checks before enabling these
-            setAllowFp16PrecisionForFp32(true)
-            setUseXNNPACK(true)
-
-            if (useGpu) {
-                try {
-                    val gpuOpts = GpuDelegate.Options().apply {
-                        setPrecisionLossAllowed(true) // Deprecated, but shown for compatibility
-                        // Use setInferencePriority1 for newer TFLite versions
-                        setInferencePreference(GpuDelegate.Options.INFERENCE_PREFERENCE_SUSTAINED_SPEED)
-                    }
-                    val gpuDelegate = GpuDelegate(gpuOpts)
-                    addDelegate(gpuDelegate)
-                    // Use a unique key for each delegate instance to track it
-                    newDelegates["gpu_${modelPath.hashCode()}"] = gpuDelegate
-                    Timber.d("GPU delegate enabled for $modelPath")
-                } catch (e: Exception) {
-                    Timber.w(e, "GPU delegate unavailable for $modelPath")
-                }
-            }
-
-            if (useNnapi && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) { // NNAPI delegate is generally stable on P+
-                try {
-                    val nnapiDelegate = NnApiDelegate() // Options can be configured if needed
-                    addDelegate(nnapiDelegate)
-                    newDelegates["nnapi_${modelPath.hashCode()}"] = nnapiDelegate
-                    Timber.d("NNAPI delegate enabled for $modelPath")
-                } catch (e: Exception) {
-                    Timber.w(e, "NNAPI delegate unavailable for $modelPath")
-                }
-            }
+    private suspend fun getStoredApiKey(): String? =
+        withContext(Dispatchers.IO) {
+            // `dataStore` now resolves unambiguously
+            context.dataStore.data
+                .map { it[API_KEY] }
+                .first()
         }
 
-        // After creating the interpreter, add the newly created delegates to the central map for lifecycle tracking.
-        // This should be done within the cacheMutex to ensure thread safety.
-        // Note: This part requires refactoring how you call this function to use the mutex.
-        // For now, let's assume you'll lock it before calling.
-        delegates.putAll(newDelegates)
 
-        return Interpreter(modelBuffer, options).also {
-            it.allocateTensors()
-            Timber.d("Interpreter initialized for $modelPath")
-        }
-    }
-
-
-
-
-    private fun loadMixNMatchModel(modelPath: String, activationRatio: Float): Interpreter {
-        val modelBuffer = loadModelBuffer(modelPath)
-        var gpuDelegate: GpuDelegate? = null // 👈 1. Declare variable here
-
-        val options = Interpreter.Options().apply {
-            setNumThreads(4)
-            setAllowFp16PrecisionForFp32(true)
-            setUseXNNPACK(true)
-            try {
-                val gpuOptions = GpuDelegate.Options().apply {
-                    setPrecisionLossAllowed(true)
-                    setQuantizedModelsAllowed(true)
-                    setInferencePreference(GpuDelegate.Options.INFERENCE_PREFERENCE_SUSTAINED_SPEED)
-                }
-                // Assign to the variable declared outside this scope
-                gpuDelegate = GpuDelegate(gpuOptions)
-                addDelegate(gpuDelegate)
-                Timber.d("GPU delegate enabled for mix'n'match model")
-            } catch (e: Exception) {
-                Timber.w(e, "GPU delegate not available for mix'n'match")
-            }
-        }
-
-        // 2. Add the created delegate to the class's map
-        // This happens only if the delegate was successfully created
-        gpuDelegate?.let {
-            delegates["gpu_mix"] = it
-        }
-
-        val interpreter = Interpreter(modelBuffer, options)
-        configureMixNMatch(interpreter, activationRatio)
-        interpreter.allocateTensors()
-        return interpreter
-    }
-
-
-
-    private fun configureMixNMatch(interpreter: Interpreter, ratio: Float) {
-        // This is a conceptual implementation
-        // The actual Gemma 3n mix'n'match would involve:
-        // 1. Identifying which layers to activate based on ratio
-        // 2. Setting activation masks for Per-Layer Embeddings
-        // 3. Configuring the model to use subset of parameters
-
-        Timber.d("Configured mix'n'match with ${(ratio * 100).toInt()}% parameter activation")
-    }
-
-    private fun loadModelBuffer(modelPath: String): MappedByteBuffer {
-        val modelFile = File(modelPath)
-        require(modelFile.exists()) { "Model file not found: $modelPath" }
-
-        FileInputStream(modelFile).channel.use { fc ->
-            val fileSize = fc.size()
-
-            // ───── Fix A: direct mmap if the file fits JVM limit (≈ 2 GB) ─────
-            if (fileSize <= Int.MAX_VALUE.toLong()) {
-                return fc.map(FileChannel.MapMode.READ_ONLY, 0, fileSize)
-            }
-
-            // ───── Fix B: chunk-map and copy into one direct buffer ───────────
-            val sliceSize = 1_900_000_000L                     // 1.9 GB per slice
-            val bigBuf: ByteBuffer = ByteBuffer
-                .allocateDirect(fileSize.toInt())              // single contiguous buffer
-                .order(ByteOrder.nativeOrder())
-
-            var offset = 0L
-            while (offset < fileSize) {
-                val len   = minOf(sliceSize, fileSize - offset)
-                val slice = fc.map(FileChannel.MapMode.READ_ONLY, offset, len)
-                bigBuf.put(slice)                              // copy slice → big buffer
-                offset += len
-            }
-            bigBuf.rewind()
-            @Suppress("CAST_NEVER_SUCCEEDS")
-            return bigBuf as MappedByteBuffer                  // safe on ART / Dalvik
-        }
-    }
-
+    /**
+     * Tokenize text - now a simplified version since API handles tokenization
+     */
     suspend fun tokenize(text: String, maxLength: Int = MAX_SEQUENCE_LENGTH): IntArray {
-        // Simplified tokenization - in production, use SentencePiece
+        // API handles tokenization internally, so we return a dummy array
+        // This maintains compatibility with existing code
         return withContext(Dispatchers.Default) {
-            val tokens = mutableListOf<Int>()
-
-            // Add BOS token
-            tokens.add(1) // BOS_TOKEN
-
-            // Simple character-based tokenization (placeholder)
-            text.take(maxLength - 2).forEach { char ->
-                tokens.add(char.code % TOKENIZER_VOCAB_SIZE)
-            }
-
-            // Pad or truncate to maxLength
-            while (tokens.size < maxLength) {
-                tokens.add(0) // PAD_TOKEN
-            }
-
-            tokens.take(maxLength).toIntArray()
+            IntArray(minOf(text.length, maxLength)) { it }
         }
     }
 
+    /**
+     * Generate text using the Gemini API
+     */
     suspend fun generateText(
-        model: Interpreter,
+        model: String, // Now just a model name string
         prompt: String,
         maxTokens: Int = 256,
         temperature: Float = 0.7f,
@@ -275,148 +149,152 @@ class GemmaModelManager @Inject constructor(
     ): String = withContext(Dispatchers.Default) {
         val startTime = System.currentTimeMillis()
 
-        // Tokenize prompt
-        val inputTokens = tokenize(prompt)
-
-        // Prepare buffers
-        val inputBuffer = ByteBuffer.allocateDirect(inputTokens.size * 4).order(ByteOrder.nativeOrder())
-        inputTokens.forEach { inputBuffer.putInt(it) }
-        inputBuffer.rewind()
-
-        val outputBuffer = ByteBuffer.allocateDirect(TOKENIZER_VOCAB_SIZE * 4).order(ByteOrder.nativeOrder())
-
-        // Run inference
-        model.run(inputBuffer, outputBuffer)
-
-        // Decode output (simplified)
-        val generatedText = decodeOutput(outputBuffer, temperature, topK, topP)
-
-        val totalTime = System.currentTimeMillis() - startTime
-        Timber.d("Generated text in ${totalTime}ms")
-
-        generatedText
-    }
-
-    private fun decodeOutput(
-        outputBuffer: ByteBuffer,
-        temperature: Float,
-        topK: Int,
-        topP: Float
-    ): String {
-        // Simplified decoding - in production, use proper sampling and detokenization
-        outputBuffer.rewind()
-
-        // Extract top token (greedy decoding for simplicity)
-        var maxLogit = Float.NEGATIVE_INFINITY
-        var maxIndex = 0
-
-        for (i in 0 until TOKENIZER_VOCAB_SIZE) {
-            val logit = outputBuffer.getFloat()
-            if (logit > maxLogit) {
-                maxLogit = logit
-                maxIndex = i
-            }
+        if (!geminiApiService.isInitialized()) {
+            throw IllegalStateException("Gemini API not initialized")
         }
 
-        return "Generated text based on the prompt (token: $maxIndex)"
+        try {
+            // Generate text using API
+            val generatedText = geminiApiService.generateTextComplete(prompt)
+
+            val totalTime = System.currentTimeMillis() - startTime
+            Timber.d("Generated text via API in ${totalTime}ms")
+
+            // Record performance metrics
+            performanceMonitor.recordInference(
+                prefillTime = 0,
+                decodeTime = totalTime,
+                tokens = maxTokens,
+                model = model,
+                feature = "text_generation",
+                cacheHitRate = 0f,
+                delegateType = "CLOUD_API"
+            )
+
+            generatedText
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to generate text")
+            throw e
+        }
     }
 
+    /**
+     * Warm up models - now just ensures API is ready
+     */
     suspend fun warmupModels() = withContext(Dispatchers.IO) {
-        Timber.d("Starting model warmup...")
+        Timber.d("Checking API readiness...")
 
-        // Warmup each model configuration
+        // Try to initialize with each model configuration
         listOf(ModelConfig.FAST_2B, ModelConfig.BALANCED_3B, ModelConfig.QUALITY_4B).forEach { config ->
             try {
-                val model = getModel(config)
-
-                // Run a dummy inference to warm up
-                val dummyInput = ByteBuffer.allocateDirect(4).order(ByteOrder.nativeOrder())
-                dummyInput.putInt(1) // Single token
-                dummyInput.rewind()
-
-                val dummyOutput = ByteBuffer.allocateDirect(TOKENIZER_VOCAB_SIZE * 4).order(ByteOrder.nativeOrder())
-
-                model.run(dummyInput, dummyOutput)
-
-                Timber.d("Warmed up model: ${config.activeParams}")
+                getModel(config)
+                Timber.d("API ready for model: ${config.activeParams}")
             } catch (e: Exception) {
-                Timber.w(e, "Failed to warmup model: $config")
+                Timber.w(e, "Failed to prepare model: $config")
             }
         }
     }
 
-    // This implementation is correct, assuming the `delegates` map is populated correctly.
-    fun clearCache() = runBlocking { // Use runBlocking or make it a suspend function to use mutex
+    /**
+     * Clear cache - now just clears API configuration
+     */
+    fun clearCache() = runBlocking {
         cacheMutex.withLock {
+            /* Commented out local model cleanup
             modelCache.values.forEach { it.close() }
             modelCache.clear()
             embeddingModelCache.values.forEach { it.close() }
             embeddingModelCache.clear()
-
             delegates.values.forEach { it?.close() }
             delegates.clear()
+            */
 
-            Timber.d("Model cache cleared")
+            // Clear API configuration
+            geminiApiService.cleanup()
+            currentModelConfig = null
+
+            Timber.d("API configuration cleared")
         }
     }
 
+    /**
+     * Get model statistics - adapted for API usage
+     */
     suspend fun getModelStats(): ModelStats {
-        val loadedModels = modelCache.mapValues { (config, interpreter) ->
+        val currentModel = currentModelConfig?.let { config ->
             ModelInfo(
                 config = config,
-                inputShape = getInputShape(interpreter),
-                outputShape = getOutputShape(interpreter),
-                delegateType = getActiveDelegateType(interpreter)
+                inputShape = intArrayOf(1, config.maxTokens), // Simplified
+                outputShape = intArrayOf(1, TOKENIZER_VOCAB_SIZE), // Simplified
+                delegateType = "CLOUD_API"
             )
         }
 
-        val availableModels = modelRepository.getAvailableModels()
+        val loadedModels = currentModel?.let { mapOf(it.config to it) } ?: emptyMap()
+
+        // Check which models are available via API
+        val availableModels = listOf(
+            ModelRepository.ModelInfo(
+                name = "Gemini Flash",
+                path = "cloud://gemini-1.5-flash",
+                size = 0L, // Cloud model
+                type = "gemini",
+                checksum = null
+            ),
+            ModelRepository.ModelInfo(
+                name = "Gemini Flash 8B",
+                path = "cloud://gemini-1.5-flash-8b",
+                size = 0L, // Cloud model
+                type = "gemini",
+                checksum = null
+            )
+        )
 
         return ModelStats(
             loadedModels = loadedModels,
             availableModels = availableModels,
-            totalMemoryUsedMB = calculateTotalMemoryUsage()
+            totalMemoryUsedMB = 0 // No local memory usage with API
         )
     }
 
-    private fun getInputShape(interpreter: Interpreter): IntArray {
-        return try {
-            interpreter.getInputTensor(0).shape()
-        } catch (e: Exception) {
-            intArrayOf()
-        }
-    }
-
-    private fun getOutputShape(interpreter: Interpreter): IntArray {
-        return try {
-            interpreter.getOutputTensor(0).shape()
-        } catch (e: Exception) {
-            intArrayOf()
-        }
-    }
-
-    private fun getActiveDelegateType(interpreter: Interpreter): String {
-        // This is a simplified check - actual implementation would query the interpreter
-        return when {
-            delegates.containsKey("gpu") || delegates.containsKey("gpu_mix") -> "GPU"
-            delegates.containsKey("nnapi") -> "NNAPI"
-            else -> "CPU"
-        }
-    }
-
-    private fun calculateTotalMemoryUsage(): Int {
-        // Estimate memory usage based on loaded models
-        var totalMB = 0
-
-        modelCache.forEach { (config, _) ->
-            totalMB += when (config) {
-                is ModelConfig.FAST_2B -> 1000 // ~1GB for 2B model
-                is ModelConfig.BALANCED_3B -> 1500 // ~1.5GB for 3B active params
-                is ModelConfig.QUALITY_4B -> 2000 // ~2GB for 4B model
+    /**
+     * Select optimal model based on requirements
+     */
+    suspend fun selectOptimalModel(
+        requireQuality: Boolean = false,
+        requireSpeed: Boolean = false
+    ): ModelConfig = withContext(Dispatchers.Default) {
+        when {
+            requireQuality -> ModelConfig.QUALITY_4B
+            requireSpeed -> ModelConfig.FAST_2B
+            else -> {
+                // For API, we can always use the best model since there's no local resource constraint
+                ModelConfig.BALANCED_3B
             }
         }
+    }
 
-        return totalMB
+    /**
+     * Get memory info - simplified since we're not using local models
+     */
+    private fun getMemoryInfo(): MemoryInfo {
+        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val memoryInfo = android.app.ActivityManager.MemoryInfo()
+        activityManager.getMemoryInfo(memoryInfo)
+
+        return MemoryInfo(
+            availableMemoryMB = (memoryInfo.availMem / (1024 * 1024)).toInt(),
+            totalMemoryMB = (memoryInfo.totalMem / (1024 * 1024)).toInt(),
+            lowMemory = memoryInfo.lowMemory
+        )
+    }
+
+    /**
+     * Get battery level - kept for compatibility
+     */
+    private fun getBatteryLevel(): Int {
+        val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager
+        return batteryManager.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
     }
 
     data class ModelInfo(
@@ -454,45 +332,10 @@ class GemmaModelManager @Inject constructor(
         val totalMemoryUsedMB: Int
     )
 
-    // Dynamic model switching based on system resources
-    suspend fun selectOptimalModel(
-        requireQuality: Boolean = false,
-        requireSpeed: Boolean = false
-    ): ModelConfig = withContext(Dispatchers.Default) {
-        val memoryInfo = getMemoryInfo()
-        val batteryLevel = getBatteryLevel()
-
-        when {
-            requireQuality -> ModelConfig.QUALITY_4B
-            requireSpeed -> ModelConfig.FAST_2B
-            memoryInfo.availableMemoryMB < 1000 -> ModelConfig.FAST_2B
-            batteryLevel < 20 -> ModelConfig.FAST_2B
-            memoryInfo.availableMemoryMB < 2000 -> ModelConfig.BALANCED_3B
-            else -> ModelConfig.QUALITY_4B
-        }
-    }
-
-    private fun getMemoryInfo(): MemoryInfo {
-        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-        val memoryInfo = android.app.ActivityManager.MemoryInfo()
-        activityManager.getMemoryInfo(memoryInfo)
-
-        return MemoryInfo(
-            availableMemoryMB = (memoryInfo.availMem / (1024 * 1024)).toInt(),
-            totalMemoryMB = (memoryInfo.totalMem / (1024 * 1024)).toInt(),
-            lowMemory = memoryInfo.lowMemory
-        )
-    }
-
-    private fun getBatteryLevel(): Int {
-        // Simplified battery check
-        val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager
-        return batteryManager.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
-    }
-
     data class MemoryInfo(
         val availableMemoryMB: Int,
         val totalMemoryMB: Int,
         val lowMemory: Boolean
     )
 }
+

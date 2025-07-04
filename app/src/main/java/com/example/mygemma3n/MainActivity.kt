@@ -1,4 +1,4 @@
-// Fixed MainActivity.kt
+// Updated MainActivity.kt with Gemini API integration
 package com.example.mygemma3n
 
 import android.Manifest
@@ -7,6 +7,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.*
@@ -24,21 +26,37 @@ import com.example.mygemma3n.feature.plant.PlantScannerViewModel
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.google.android.play.core.assetpacks.AssetPackManagerFactory
-import com.google.android.play.core.assetpacks.AssetPackStateUpdateListener
-import com.google.android.play.core.assetpacks.model.AssetPackStatus
-import com.google.android.play.core.assetpacks.AssetPackManager
+// Commented out local model imports
+// import com.google.android.play.core.assetpacks.AssetPackManagerFactory
+// import com.google.android.play.core.assetpacks.AssetPackStateUpdateListener
+// import com.google.android.play.core.assetpacks.model.AssetPackStatus
+// import com.google.android.play.core.assetpacks.AssetPackManager
 import dagger.hilt.android.AndroidEntryPoint
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
+// import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import timber.log.Timber
+import androidx.datastore.preferences.preferencesDataStore
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import com.example.mygemma3n.data.GeminiApiService
+import com.example.mygemma3n.data.validateApiKey
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import javax.inject.Inject
+
+// DataStore for API key storage
+
+val API_KEY = stringPreferencesKey("gemini_api_key")
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    @Inject
+    lateinit var geminiApiService: GeminiApiService
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -46,7 +64,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             Gemma3nTheme {
-                Gemma3nApp()
+                Gemma3nApp(geminiApiService)
             }
         }
     }
@@ -54,7 +72,7 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
-fun Gemma3nApp() {
+fun Gemma3nApp(geminiApiService: GeminiApiService) {
     val navController = rememberNavController()
 
     // Request necessary permissions
@@ -75,6 +93,7 @@ fun Gemma3nApp() {
     ) { paddingValues ->
         Gemma3nNavigation(
             navController = navController,
+            geminiApiService = geminiApiService,
             modifier = Modifier.padding(paddingValues)
         )
     }
@@ -84,6 +103,7 @@ fun Gemma3nApp() {
 @Composable
 fun Gemma3nNavigation(
     navController: androidx.navigation.NavHostController,
+    geminiApiService: GeminiApiService,
     modifier: Modifier = Modifier
 ) {
     NavHost(
@@ -92,7 +112,7 @@ fun Gemma3nNavigation(
         modifier = modifier
     ) {
         composable("home") {
-            HomeScreen(navController)
+            HomeScreen(navController, geminiApiService)
         }
         composable("live_caption") {
             LiveCaptionScreen()
@@ -112,19 +132,53 @@ fun Gemma3nNavigation(
         composable("crisis_handbook") {
             CrisisHandbookScreen()
         }
+        composable("api_settings") {
+            ApiSettingsScreen(geminiApiService)
+        }
     }
 }
 
-// Home screen with asset pack download
+// Updated Home screen with Gemini API
 @Composable
-fun HomeScreen(navController: androidx.navigation.NavHostController) {
-    var downloadProgress by remember { mutableStateOf(0f) }
-    var isModelReady by remember { mutableStateOf(false) }
-    var isPreparingModel by remember { mutableStateOf(false) }
+fun HomeScreen(
+    navController: androidx.navigation.NavHostController,
+    geminiApiService: GeminiApiService
+) {
+    // Commented out local model states
+    // var downloadProgress by remember { mutableStateOf(0f) }
+    // var isModelReady by remember { mutableStateOf(false) }
+    // var isPreparingModel by remember { mutableStateOf(false) }
+
+    var isApiReady by remember { mutableStateOf(false) }
+    var isCheckingApi by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
 
-    // in MainActivity.kt, inside HomeScreen’s LaunchedEffect:
+    // Check API key on launch
+    LaunchedEffect(Unit) {
+        val apiKey = context.dataStore.data.map { it[API_KEY] }.first()
+        if (!apiKey.isNullOrBlank()) {
+            try {
+                geminiApiService.initialize(
+                    GeminiApiService.ApiConfig(
+                        apiKey = apiKey,
+                        modelName = GeminiApiService.GEMINI_FLASH_MODEL
+                    )
+                )
+                isApiReady = true
+                errorMessage = null
+            } catch (e: Exception) {
+                errorMessage = "Failed to initialize API: ${e.message}"
+                isApiReady = false
+            }
+        } else {
+            errorMessage = "API key not configured"
+            isApiReady = false
+        }
+        isCheckingApi = false
+    }
+
+    /* Commented out local model checking
     LaunchedEffect(Unit) {
         checkModelAvailability(context) { progress, ready, preparing, error ->
             downloadProgress = progress
@@ -133,7 +187,7 @@ fun HomeScreen(navController: androidx.navigation.NavHostController) {
             errorMessage    = error
         }
     }
-
+    */
 
     Column(
         modifier = Modifier
@@ -146,10 +200,23 @@ fun HomeScreen(navController: androidx.navigation.NavHostController) {
             style = MaterialTheme.typography.headlineLarge
         )
 
+        Text(
+            text = "(Powered by Gemini API)",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
         Spacer(modifier = Modifier.height(32.dp))
 
         // Show appropriate status
         when {
+            isCheckingApi -> {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text("Checking API configuration...")
+                Spacer(modifier = Modifier.height(16.dp))
+            }
             errorMessage != null -> {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -161,7 +228,7 @@ fun HomeScreen(navController: androidx.navigation.NavHostController) {
                         modifier = Modifier.padding(16.dp)
                     ) {
                         Text(
-                            "Error loading model:",
+                            "Configuration Issue:",
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
@@ -170,10 +237,17 @@ fun HomeScreen(navController: androidx.navigation.NavHostController) {
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        TextButton(
+                            onClick = { navController.navigate("api_settings") }
+                        ) {
+                            Text("Configure API Key")
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
             }
+            /* Commented out local model UI
             isPreparingModel -> {
                 LinearProgressIndicator(
                     modifier = Modifier.fillMaxWidth(),
@@ -189,12 +263,13 @@ fun HomeScreen(navController: androidx.navigation.NavHostController) {
                 Text("Downloading model: ${downloadProgress.toInt()}%")
                 Spacer(modifier = Modifier.height(16.dp))
             }
+            */
         }
 
         Button(
             onClick = { navController.navigate("live_caption") },
             modifier = Modifier.fillMaxWidth(),
-            enabled = isModelReady
+            enabled = isApiReady
         ) {
             Text("Live Caption & Translation")
         }
@@ -204,9 +279,9 @@ fun HomeScreen(navController: androidx.navigation.NavHostController) {
         Button(
             onClick = { navController.navigate("quiz_generator") },
             modifier = Modifier.fillMaxWidth(),
-            enabled = isModelReady
+            enabled = isApiReady
         ) {
-            Text("Offline Quiz Generator")
+            Text("Quiz Generator")
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -214,7 +289,7 @@ fun HomeScreen(navController: androidx.navigation.NavHostController) {
         Button(
             onClick = { navController.navigate("cbt_coach") },
             modifier = Modifier.fillMaxWidth(),
-            enabled = isModelReady
+            enabled = isApiReady
         ) {
             Text("Voice CBT Coach")
         }
@@ -224,7 +299,7 @@ fun HomeScreen(navController: androidx.navigation.NavHostController) {
         Button(
             onClick = { navController.navigate("plant_scanner") },
             modifier = Modifier.fillMaxWidth(),
-            enabled = isModelReady
+            enabled = isApiReady
         ) {
             Text("Plant Disease Scanner")
         }
@@ -234,20 +309,182 @@ fun HomeScreen(navController: androidx.navigation.NavHostController) {
         Button(
             onClick = { navController.navigate("crisis_handbook") },
             modifier = Modifier.fillMaxWidth(),
-            enabled = isModelReady
+            enabled = isApiReady
         ) {
             Text("Crisis Handbook")
         }
 
-        if (!isModelReady && !isPreparingModel) {
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // API Settings button
+        OutlinedButton(
+            onClick = { navController.navigate("api_settings") },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(
+                imageVector = Icons.Default.Settings,
+                contentDescription = "Settings"
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("API Settings")
+        }
+
+        if (!isApiReady && !isCheckingApi) {
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                "Model needs to be available before using features",
+                "Please configure your Gemini API key to use the features",
                 style = MaterialTheme.typography.bodySmall
             )
         }
     }
 }
+
+// New API Settings Screen
+@Composable
+fun ApiSettingsScreen(geminiApiService: GeminiApiService) {
+    var apiKey by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+    var validationMessage by remember { mutableStateOf<String?>(null) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    // Load existing API key
+    LaunchedEffect(Unit) {
+        context.dataStore.data.map { it[API_KEY] }.first()?.let {
+            apiKey = it
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        Text(
+            text = "API Configuration",
+            style = MaterialTheme.typography.headlineMedium
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "Enter your Gemini API key to enable all features",
+            style = MaterialTheme.typography.bodyMedium
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        OutlinedTextField(
+            value = apiKey,
+            onValueChange = { apiKey = it },
+            label = { Text("Gemini API Key") },
+            placeholder = { Text("AIza...") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            enabled = !isLoading
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = {
+                    isLoading = true
+                    validationMessage = null
+                    CoroutineScope(Dispatchers.IO).launch {
+                        try {
+                            if (geminiApiService.validateApiKey(apiKey)) {
+                                // Save API key
+                                context.dataStore.edit { settings ->
+                                    settings[API_KEY] = apiKey
+                                }
+                                withContext(Dispatchers.Main) {
+                                    validationMessage = "API key validated successfully!"
+                                }
+                            } else {
+                                withContext(Dispatchers.Main) {
+                                    validationMessage = "Invalid API key"
+                                }
+                            }
+                        } catch (e: Exception) {
+                            withContext(Dispatchers.Main) {
+                                validationMessage = "Error: ${e.message}"
+                            }
+                        } finally {
+                            withContext(Dispatchers.Main) {
+                                isLoading = false
+                            }
+                        }
+                    }
+                },
+                enabled = apiKey.isNotBlank() && !isLoading,
+                modifier = Modifier.weight(1f)
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                } else {
+                    Text("Save & Validate")
+                }
+            }
+
+            OutlinedButton(
+                onClick = {
+                    apiKey = ""
+                    CoroutineScope(Dispatchers.IO).launch {
+                        context.dataStore.edit { settings ->
+                            settings.remove(API_KEY)
+                        }
+                    }
+                    validationMessage = "API key cleared"
+                },
+                enabled = !isLoading
+            ) {
+                Text("Clear")
+            }
+        }
+
+        validationMessage?.let { message ->
+            Spacer(modifier = Modifier.height(16.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (message.contains("success", ignoreCase = true))
+                        MaterialTheme.colorScheme.secondaryContainer
+                    else
+                        MaterialTheme.colorScheme.errorContainer
+                )
+            ) {
+                Text(
+                    text = message,
+                    modifier = Modifier.padding(16.dp),
+                    color = if (message.contains("success", ignoreCase = true))
+                        MaterialTheme.colorScheme.onSecondaryContainer
+                    else
+                        MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text(
+            text = "Get your API key from:",
+            style = MaterialTheme.typography.bodySmall
+        )
+        Text(
+            text = "https://makersuite.google.com/app/apikey",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
+}
+
+
 
 @Composable
 fun CBTCoachScreen() {
@@ -259,22 +496,16 @@ fun CrisisHandbookScreen() {
     Text("Crisis Handbook Screen")
 }
 
+/* Commented out all local model checking code below */
+
+/*
 // Updated model availability check with error handling
-/**
- * Checks that every required .tflite (and metadata) file exists under
- * C:\Users\genya\Downloads\MyGemma3N\app\src\main\ml.
- *
- * Runs on a background thread and reports progress / status to
- * [onStatusUpdate].
- */
 fun checkModelAvailability(
-    /* ctx kept for signature compatibility, not used here */
     ctx: Context,
     onStatusUpdate: (progress: Float, ready: Boolean, preparing: Boolean, error: String?) -> Unit
 ) {
     CoroutineScope(Dispatchers.IO).launch {
         try {
-            /* absolute or project-relative root – adjust if you move the project */
             val root = File("C:\\Users\\genya\\Downloads\\MyGemma3N")
 
             val requiredPaths = listOf(
@@ -291,7 +522,7 @@ fun checkModelAvailability(
             }
 
             if (missing.isEmpty()) {
-                onStatusUpdate(100f, true, false, null)          // all files present
+                onStatusUpdate(100f, true, false, null)
             } else {
                 onStatusUpdate(
                     0f, false, false,
@@ -307,10 +538,6 @@ fun checkModelAvailability(
     }
 }
 
-
-
-
-// ---- checkAssetModel -------------------------------------------------
 private fun checkAssetModel(ctx: Context): Boolean = try {
     val dir = "models"
     ctx.assets.list(dir)?.any {
@@ -321,8 +548,6 @@ private fun checkAssetModel(ctx: Context): Boolean = try {
     false
 }
 
-// Copy model from assets to cache
-// ---- copyAssetModelToCache ------------------------------------------
 private suspend fun copyAssetModelToCache(ctx: Context): String? = withContext(Dispatchers.IO) {
     val names = listOf("gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
     for (name in names) {
@@ -334,173 +559,11 @@ private suspend fun copyAssetModelToCache(ctx: Context): String? = withContext(D
                 }
             }
             return@withContext cacheFile.absolutePath
-        } catch (_: Exception) { /* try next */ }
+        } catch (_: Exception) { }
     }
     Timber.e("No model found in assets")
     null
 }
 
-// Check if Google Play Services is available
-private fun isPlayStoreAvailable(context: Context): Boolean {
-    return try {
-        // Check if we can access Google Play services
-        val packageInfo = context.packageManager.getPackageInfo("com.android.vending", 0)
-        packageInfo != null
-    } catch (e: Exception) {
-        false
-    }
-}
-
-// Original Google Play asset pack download (with error handling)
-fun checkAndDownloadFromPlay(
-    context: Context,
-    onProgressUpdate: (progress: Float, ready: Boolean) -> Unit
-) {
-    val assetPackManager = AssetPackManagerFactory.getInstance(context)
-    val packName = "gemma3n_assetpack"
-
-    CoroutineScope(Dispatchers.IO).launch {
-        try {
-            // Check if already installed
-            val packStates = assetPackManager.getPackStates(listOf(packName)).await()
-            val packState = packStates.packStates()[packName]
-
-            when (packState?.status()) {
-                AssetPackStatus.COMPLETED -> {
-                    onProgressUpdate(100f, true)
-                    Timber.d("Asset pack already installed")
-                }
-                AssetPackStatus.DOWNLOADING -> {
-                    // Monitor download progress
-                    monitorDownload(assetPackManager, packName) { progress, ready ->
-                        onProgressUpdate(progress, ready)
-                    }
-                }
-                else -> {
-                    // Start download
-                    startDownload(assetPackManager, packName) { progress, ready ->
-                        onProgressUpdate(progress, ready)
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Timber.e(e, "Asset pack not available, falling back to bundled model")
-            // Don't fail, just use bundled model
-            onProgressUpdate(100f, checkAssetModel(context))
-        }
-    }
-}
-
-private fun startDownload(
-    assetPackManager: AssetPackManager,
-    packName: String,
-    onProgressUpdate: (progress: Float, ready: Boolean) -> Unit
-) {
-    // Create listener for updates
-    lateinit var listener: AssetPackStateUpdateListener
-    listener = AssetPackStateUpdateListener { state ->
-        when (state.status()) {
-            AssetPackStatus.DOWNLOADING -> {
-                val progress = if (state.totalBytesToDownload() > 0) {
-                    (state.bytesDownloaded() * 100f / state.totalBytesToDownload())
-                } else 0f
-                onProgressUpdate(progress, false)
-                Timber.d("Downloading: $progress%")
-            }
-            AssetPackStatus.COMPLETED -> {
-                onProgressUpdate(100f, true)
-                Timber.d("Download completed")
-                assetPackManager.unregisterListener(listener)
-            }
-            AssetPackStatus.FAILED -> {
-                onProgressUpdate(0f, false)
-                Timber.e("Download failed: ${state.errorCode()}")
-                assetPackManager.unregisterListener(listener)
-            }
-            else -> {
-                Timber.d("Status: ${state.status()}")
-            }
-        }
-    }
-
-    // Register listener and start download
-    assetPackManager.registerListener(listener)
-    assetPackManager.fetch(listOf(packName))
-}
-
-private fun monitorDownload(
-    assetPackManager: AssetPackManager,
-    packName: String,
-    onProgressUpdate: (progress: Float, ready: Boolean) -> Unit
-) {
-    lateinit var listener: AssetPackStateUpdateListener
-    listener = AssetPackStateUpdateListener { state ->
-        if (state.name() == packName) {
-            when (state.status()) {
-                AssetPackStatus.DOWNLOADING -> {
-                    val progress = if (state.totalBytesToDownload() > 0) {
-                        (state.bytesDownloaded() * 100f / state.totalBytesToDownload())
-                    } else 0f
-                    onProgressUpdate(progress, false)
-                }
-                AssetPackStatus.COMPLETED -> {
-                    onProgressUpdate(100f, true)
-                    assetPackManager.unregisterListener(listener)
-                }
-                AssetPackStatus.FAILED -> {
-                    onProgressUpdate(0f, false)
-                    assetPackManager.unregisterListener(listener)
-                }
-            }
-        }
-    }
-
-    assetPackManager.registerListener(listener)
-}
-
-// ---- getModelFilePath -----------------------------------------------
-fun getModelFilePath(ctx: Context): String? {
-    val pack = AssetPackManagerFactory.getInstance(ctx)
-        .getPackLocation("gemma3n_assetpack")
-    pack?.assetsPath()?.let { base ->
-        File(base, "gemma-3n-E4B-it-int4.task").takeIf { it.exists() }?.let { return it.path }
-    }
-    listOf("gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task").forEach { name ->
-        File(ctx.cacheDir, name).takeIf { it.exists() }?.let { return it.path }
-    }
-    return null
-}
-
-// FIXED: Better error handling for large model extraction
-suspend fun ensureLargeModelOnDisk(ctx: Context): String = withContext(Dispatchers.IO) {
-    val target = File(ctx.cacheDir, "gemma-3n-E2B-it-int4.task")
-    if (target.exists()) return@withContext target.path          // already done
-
-    try {
-        val modelParts = ctx.assets.list("models")!!
-            .filter { it.startsWith("gemma-3n-E2B-it-int4.part") }
-            .sorted()                                               // part0, part1, …
-
-        if (modelParts.isEmpty()) {
-            throw IllegalStateException("No model parts found in assets/models/")
-        }
-
-        Timber.d("Found ${modelParts.size} model parts to concatenate")
-
-        // Use append mode to avoid keeping everything in memory
-        target.outputStream().use { output ->
-            modelParts.forEach { partName ->
-                Timber.d("Processing $partName...")
-                ctx.assets.open("models/$partName").use { input ->
-                    input.copyTo(output)
-                }
-            }
-        }
-
-        Timber.i("Model assembled successfully at ${target.absolutePath}")
-        target.path
-    } catch (e: Exception) {
-        Timber.e(e, "Failed to assemble model from parts")
-        throw e
-    }
-}
+// ... rest of the commented local model code ...
+*/

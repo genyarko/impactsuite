@@ -1,11 +1,9 @@
 package com.example.mygemma3n.di
 
-
 import android.content.Context
 import androidx.room.Room
 import androidx.work.WorkManager
-import com.example.mygemma3n.data.ModelDownloadManager
-import com.example.mygemma3n.data.ModelRepository
+import com.example.mygemma3n.data.*
 import com.example.mygemma3n.data.local.*
 import com.example.mygemma3n.data.local.dao.SubjectDao
 import com.example.mygemma3n.feature.caption.AudioCapture
@@ -35,226 +33,181 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import javax.inject.Singleton
 
-
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule {
 
-    @Provides
-    @Singleton
-    fun provideApplicationScope(): CoroutineScope {
-        return CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    }
+    /* ------------------------------------------------------------------ *
+     * Core singletons                                                    *
+     * ------------------------------------------------------------------ */
+    @Provides @Singleton
+    fun provideApplicationScope(): CoroutineScope =
+        CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    @Provides
-    @Singleton
-    fun provideGson(): Gson = Gson()
+    @Provides @Singleton fun provideGson(): Gson = Gson()
 
-    @Provides
-    @Singleton
+    @Provides @Singleton
     fun provideFirebaseAnalytics(): FirebaseAnalytics = Firebase.analytics
 
+    @Provides @Singleton
+    fun provideWorkManager(@ApplicationContext ctx: Context): WorkManager =
+        WorkManager.getInstance(ctx)
 
-    // Databases
-    @Provides
-    @Singleton
-    fun provideAppDatabase(
-        @ApplicationContext context: Context
-    ): AppDatabase {
-        return Room.databaseBuilder(
-            context,
-            AppDatabase::class.java,
-            "vector_database"
-        ).fallbackToDestructiveMigration()
-            .build()
-    }
-
-    @Provides
-    @Singleton
-    fun provideSubjectDao(db: AppDatabase): SubjectDao = db.subjectDao()
-
-
-    @Provides
-    @Singleton
-    fun provideVectorDatabase(
-        appDatabase: AppDatabase
-    ): VectorDatabase = VectorDatabase(appDatabase)
-
-    @Provides
-    @Singleton
-    fun provideEmergencyDatabase(
-        @ApplicationContext context: Context
-    ): EmergencyDatabase = EmergencyDatabase.getInstance(context)
-
-    @Provides
-    @Singleton
-    fun provideCBTDatabase(
-        @ApplicationContext context: Context
-    ): CBTDatabase {
-        return Room.databaseBuilder(
-            context,
-            CBTDatabase::class.java,
-            "cbt_database"
-        )
+    /* ------------------------------------------------------------------ *
+     * Databases                                                          *
+     * ------------------------------------------------------------------ */
+    @Provides @Singleton
+    fun provideAppDatabase(@ApplicationContext ctx: Context): AppDatabase =
+        Room.databaseBuilder(ctx, AppDatabase::class.java, "vector_database")
             .fallbackToDestructiveMigration()
             .build()
-    }
 
-    @Provides
-    @Singleton
-    fun providePlantDatabase(
-        @ApplicationContext context: Context
-    ): PlantDatabase {
-        return Room.databaseBuilder(
-            context,
-            PlantDatabase::class.java,
-            "plant_database"
-        )
+    @Provides @Singleton fun provideSubjectDao(db: AppDatabase): SubjectDao = db.subjectDao()
+
+    @Provides @Singleton
+    fun provideVectorDatabase(db: AppDatabase): VectorDatabase = VectorDatabase(db)
+
+    @Provides @Singleton
+    fun provideEmergencyDatabase(@ApplicationContext ctx: Context): EmergencyDatabase =
+        EmergencyDatabase.getInstance(ctx)
+
+    @Provides @Singleton
+    fun provideCBTDatabase(@ApplicationContext ctx: Context): CBTDatabase =
+        Room.databaseBuilder(ctx, CBTDatabase::class.java, "cbt_database")
+            .fallbackToDestructiveMigration()
+            .build()
+
+    @Provides @Singleton
+    fun providePlantDatabase(@ApplicationContext ctx: Context): PlantDatabase =
+        Room.databaseBuilder(ctx, PlantDatabase::class.java, "plant_database")
             .fallbackToDestructiveMigration()
             .addCallback(object : androidx.room.RoomDatabase.Callback() {
                 override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                     super.onCreate(db)
-                    // Prepopulate plant data
+                    // Pre-populate plant data here if desired
                 }
             })
             .build()
-    }
 
-    @Provides
-    @Singleton
-    fun provideQuizDatabase(
-        @ApplicationContext context: Context
-    ): QuizDatabase {
-        return Room.databaseBuilder(
-            context,
-            QuizDatabase::class.java,
-            "quiz_database"
-        )
+    @Provides @Singleton
+    fun provideQuizDatabase(@ApplicationContext ctx: Context): QuizDatabase =
+        Room.databaseBuilder(ctx, QuizDatabase::class.java, "quiz_database")
             .fallbackToDestructiveMigration()
             .build()
-    }
 
-    // Repositories
-    @Provides
-    @Singleton
-    fun provideModelRepository(
-        @ApplicationContext context: Context
-    ): ModelRepository = ModelRepository(context)
+    /* ------------------------------------------------------------------ *
+     * Repositories & managers                                            *
+     * ------------------------------------------------------------------ */
+    @Provides @Singleton
+    fun provideModelRepository(@ApplicationContext ctx: Context): ModelRepository =
+        ModelRepository(ctx)
 
-    @Provides
-    @Singleton
+    @Provides @Singleton
     fun provideModelDownloadManager(
-        @ApplicationContext context: Context,
+        @ApplicationContext ctx: Context,
         workManager: WorkManager,
         modelRepository: ModelRepository
-    ): ModelDownloadManager = ModelDownloadManager(context, workManager, modelRepository)
+    ): ModelDownloadManager = ModelDownloadManager(ctx, workManager, modelRepository)
 
-    @Provides
-    @Singleton
-    fun provideSessionRepository(
-        cbtDatabase: CBTDatabase
-    ): SessionRepository = SessionRepository(cbtDatabase)
+    @Provides @Singleton
+    fun provideSessionRepository(db: CBTDatabase): SessionRepository =
+        SessionRepository(db)
 
-    @Provides
-    @Singleton
-    fun provideEducationalContentRepository(
-        quizDatabase: QuizDatabase
-    ): EducationalContentRepository = EducationalContentRepository(quizDatabase)
+    @Provides @Singleton
+    fun provideEducationalContentRepository(db: QuizDatabase): EducationalContentRepository =
+        EducationalContentRepository(db)
 
-    @Provides
-    @Singleton
-    fun provideQuizRepository(
-        quizDatabase: QuizDatabase,
-        gson: Gson
-    ): QuizRepository = QuizRepository(quizDatabase, gson)
+    @Provides @Singleton
+    fun provideQuizRepository(db: QuizDatabase, gson: Gson): QuizRepository =
+        QuizRepository(db, gson)
 
-    // Gemma Engine and Model Manager
-    @Provides
-    @Singleton
-    fun provideGemmaEngine(
-        @ApplicationContext context: Context,
-        performanceMonitor: PerformanceMonitor
-    ): GemmaEngine = GemmaEngine(context, performanceMonitor)
+    /* ------------------------------------------------------------------ *
+     * Gemini / Gemma                                                     *
+     * ------------------------------------------------------------------ */
+    @Provides @Singleton
+    fun provideGeminiApiService(@ApplicationContext ctx: Context): GeminiApiService =
+        GeminiApiService(ctx)
 
-    @Provides
-    @Singleton
-    fun provideGemmaModelManager(
-        @ApplicationContext context: Context,
-        modelRepository: ModelRepository,
-        performanceMonitor: PerformanceMonitor
-    ): GemmaModelManager = GemmaModelManager(context, modelRepository, performanceMonitor)
-
-    // Shared Utilities
-    @Provides
-    @Singleton
+    @Provides @Singleton
     fun providePerformanceMonitor(
-        @ApplicationContext context: Context,
+        @ApplicationContext ctx: Context,
         firebaseAnalytics: FirebaseAnalytics,
         scope: CoroutineScope
-    ): PerformanceMonitor = PerformanceMonitor(context, firebaseAnalytics, scope)
+    ): PerformanceMonitor = PerformanceMonitor(ctx, firebaseAnalytics, scope)
 
+    @Provides @Singleton
+    fun provideGemmaModelManager(
+        @ApplicationContext ctx: Context,
+        modelRepository: ModelRepository,
+        performanceMonitor: PerformanceMonitor,
+        geminiApiService: GeminiApiService
+    ): GemmaModelManager =
+        GemmaModelManager(ctx, modelRepository, performanceMonitor, geminiApiService)
+
+    /*  ── If your code still relies on the on-device Gemma engine, keep this. ── */
+//    @Provides @Singleton
+//    fun provideGemmaEngine(
+//        @ApplicationContext ctx: Context,
+//        performanceMonitor: PerformanceMonitor
+//    ): GemmaEngine = GemmaEngine(ctx, performanceMonitor)
+
+    /* ------------------------------------------------------------------ *
+     * Shared utilities                                                   *
+     * ------------------------------------------------------------------ */
     @Provides
     @Singleton
     fun provideMultimodalProcessor(
-        modelManager: GemmaModelManager
-    ): MultimodalProcessor = MultimodalProcessor(modelManager)
+        modelManager: GemmaModelManager,
+        geminiApiService: GeminiApiService      // ← add this
+    ): MultimodalProcessor =
+        MultimodalProcessor(modelManager, geminiApiService)
 
-    @Provides
-    @Singleton
+
+    @Provides @Singleton
     fun provideSubjectRepository(dao: SubjectDao): SubjectRepository =
         SubjectRepository(dao)
-
-
-
 
     @Provides
     @Singleton
     fun provideOfflineRAG(
         vectorDatabase: VectorDatabase,
         subjectRepository: SubjectRepository,
-        modelManager: GemmaModelManager
-    ): OfflineRAG = OfflineRAG(vectorDatabase, subjectRepository, modelManager)
+        modelManager: GemmaModelManager,
+        geminiApiService: GeminiApiService  // NEW
+    ): OfflineRAG = OfflineRAG(vectorDatabase, subjectRepository, modelManager, geminiApiService)
 
 
-    @Provides
-    @Singleton
-    fun provideCrisisFunctionCalling(
-        @ApplicationContext context: Context,
-        locationService: LocationService,
-        emergencyDatabase: EmergencyDatabase,
-        gemmaEngine: GemmaEngine
-    ): CrisisFunctionCalling = CrisisFunctionCalling(
-        context,
-        locationService,
-        emergencyDatabase,
-        gemmaEngine
-    )
+    /* ------------------------------------------------------------------ *
+     * Crisis & location                                                  *
+     * ------------------------------------------------------------------ */
+    @Provides @Singleton
+    fun provideLocationService(@ApplicationContext ctx: Context): LocationService =
+        LocationService(ctx)
 
-    // Feature-specific services
-
-
-
-
-    @Provides
-    @Singleton
-    fun provideLocationService(
-        @ApplicationContext context: Context
-    ): LocationService = LocationService(context)
-
-    @Provides
-    @Singleton
+    @Provides @Singleton
     fun provideEmergencyContactsRepository(): EmergencyContactsRepository =
         EmergencyContactsRepository()
 
-    @Provides
-    @Singleton
+    @Provides @Singleton
     fun provideOfflineMapService(): OfflineMapService = OfflineMapService()
 
-    @Provides
-    @Singleton
+    @Provides @Singleton
     fun provideEmotionDetector(): EmotionDetector = EmotionDetector()
 
-    @Provides
-    @Singleton
+    @Provides @Singleton
     fun provideCBTTechniques(): CBTTechniques = CBTTechniques()
+
+    @Provides @Singleton
+    fun provideCrisisFunctionCalling(
+        @ApplicationContext ctx: Context,
+        locationService: LocationService,
+        emergencyDatabase: EmergencyDatabase,
+        gemmaEngine: GemmaEngine
+    ): CrisisFunctionCalling =
+        CrisisFunctionCalling(ctx, locationService, emergencyDatabase, gemmaEngine)
+
+    /* ------------------------------------------------------------------ *
+     * (Feature-specific providers such as AudioCapture, TranslationCache *
+     *  etc. can be added here when needed.)                              *
+     * ------------------------------------------------------------------ */
 }
