@@ -117,12 +117,12 @@ class QuizGeneratorViewModel @Inject constructor(
 
 
     private val REQUIRED_SHARDS = listOf(
-        "TF_LITE_EMBEDDER.tflite",
-        "TF_LITE_PER_LAYER_EMBEDDER.tflite",
-        "TF_LITE_PREFILL_DECODE.tflite",
-        "TF_LITE_VISION_ADAPTER.tflite",
-        "TF_LITE_VISION_ENCODER.tflite",
-        "TOKENIZER_MODEL.tflite",
+        "TF_LITE_EMBEDDER.tflite.tflite",
+        "TF_LITE_PER_LAYER_EMBEDDER.tflite.tflite",
+        "TF_LITE_PREFILL_DECODE.tflite.tflite",
+        "TF_LITE_VISION_ADAPTER.tflite.tflite",
+        "TF_LITE_VISION_ENCODER.tflite.tflite",
+        "TOKENIZER_MODEL.tflite.tflite",
         "METADATA"
     )
 

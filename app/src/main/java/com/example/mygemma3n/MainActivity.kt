@@ -260,38 +260,54 @@ fun CrisisHandbookScreen() {
 }
 
 // Updated model availability check with error handling
+/**
+ * Checks that every required .tflite (and metadata) file exists under
+ * C:\Users\genya\Downloads\MyGemma3N\app\src\main\ml.
+ *
+ * Runs on a background thread and reports progress / status to
+ * [onStatusUpdate].
+ */
 fun checkModelAvailability(
+    /* ctx kept for signature compatibility, not used here */
     ctx: Context,
     onStatusUpdate: (progress: Float, ready: Boolean, preparing: Boolean, error: String?) -> Unit
 ) {
     CoroutineScope(Dispatchers.IO).launch {
         try {
-            // Always ready if all .tflite shards are in assets/models/
-            val assetsDir = "models"
-            val needed = listOf(
-                "TF_LITE_EMBEDDER.tflite",
-                "TF_LITE_PER_LAYER_EMBEDDER.tflite",
-                "TF_LITE_PREFILL_DECODE.tflite",
-                "TF_LITE_VISION_ADAPTER.tflite",
-                "TF_LITE_VISION_ENCODER.tflite",
-                "TOKENIZER_MODEL.tflite"
+            /* absolute or project-relative root – adjust if you move the project */
+            val root = File("C:\\Users\\genya\\Downloads\\MyGemma3N")
+
+            val requiredPaths = listOf(
+                "app/src/main/ml/TF_LITE_EMBEDDER.tflite",
+                "app/src/main/ml/TF_LITE_PER_LAYER_EMBEDDER.tflite",
+                "app/src/main/ml/TF_LITE_PREFILL_DECODE.tflite",
+                "app/src/main/ml/TF_LITE_VISION_ADAPTER.tflite",
+                "app/src/main/ml/TF_LITE_VISION_ENCODER.tflite",
+                "app/src/main/ml/TOKENIZER_MODEL.tflite"
             )
-            val available = ctx.assets.list(assetsDir)?.toList() ?: emptyList()
-            val missing = needed.filterNot { available.contains(it) }
+
+            val missing = requiredPaths.filterNot { rel ->
+                File(root, rel).exists()
+            }
 
             if (missing.isEmpty()) {
-                onStatusUpdate(100f, true, false, null)  // ready
+                onStatusUpdate(100f, true, false, null)          // all files present
             } else {
                 onStatusUpdate(
                     0f, false, false,
-                    "Missing assets: ${missing.joinToString()}"
+                    "Missing model files:\n${missing.joinToString("\n")}"
                 )
             }
         } catch (e: Exception) {
-            onStatusUpdate(0f, false, false, "Error checking assets: ${e.message}")
+            onStatusUpdate(
+                0f, false, false,
+                "Error checking model files: ${e.localizedMessage}"
+            )
         }
     }
 }
+
+
 
 
 // ---- checkAssetModel -------------------------------------------------

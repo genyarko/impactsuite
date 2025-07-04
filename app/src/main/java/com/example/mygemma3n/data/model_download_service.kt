@@ -145,7 +145,7 @@ class ModelRepository @Inject constructor(
         type: String,
         checksum: String? = null
     ): ModelInfo = withContext(Dispatchers.IO) {
-        val targetFile = File(modelsDir, "$name.tflite")
+        val targetFile = File(modelsDir, name)
         file.copyTo(targetFile, overwrite = true)
 
         val modelInfo = ModelInfo(
@@ -178,12 +178,12 @@ class ModelRepository @Inject constructor(
     }
 
     fun getModelPath(name: String): String? {
-        val modelFile = File(modelsDir, "$name.tflite")
+        val modelFile = File(modelsDir, name)
         return if (modelFile.exists()) modelFile.absolutePath else null
     }
 
     fun isModelDownloaded(name: String): Boolean {
-        return File(modelsDir, "$name.tflite").exists()
+        return File(modelsDir, name).exists()
     }
 
     fun getAvailableModels(): List<ModelInfo> {
@@ -211,7 +211,7 @@ class ModelRepository @Inject constructor(
     }
 
     fun getModelSize(name: String): Long {
-        val modelFile = File(modelsDir, "$name.tflite")
+        val modelFile = File(modelsDir, name)
         return if (modelFile.exists()) modelFile.length() else 0L
     }
 
