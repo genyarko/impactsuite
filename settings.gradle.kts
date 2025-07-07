@@ -24,15 +24,6 @@ dependencyResolutionManagement {
 rootProject.name = "ImpactSuite"
 
 include(":app")
-include(":edge_ai")
-include(":data")
-include(":feature_caption")
-include(":feature_quiz")
-include(":feature_cbt")
-include(":feature_plant")
-include(":feature_crisis")
-include(":common_ui")
-include(":common_utils")
 
 
 

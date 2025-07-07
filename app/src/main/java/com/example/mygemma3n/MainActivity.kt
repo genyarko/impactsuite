@@ -25,11 +25,8 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import androidx.datastore.preferences.preferencesDataStore
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.core.DataStore
 import com.example.mygemma3n.data.GeminiApiService
 import com.example.mygemma3n.data.validateApiKey
 import com.example.mygemma3n.feature.caption.LiveCaptionScreen
@@ -37,19 +34,19 @@ import com.example.mygemma3n.feature.quiz.QuizScreen
 import com.example.mygemma3n.feature.cbt.CBTCoachScreen
 import com.example.mygemma3n.feature.plant.PlantScannerScreen
 import com.example.mygemma3n.feature.crisis.CrisisHandbookScreen
-
 import com.example.mygemma3n.ui.theme.Gemma3nTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import androidx.compose.foundation.background
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.mygemma3n.feature.caption.SpeechRecognitionService
+import dagger.hilt.android.EntryPointAccessors
+import com.example.mygemma3n.di.SpeechRecognitionServiceEntryPoint
 
-// DataStore extension
 
-// DataStore keys
 val API_KEY = stringPreferencesKey("gemini_api_key")
 val MAPS_API_KEY = stringPreferencesKey("google_maps_api_key")
 
@@ -145,7 +142,17 @@ fun Gemma3nNavigation(
             CrisisHandbookScreen()
         }
         composable("api_settings") {
-            ApiSettingsScreen(geminiApiService)
+            val context = LocalContext.current
+            val speechService = remember {
+                EntryPointAccessors.fromApplication(
+                    context.applicationContext,
+                    SpeechRecognitionServiceEntryPoint::class.java
+                ).speechRecognitionService()
+            }
+            ApiSettingsScreen(
+                geminiApiService = geminiApiService,
+                speechService = speechService
+            )
         }
     }
 }
@@ -320,11 +327,16 @@ fun HomeScreen(
     }
 }
 
-// Updated API Settings Screen with both API keys
+
+
 @Composable
-fun ApiSettingsScreen(geminiApiService: GeminiApiService) {
+fun ApiSettingsScreen(
+    geminiApiService: GeminiApiService,
+    speechService: SpeechRecognitionService // <-- Inject this!
+) {
     var apiKey by remember { mutableStateOf("") }
     var mapsApiKey by remember { mutableStateOf("") }
+    var speechApiKey by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     var validationMessage by remember { mutableStateOf<String?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -336,6 +348,9 @@ fun ApiSettingsScreen(geminiApiService: GeminiApiService) {
         }
         context.dataStore.data.map { it[MAPS_API_KEY] }.first()?.let {
             mapsApiKey = it
+        }
+        context.dataStore.data.map { it[SPEECH_API_KEY] }.first()?.let {
+            speechApiKey = it
         }
     }
 
@@ -366,7 +381,22 @@ fun ApiSettingsScreen(geminiApiService: GeminiApiService) {
             placeholder = { Text("AIza...") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
-            enabled = !isLoading
+            enabled = !isLoading,
+            supportingText = { Text("Required for AI features") }
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Google Cloud Speech API Key
+        OutlinedTextField(
+            value = speechApiKey,
+            onValueChange = { speechApiKey = it },
+            label = { Text("Google Cloud Speech API Key") },
+            placeholder = { Text("AIza...") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            enabled = !isLoading,
+            supportingText = { Text("Required for Live Caption audio transcription") }
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -396,18 +426,37 @@ fun ApiSettingsScreen(geminiApiService: GeminiApiService) {
                     CoroutineScope(Dispatchers.IO).launch {
                         try {
                             var allValid = true
-                            var messages = mutableListOf<String>()
+                            val messages = mutableListOf<String>()
 
                             // Validate Gemini API key
                             if (apiKey.isNotBlank()) {
                                 if (geminiApiService.validateApiKey(apiKey)) {
-                                    // Save API key
                                     context.dataStore.edit { settings ->
                                         settings[API_KEY] = apiKey
                                     }
                                     messages.add("✓ Gemini API key validated")
                                 } else {
                                     messages.add("✗ Invalid Gemini API key")
+                                    allValid = false
+                                }
+                            }
+
+                            // Save Speech API key and initialize SpeechRecognitionService
+                            if (speechApiKey.isNotBlank()) {
+                                if (speechApiKey.startsWith("AIza") && speechApiKey.length > 20) {
+                                    context.dataStore.edit { settings ->
+                                        settings[SPEECH_API_KEY] = speechApiKey
+                                    }
+                                    // Initialize the speech service with this API key
+                                    try {
+                                        speechService.initializeWithApiKey(speechApiKey)
+                                        messages.add("✓ Speech API key saved & initialized")
+                                    } catch (e: Exception) {
+                                        messages.add("✗ Failed to initialize SpeechRecognitionService: ${e.message}")
+                                        allValid = false
+                                    }
+                                } else {
+                                    messages.add("✗ Invalid Speech API key format")
                                     allValid = false
                                 }
                             }
@@ -434,7 +483,7 @@ fun ApiSettingsScreen(geminiApiService: GeminiApiService) {
                         }
                     }
                 },
-                enabled = (apiKey.isNotBlank() || mapsApiKey.isNotBlank()) && !isLoading,
+                enabled = (apiKey.isNotBlank() || mapsApiKey.isNotBlank() || speechApiKey.isNotBlank()) && !isLoading,
                 modifier = Modifier.weight(1f)
             ) {
                 if (isLoading) {
@@ -451,10 +500,12 @@ fun ApiSettingsScreen(geminiApiService: GeminiApiService) {
                 onClick = {
                     apiKey = ""
                     mapsApiKey = ""
+                    speechApiKey = ""
                     CoroutineScope(Dispatchers.IO).launch {
                         context.dataStore.edit { settings ->
                             settings.remove(API_KEY)
                             settings.remove(MAPS_API_KEY)
+                            settings.remove(SPEECH_API_KEY)
                         }
                     }
                     validationMessage = "API keys cleared"
@@ -495,20 +546,92 @@ fun ApiSettingsScreen(geminiApiService: GeminiApiService) {
 
         Text(
             text = "Get your API keys from:",
-            style = MaterialTheme.typography.bodySmall
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Medium
         )
-        Text(
-            text = "Gemini: https://makersuite.google.com/app/apikey",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.primary
-        )
-        Text(
-            text = "Maps: https://console.cloud.google.com/",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.primary
-        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top
+            ) {
+                Text(
+                    text = "Gemini: ",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = "https://makersuite.google.com/app/apikey",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top
+            ) {
+                Text(
+                    text = "Speech: ",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = "https://console.cloud.google.com/apis/library/speech.googleapis.com",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top
+            ) {
+                Text(
+                    text = "Maps: ",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = "https://console.cloud.google.com/",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(12.dp)
+            ) {
+                Text(
+                    text = "Note for Speech API:",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = "Enable the Cloud Speech-to-Text API in your Google Cloud Console and create an API key with Speech-to-Text permissions.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            }
+        }
     }
 }
+
 
 @Composable
 fun CBTCoachScreen() {

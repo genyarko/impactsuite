@@ -7,6 +7,7 @@ import com.example.mygemma3n.data.*
 import com.example.mygemma3n.data.local.*
 import com.example.mygemma3n.data.local.dao.SubjectDao
 import com.example.mygemma3n.feature.caption.AudioCapture
+import com.example.mygemma3n.feature.caption.SpeechRecognitionService
 import com.example.mygemma3n.feature.caption.TranslationCache
 import com.example.mygemma3n.feature.cbt.*
 import com.example.mygemma3n.feature.crisis.EmergencyContactsRepository
@@ -212,6 +213,16 @@ object AppModule {
             geminiApiService
         )
     }
+
+    /* ------------------------------------------------------------------ *
+     * Caption                                                         *
+     * ------------------------------------------------------------------ */
+
+    @Provides
+    @Singleton
+    fun provideSpeechRecognitionService(
+        @ApplicationContext context: Context
+    ): SpeechRecognitionService = SpeechRecognitionService(context)
 
     /* ------------------------------------------------------------------ *
      * Cbt                          *

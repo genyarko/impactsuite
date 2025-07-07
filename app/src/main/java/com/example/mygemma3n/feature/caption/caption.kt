@@ -140,17 +140,23 @@ class AudioCapture @Inject constructor(
         isRecording = false
         audioRecord?.apply {
             try {
-                if (state == AudioRecord.STATE_INITIALIZED) {
+                if (state == AudioRecord.STATE_INITIALIZED && recordingState == AudioRecord.RECORDSTATE_RECORDING) {
                     stop()
                 }
+            } catch (e: IllegalStateException) {
+                // AudioRecord already stopped, ignore
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            try {
                 release()
             } catch (e: Exception) {
-                // Log error but don't throw, as we're cleaning up
                 e.printStackTrace()
             }
         }
         audioRecord = null
     }
+
 }
 
 // Translation cache

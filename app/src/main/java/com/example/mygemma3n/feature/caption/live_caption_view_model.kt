@@ -16,7 +16,8 @@ import javax.inject.Inject
 class LiveCaptionViewModel @Inject constructor(
     application: Application,
     private val gemmaEngine: GemmaEngine,
-    private val translationCache: TranslationCache
+    private val translationCache: TranslationCache,
+    private val speechService: SpeechRecognitionService // <-- Inject the speech-to-text service
 ) : AndroidViewModel(application) {
 
     private val _captionState = MutableStateFlow(CaptionState())
@@ -76,43 +77,44 @@ class LiveCaptionViewModel @Inject constructor(
     }
 
     private fun startProcessingAudio() {
+        // Check if speech service is initialized BEFORE starting
+        if (!speechService.isInitialized) {
+            _captionState.update {
+                it.copy(
+                    error = "Speech-to-text service is not initialized. Please open API Settings and enter a valid Speech API key."
+                )
+            }
+            return
+        }
+
         audioProcessingJob = viewModelScope.launch {
-            AudioCaptureService.audioDataFlow
-                .filterNotNull()
-                .chunked(1600) // Process in 100ms chunks (16kHz * 0.1s)
-                .transform { audioChunk ->
-                    val startTime = System.currentTimeMillis()
+            _captionState.update { it.copy(error = null) }
 
-                    // Process audio through Gemma for transcription
-                    val transcript = processAudioChunk(audioChunk)
-
-                    if (transcript.isNotEmpty()) {
-                        emit(transcript)
-
-                        val latency = System.currentTimeMillis() - startTime
-                        _captionState.update { it.copy(latencyMs = latency) }
+            speechService
+                .transcribeAudioStream(
+                    AudioCaptureService.audioDataFlow.filterNotNull(),
+                    _captionState.value.sourceLanguage.toGoogleLanguageCode()
+                )
+                .catch { e ->
+                    _captionState.update { it.copy(error = "Transcription error: ${e.message}") }
+                }
+                .collect { result ->
+                    _captionState.update { state ->
+                        state.copy(
+                            currentTranscript = result.transcript,
+                            // You can set latencyMs if you compute it elsewhere
+                            error = null
+                        )
                     }
-                }
-                .scan("") { acc, newText ->
-                    // Keep last 500 characters for context
-                    val combined = acc + " " + newText
-                    if (combined.length > 500) {
-                        combined.takeLast(500)
-                    } else {
-                        combined
-                    }.trim()
-                }
-                .collect { transcript ->
-                    _captionState.update { it.copy(currentTranscript = transcript) }
-
-                    // Translate if needed
-                    if (_captionState.value.targetLanguage != _captionState.value.sourceLanguage &&
-                        _captionState.value.sourceLanguage != Language.AUTO) {
-                        translateText(transcript)
+                    val state = _captionState.value
+                    // Auto-translate if needed
+                    if (state.targetLanguage != state.sourceLanguage && state.sourceLanguage != Language.AUTO) {
+                        translateText(result.transcript)
                     }
                 }
         }
     }
+
 
     private fun stopProcessingAudio() {
         audioProcessingJob?.cancel()
@@ -146,34 +148,6 @@ class LiveCaptionViewModel @Inject constructor(
         }
     }
 
-    private suspend fun processAudioChunk(audioChunk: FloatArray): String {
-        // In production, this would use Gemma's audio processing capabilities
-        // For now, we'll use a simplified approach
-
-        val prompt = buildMultimodalPrompt(
-            instruction = """
-                Transcribe the audio to text. 
-                Language: ${_captionState.value.sourceLanguage.displayName}
-                Output only the transcribed text, nothing else.
-            """.trimIndent(),
-            audioData = audioChunk,
-            previousContext = _captionState.value.currentTranscript.takeLast(100)
-        )
-
-        return try {
-            gemmaEngine.generateText(
-                prompt = prompt,
-                config = GemmaEngine.GenerationConfig(
-                    maxNewTokens = 50,
-                    temperature = 0.1f,
-                    doSample = false // Greedy decoding for accuracy
-                )
-            ).toList().joinToString("")
-        } catch (e: Exception) {
-            ""
-        }
-    }
-
     private suspend fun translateText(text: String) {
         if (text.isBlank()) return
 
@@ -184,14 +158,13 @@ class LiveCaptionViewModel @Inject constructor(
             return
         }
 
-        // Generate translation
+        // Generate translation using Gemini API
         val translationPrompt = """
             Translate the following text from ${_captionState.value.sourceLanguage.displayName} to ${_captionState.value.targetLanguage.displayName}.
             Maintain the original meaning and tone.
-            
+            Output only the translation, nothing else.
+
             Text: "$text"
-            
-            Translation:
         """.trimIndent()
 
         try {
@@ -199,7 +172,8 @@ class LiveCaptionViewModel @Inject constructor(
                 prompt = translationPrompt,
                 config = GemmaEngine.GenerationConfig(
                     maxNewTokens = 100,
-                    temperature = 0.3f
+                    temperature = 0.3f,
+                    doSample = false
                 )
             ).toList().joinToString("").trim()
 
@@ -220,9 +194,35 @@ class LiveCaptionViewModel @Inject constructor(
     }
 }
 
-// Extension function for Flow operations
-suspend fun <T> Flow<T>.toList(): List<T> {
+// Extension function to collect Flow into a List
+private suspend fun <T> Flow<T>.toList(): List<T> {
     val list = mutableListOf<T>()
     collect { list.add(it) }
     return list
 }
+
+
+fun Language.toGoogleLanguageCode(): String = when (this) {
+    Language.AUTO -> "auto"
+    Language.ENGLISH -> "en-US"
+    Language.SPANISH -> "es-ES"
+    Language.FRENCH -> "fr-FR"
+    Language.GERMAN -> "de-DE"
+    Language.CHINESE -> "zh-CN"
+    Language.JAPANESE -> "ja-JP"
+    Language.KOREAN -> "ko-KR"
+    Language.HINDI -> "hi-IN"
+    Language.ARABIC -> "ar-SA"
+    Language.PORTUGUESE -> "pt-BR"
+    Language.RUSSIAN -> "ru-RU"
+    Language.ITALIAN -> "it-IT"
+    Language.DUTCH -> "nl-NL"
+    Language.SWEDISH -> "sv-SE"
+    Language.POLISH -> "pl-PL"
+    Language.TURKISH -> "tr-TR"
+    Language.INDONESIAN -> "id-ID"
+    Language.VIETNAMESE -> "vi-VN"
+    Language.THAI -> "th-TH"
+    Language.HEBREW -> "he-IL"
+}
+
