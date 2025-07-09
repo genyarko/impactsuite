@@ -53,7 +53,7 @@ class CBTCoachViewModel @Inject constructor(
                 // Initialize CBT knowledge base
                 sessionManager.initializeKnowledgeBase()
             } catch (e: Exception) {
-                Timber.e(e, "Failed to initialize Gemini API or knowledge base")
+                Timber.e(e, "Failed to initialize Gemma 3N API or knowledge base")
             }
         }
     }

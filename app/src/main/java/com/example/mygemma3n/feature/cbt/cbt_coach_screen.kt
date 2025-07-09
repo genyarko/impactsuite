@@ -5,7 +5,13 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -16,11 +22,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Send
-import androidx.compose.material3.Icon
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.SuggestionChip
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -28,7 +29,7 @@ fun CBTCoachScreen(
     viewModel: CBTCoachViewModel = hiltViewModel()
 ) {
     val sessionState by viewModel.sessionState.collectAsStateWithLifecycle()
-    val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val isLoading    by viewModel.isLoading.collectAsStateWithLifecycle()
     val coroutineScope = rememberCoroutineScope()
 
     var userInput by remember { mutableStateOf("") }
@@ -39,17 +40,17 @@ fun CBTCoachScreen(
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        // Header
+        /* ───────── Header ───────── */
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
+            colors   = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.primaryContainer
             )
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = "CBT Coach",
-                    style = MaterialTheme.typography.headlineMedium,
+                    text       = "CBT Coach",
+                    style      = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold
                 )
 
@@ -59,12 +60,12 @@ fun CBTCoachScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Detected Emotion: ",
+                            text  = "Detected Emotion: ",
                             style = MaterialTheme.typography.bodyMedium
                         )
                         EmotionChip(
-                            text = sessionState.currentEmotion?.name ?: "",
-                            onClick = { /* no-op */ },
+                            text       = sessionState.currentEmotion?.name ?: "",
+                            onClick    = { /* no‑op */ },
                             labelColor = getEmotionColor(sessionState.currentEmotion)
                         )
                     }
@@ -73,16 +74,19 @@ fun CBTCoachScreen(
                 AnimatedVisibility(visible = sessionState.suggestedTechnique != null) {
                     Column(modifier = Modifier.padding(top = 8.dp)) {
                         Text(
-                            text = "Current Technique: ${sessionState.suggestedTechnique?.name}",
-                            style = MaterialTheme.typography.bodyMedium,
+                            text       = "Current Technique: ${sessionState.suggestedTechnique?.name}",
+                            style      = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium
                         )
                         sessionState.suggestedTechnique?.let {
                             LinearProgressIndicator(
-                                progress = (sessionState.currentStep + 1f) / it.steps.size,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 4.dp)
+                            progress = { (sessionState.currentStep + 1f) / it.steps.size },
+                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .padding(top = 4.dp),
+                            color = ProgressIndicatorDefaults.linearColor,
+                            trackColor = ProgressIndicatorDefaults.linearTrackColor,
+                            strokeCap = ProgressIndicatorDefaults.LinearStrokeCap,
                             )
                         }
                     }
@@ -90,7 +94,7 @@ fun CBTCoachScreen(
             }
         }
 
-        // Conversation
+        /* ───────── Conversation ───────── */
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
@@ -99,13 +103,13 @@ fun CBTCoachScreen(
         ) {
             items(sessionState.conversation.reversed()) { message ->
                 MessageBubble(
-                    message = message,
-                    cbtTechniques = viewModel.cbtTechniques  // Pass cbtTechniques
+                    message       = message,
+                    cbtTechniques = viewModel.cbtTechniques
                 )
             }
         }
 
-        // Action buttons
+        /* ───────── Action Buttons ───────── */
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -114,66 +118,53 @@ fun CBTCoachScreen(
         ) {
             if (sessionState.isActive) {
                 OutlinedButton(
-                    onClick = { showThoughtRecord = true },
+                    onClick  = { showThoughtRecord = true },
                     modifier = Modifier.weight(1f)
-                ) {
-                    Text("Thought Record")
-                }
+                ) { Text("Thought Record") }
 
                 OutlinedButton(
-                    onClick = { viewModel.progressToNextStep() },
+                    onClick  = { viewModel.progressToNextStep() },
                     modifier = Modifier.weight(1f),
-                    enabled = sessionState.suggestedTechnique != null
-                ) {
-                    Text("Next Step")
-                }
+                    enabled  = sessionState.suggestedTechnique != null
+                ) { Text("Next Step") }
 
                 OutlinedButton(
-                    onClick = {
-                        viewModel.analyzeEmotionTrajectory()
-                    },
+                    onClick  = { viewModel.analyzeEmotionTrajectory() },
                     modifier = Modifier.weight(1f)
-                ) {
-                    Text("Analyze Progress")
-                }
+                ) { Text("Analyze Progress") }
 
-                // New: Personalized Recommendations
                 OutlinedButton(
-                    onClick = {
-                        // Use last user message or prompt user for an issue
+                    onClick  = {
                         val lastIssue = viewModel.sessionState.value
                             .conversation
                             .filterIsInstance<Message.User>()
                             .lastOrNull()
-                            ?.content
-                            ?: ""
+                            ?.content ?: ""
                         viewModel.getPersonalizedRecommendations(lastIssue)
                     },
                     modifier = Modifier.weight(1f)
-                ) {
-                    Text("Recommendations")
-                }
+                ) { Text("Recommendations") }
             }
         }
 
-        // Input area
+        /* ───────── Input Area ───────── */
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.Bottom
         ) {
-            OutlinedTextField(
-                value = userInput,
-                onValueChange = { userInput = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Share your thoughts...") },
-                enabled = sessionState.isActive && !isLoading,
-                shape = RoundedCornerShape(24.dp)
-            )
-
             if (sessionState.isActive) {
+                OutlinedTextField(
+                    value         = userInput,
+                    onValueChange = { userInput = it },
+                    modifier      = Modifier.weight(1f),
+                    placeholder   = { Text("Share your thoughts…") },
+                    enabled       = !isLoading,
+                    shape         = RoundedCornerShape(24.dp)
+                )
+
                 IconButton(
-                    onClick = {
+                    onClick  = {
                         if (userInput.isNotBlank()) {
                             coroutineScope.launch {
                                 viewModel.processTextInput(userInput)
@@ -185,23 +176,38 @@ fun CBTCoachScreen(
                 ) {
                     if (isLoading) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
+                            modifier   = Modifier.size(24.dp),
                             strokeWidth = 2.dp
                         )
                     } else {
-                        Icon(
-                            imageVector = Icons.Filled.Send,
-                            contentDescription = "Send"
-                        )
+                        Icon(imageVector = Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
                     }
                 }
             } else {
+                /* Guidance text replacing disabled input */
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text  = "Let’s begin",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
                 Button(
                     onClick = { viewModel.startSession() },
-                    shape = RoundedCornerShape(24.dp)
-                ) {
-                    Text("Start Session")
-                }
+                    shape   = RoundedCornerShape(24.dp)
+                ) { Text("Start Session") }
             }
         }
 
