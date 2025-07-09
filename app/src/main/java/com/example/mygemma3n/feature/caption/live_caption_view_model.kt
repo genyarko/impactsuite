@@ -6,18 +6,22 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mygemma3n.gemma.GemmaEngine
 import com.example.mygemma3n.service.AudioCaptureService
+import com.example.mygemma3n.shared_utilities.toGoogleLanguageCode
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import javax.inject.Inject
+import kotlin.math.log10     // NEW
+import kotlin.math.max      // NEW
 
 @HiltViewModel
 class LiveCaptionViewModel @Inject constructor(
     application: Application,
     private val gemmaEngine: GemmaEngine,
     private val translationCache: TranslationCache,
-    private val speechService: SpeechRecognitionService // <-- Inject the speech-to-text service
+    private val speechService: SpeechRecognitionService
 ) : AndroidViewModel(application) {
 
     private val _captionState = MutableStateFlow(CaptionState())
@@ -25,18 +29,7 @@ class LiveCaptionViewModel @Inject constructor(
 
     private var audioProcessingJob: Job? = null
 
-    data class CaptionState(
-        val isListening: Boolean = false,
-        val currentTranscript: String = "",
-        val translatedText: String = "",
-        val sourceLanguage: Language = Language.AUTO,
-        val targetLanguage: Language = Language.ENGLISH,
-        val latencyMs: Long = 0,
-        val error: String? = null
-    )
-
     init {
-        // Monitor service state
         viewModelScope.launch {
             AudioCaptureService.isRunning.collect { isRunning ->
                 _captionState.update { it.copy(isListening = isRunning) }
@@ -59,12 +52,9 @@ class LiveCaptionViewModel @Inject constructor(
                 action = AudioCaptureService.ACTION_START_CAPTURE
             }
             context.startService(intent)
-
             _captionState.update { it.copy(error = null) }
         } catch (e: Exception) {
-            _captionState.update {
-                it.copy(error = "Failed to start service: ${e.message}")
-            }
+            _captionState.update { it.copy(error = "Failed to start service: ${e.message}") }
         }
     }
 
@@ -76,8 +66,8 @@ class LiveCaptionViewModel @Inject constructor(
         context.startService(intent)
     }
 
+    /* ───────── AUDIO + STT PIPELINE ───────── */
     private fun startProcessingAudio() {
-        // Check if speech service is initialized BEFORE starting
         if (!speechService.isInitialized) {
             _captionState.update {
                 it.copy(
@@ -88,80 +78,153 @@ class LiveCaptionViewModel @Inject constructor(
         }
 
         audioProcessingJob = viewModelScope.launch {
-            _captionState.update { it.copy(error = null) }
+            _captionState.update { it.copy(error = null, isProcessingAudio = true) }
 
+            var currentInterimTranscript = ""
+            var lastFinalTranscript = ""
+            var lastAudioUpdate = 0L
+
+            /* ─── 1.  AUDIO-LEVEL UI  ─── */
+            launch {
+                AudioCaptureService.audioDataFlow
+                    .filterNotNull()
+                    .collect { audioData ->
+                        val now = System.currentTimeMillis()
+                        if (now - lastAudioUpdate > 100) {          // update ~10 Hz
+                            val rms = AudioUtils.calculateRMS(audioData)
+
+                            /*  convert to dBFS (−∞..0 dB).
+                                We clamp floor at −90 dBFS for stability.            */
+                            val dbfs = if (rms <= 0f) -90f else max(-90f, 20f * log10(rms))
+                            /*  Map −90 dBFS → 0.0  and  −20 dBFS → 1.0             */
+                            val normalizedLevel = ((dbfs + 90f) / 70f).coerceIn(0f, 1f)
+
+                            _captionState.update { state ->
+                                state.copy(
+                                    lastAudioLevel = normalizedLevel,
+                                    /*  show spinner while level > −60 dBFS ≈ rms 0.001   */
+                                    isProcessingAudio = dbfs > -60f
+                                )
+                            }
+                            lastAudioUpdate = now
+                        }
+                    }
+            }
+
+            /* ─── 2.  SPEECH-TO-TEXT  ─── */
             speechService
                 .transcribeAudioStream(
                     AudioCaptureService.audioDataFlow.filterNotNull(),
                     _captionState.value.sourceLanguage.toGoogleLanguageCode()
                 )
                 .catch { e ->
-                    _captionState.update { it.copy(error = "Transcription error: ${e.message}") }
-                }
-                .collect { result ->
-                    _captionState.update { state ->
-                        state.copy(
-                            currentTranscript = result.transcript,
-                            // You can set latencyMs if you compute it elsewhere
-                            error = null
+                    Timber.tag("LiveCaption").e(e, "Transcription error")
+                    _captionState.update {
+                        it.copy(
+                            error = "Transcription error: ${e.message}",
+                            isProcessingAudio = false
                         )
                     }
+                }
+                .collect { result ->
+                    val startTime = System.currentTimeMillis()
+
+                    val displayTranscript = if (result.isFinal) {
+                        lastFinalTranscript = result.transcript
+                        currentInterimTranscript = ""
+                        result.transcript
+                    } else {
+                        currentInterimTranscript = result.transcript
+                        if (lastFinalTranscript.isNotEmpty()) {
+                            "$lastFinalTranscript $currentInterimTranscript"
+                        } else {
+                            currentInterimTranscript
+                        }
+                    }
+
+                    val latency = System.currentTimeMillis() - startTime
+
+                    _captionState.update { state ->
+                        Timber.tag("LiveCaption").d(
+                            "Transcription result: ${result.transcript} " +
+                                    "(final=${result.isFinal}, confidence=${result.confidence})"
+                        )
+                        state.copy(
+                            currentTranscript = displayTranscript,
+                            latencyMs = latency,
+                            error = null,
+                            isInterimResult = !result.isFinal
+                        )
+                    }
+
+                    // Auto-translate final results
                     val state = _captionState.value
-                    // Auto-translate if needed
-                    if (state.targetLanguage != state.sourceLanguage && state.sourceLanguage != Language.AUTO) {
+                    if (result.isFinal &&
+                        state.targetLanguage != state.sourceLanguage &&
+                        state.sourceLanguage != Language.AUTO &&
+                        result.transcript.isNotBlank()
+                    ) {
                         translateText(result.transcript)
                     }
                 }
         }
     }
 
-
     private fun stopProcessingAudio() {
         audioProcessingJob?.cancel()
         audioProcessingJob = null
+        _captionState.update { it.copy(isProcessingAudio = false, lastAudioLevel = 0f) }
     }
 
+    /* ───────── DATA CLASS ───────── */
+    data class CaptionState(
+        val isListening: Boolean = false,
+        val currentTranscript: String = "",
+        val translatedText: String = "",
+        val sourceLanguage: Language = Language.AUTO,
+        val targetLanguage: Language = Language.ENGLISH,
+        val latencyMs: Long = 0,
+        val error: String? = null,
+        val isProcessingAudio: Boolean = false,
+        val lastAudioLevel: Float = 0f,          // 0.0–1.0 for UI bar
+        val isInterimResult: Boolean = false
+    )
+
+    /* ───────── LANGUAGE PICKERS ───────── */
     fun setSourceLanguage(language: Language) {
         _captionState.update {
-            it.copy(
-                sourceLanguage = language,
-                translatedText = "" // Clear translation when language changes
-            )
+            it.copy(sourceLanguage = language, translatedText = "")
         }
     }
 
     fun setTargetLanguage(language: Language) {
         _captionState.update {
-            it.copy(
-                targetLanguage = language,
-                translatedText = "" // Clear translation when language changes
-            )
+            it.copy(targetLanguage = language, translatedText = "")
         }
 
-        // Retranslate current text if available
         val currentTranscript = _captionState.value.currentTranscript
         if (currentTranscript.isNotEmpty() &&
-            language != _captionState.value.sourceLanguage) {
-            viewModelScope.launch {
-                translateText(currentTranscript)
-            }
+            language != _captionState.value.sourceLanguage
+        ) {
+            viewModelScope.launch { translateText(currentTranscript) }
         }
     }
 
+    /* ───────── TRANSLATION ───────── */
     private suspend fun translateText(text: String) {
         if (text.isBlank()) return
 
-        // Check cache first
-        val cacheKey = "${text.take(100)}_${_captionState.value.sourceLanguage.code}_${_captionState.value.targetLanguage.code}"
+        val cacheKey =
+            "${text.take(100)}_${_captionState.value.sourceLanguage.code}_${_captionState.value.targetLanguage.code}"
         translationCache.get(cacheKey)?.let { cached ->
             _captionState.update { it.copy(translatedText = cached) }
             return
         }
 
-        // Generate translation using Gemini API
         val translationPrompt = """
-            Translate the following text from ${_captionState.value.sourceLanguage.displayName} to ${_captionState.value.targetLanguage.displayName}.
-            Maintain the original meaning and tone.
+            Translate the following text from ${_captionState.value.sourceLanguage.displayName} 
+            to ${_captionState.value.targetLanguage.displayName}. 
+            Maintain the original meaning and tone. 
             Output only the translation, nothing else.
 
             Text: "$text"
@@ -182,9 +245,7 @@ class LiveCaptionViewModel @Inject constructor(
                 _captionState.update { it.copy(translatedText = translation) }
             }
         } catch (e: Exception) {
-            _captionState.update {
-                it.copy(error = "Translation error: ${e.message}")
-            }
+            _captionState.update { it.copy(error = "Translation error: ${e.message}") }
         }
     }
 
@@ -194,35 +255,9 @@ class LiveCaptionViewModel @Inject constructor(
     }
 }
 
-// Extension function to collect Flow into a List
+/* ───────── EXTENSION ───────── */
 private suspend fun <T> Flow<T>.toList(): List<T> {
     val list = mutableListOf<T>()
     collect { list.add(it) }
     return list
 }
-
-
-fun Language.toGoogleLanguageCode(): String = when (this) {
-    Language.AUTO -> "auto"
-    Language.ENGLISH -> "en-US"
-    Language.SPANISH -> "es-ES"
-    Language.FRENCH -> "fr-FR"
-    Language.GERMAN -> "de-DE"
-    Language.CHINESE -> "zh-CN"
-    Language.JAPANESE -> "ja-JP"
-    Language.KOREAN -> "ko-KR"
-    Language.HINDI -> "hi-IN"
-    Language.ARABIC -> "ar-SA"
-    Language.PORTUGUESE -> "pt-BR"
-    Language.RUSSIAN -> "ru-RU"
-    Language.ITALIAN -> "it-IT"
-    Language.DUTCH -> "nl-NL"
-    Language.SWEDISH -> "sv-SE"
-    Language.POLISH -> "pl-PL"
-    Language.TURKISH -> "tr-TR"
-    Language.INDONESIAN -> "id-ID"
-    Language.VIETNAMESE -> "vi-VN"
-    Language.THAI -> "th-TH"
-    Language.HEBREW -> "he-IL"
-}
-

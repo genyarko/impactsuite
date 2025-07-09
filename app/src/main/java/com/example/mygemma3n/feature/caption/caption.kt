@@ -5,6 +5,9 @@ import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
+import android.util.Log
 import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -12,6 +15,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.isActive
+import timber.log.Timber
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -66,26 +70,26 @@ class AudioCapture @Inject constructor(
     }
 
     fun startCapture(): Flow<FloatArray> = flow {
-        // Check permission first
+        // 0. Permission check
         if (!hasRecordPermission()) {
             throw SecurityException("RECORD_AUDIO permission not granted")
         }
 
+        // 1. Buffer sizing
         val minBufferSize = AudioRecord.getMinBufferSize(
             SAMPLE_RATE,
             CHANNEL_CONFIG,
             AUDIO_FORMAT
         )
-
         if (minBufferSize == AudioRecord.ERROR || minBufferSize == AudioRecord.ERROR_BAD_VALUE) {
             throw IllegalStateException("Failed to get minimum buffer size")
         }
-
         val bufferSize = minBufferSize * BUFFER_SIZE_FACTOR
 
         try {
+            /* ───── 2. Create AudioRecord with AGC-friendly source ───── */
             audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.MIC,
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,     // AGC / NS path
                 SAMPLE_RATE,
                 CHANNEL_CONFIG,
                 AUDIO_FORMAT,
@@ -96,45 +100,51 @@ class AudioCapture @Inject constructor(
                 }
             }
 
+            /* ───── 3. Enable Automatic Gain Control (and NoiseSuppressor) ───── */
+            if (AutomaticGainControl.isAvailable()) {
+                AutomaticGainControl.create(audioRecord!!.audioSessionId).enabled = true
+            }
+            if (NoiseSuppressor.isAvailable()) {                       // optional
+                NoiseSuppressor.create(audioRecord!!.audioSessionId).enabled = true
+            }
+
+            // 4. Prepare buffers
             val audioBuffer = ShortArray(bufferSize)
             val floatBuffer = FloatArray(bufferSize)
 
+            // 5. Start capture loop
             audioRecord?.startRecording()
             isRecording = true
-
             while (coroutineContext.isActive && isRecording) {
                 val readSize = audioRecord?.read(audioBuffer, 0, bufferSize) ?: 0
-
                 when {
                     readSize > 0 -> {
-                        // Convert PCM16 to float
+                        // PCM16 → float -1.0…1.0
                         for (i in 0 until readSize) {
                             floatBuffer[i] = audioBuffer[i] / 32768.0f
                         }
-
-                        // Emit audio chunk
                         emit(floatBuffer.copyOfRange(0, readSize))
+                        Timber.tag("AudioCapture").d("Emitted audio chunk of size $readSize")
                     }
-                    readSize == AudioRecord.ERROR_INVALID_OPERATION -> {
+                    readSize == AudioRecord.ERROR_INVALID_OPERATION ->
                         throw IllegalStateException("AudioRecord read error: Invalid operation")
-                    }
-                    readSize == AudioRecord.ERROR_BAD_VALUE -> {
+                    readSize == AudioRecord.ERROR_BAD_VALUE ->
                         throw IllegalStateException("AudioRecord read error: Bad value")
-                    }
-                    readSize == AudioRecord.ERROR_DEAD_OBJECT -> {
+                    readSize == AudioRecord.ERROR_DEAD_OBJECT ->
                         throw IllegalStateException("AudioRecord read error: Dead object")
-                    }
                 }
             }
         } catch (e: SecurityException) {
-            throw SecurityException("Failed to access microphone. Please grant RECORD_AUDIO permission.", e)
+            throw SecurityException(
+                "Failed to access microphone. Please grant RECORD_AUDIO permission.", e
+            )
         } catch (e: Exception) {
             throw IllegalStateException("Audio capture failed: ${e.message}", e)
         } finally {
-            // Ensure cleanup happens even if an exception is thrown
-            stopCapture()
+            stopCapture()   // always clean up
         }
     }.flowOn(Dispatchers.IO)
+
 
     fun stopCapture() {
         isRecording = false

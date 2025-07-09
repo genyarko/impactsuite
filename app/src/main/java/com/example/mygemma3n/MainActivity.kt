@@ -28,7 +28,6 @@ import kotlinx.coroutines.launch
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.edit
 import com.example.mygemma3n.data.GeminiApiService
-import com.example.mygemma3n.data.validateApiKey
 import com.example.mygemma3n.feature.caption.LiveCaptionScreen
 import com.example.mygemma3n.feature.quiz.QuizScreen
 import com.example.mygemma3n.feature.cbt.CBTCoachScreen
@@ -42,9 +41,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.mygemma3n.data.GeminiApiConfig
+import com.example.mygemma3n.data.validateKey
 import com.example.mygemma3n.feature.caption.SpeechRecognitionService
 import dagger.hilt.android.EntryPointAccessors
 import com.example.mygemma3n.di.SpeechRecognitionServiceEntryPoint
+import timber.log.Timber
 
 
 val API_KEY = stringPreferencesKey("gemini_api_key")
@@ -56,20 +58,20 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var geminiApiService: GeminiApiService
 
+
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
 
-        // Initialize Gemini API service with stored API key
         lifecycleScope.launch {
             val apiKey = dataStore.data.map { it[API_KEY].orEmpty() }.first()
             if (apiKey.isNotBlank()) {
                 try {
                     geminiApiService.initialize(
-                        GeminiApiService.Companion.ApiConfig(apiKey = apiKey)
+                        GeminiApiConfig(apiKey = apiKey)   // ← new name
                     )
                 } catch (e: Exception) {
-                    // Log initialization error
+                    Timber.e(e, "Gemini initialisation failed")
                 }
             }
         }
@@ -80,6 +82,7 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
 }
 
 @OptIn(ExperimentalPermissionsApi::class)
@@ -168,31 +171,26 @@ fun HomeScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
 
-    // Check API key on launch
-    LaunchedEffect(Unit) {
-        val apiKey = context.dataStore.data.map { it[API_KEY] }.first()
-        if (!apiKey.isNullOrBlank()) {
-            try {
-                // Initialize the API service.
-                // By omitting the 'modelName' parameter, ApiConfig will use its default,
-                // which is now PRIMARY_GENERATION_MODEL (Gemma 3n).
-                geminiApiService.initialize(
-                    GeminiApiService.Companion.ApiConfig(
-                        apiKey = apiKey
-                    )
-                )
-                isApiReady = true
-                errorMessage = null
-            } catch (e: Exception) {
-                errorMessage = "Failed to initialize API: ${e.message}"
-                isApiReady = false
+            LaunchedEffect(Unit) {
+                val apiKey = context.dataStore.data.map { it[API_KEY] }.first()
+                if (!apiKey.isNullOrBlank()) {
+                    try {
+                        geminiApiService.initialize(
+                            GeminiApiConfig(apiKey = apiKey)   // ← new class name
+                        )
+                        isApiReady   = true
+                        errorMessage = null
+                    } catch (e: Exception) {
+                        errorMessage = "Failed to initialize API: ${e.message}"
+                        isApiReady   = false
+                    }
+                } else {
+                    errorMessage = "API key not configured"
+                    isApiReady   = false
+                }
+                isCheckingApi = false
             }
-        } else {
-            errorMessage = "API key not configured"
-            isApiReady = false
-        }
-        isCheckingApi = false
-    }
+
 
     Column(
         modifier = Modifier
@@ -430,10 +428,8 @@ fun ApiSettingsScreen(
 
                             // Validate Gemini API key
                             if (apiKey.isNotBlank()) {
-                                if (geminiApiService.validateApiKey(apiKey)) {
-                                    context.dataStore.edit { settings ->
-                                        settings[API_KEY] = apiKey
-                                    }
+                                if (geminiApiService.validateKey(apiKey)) {   // ← rename here
+                                    context.dataStore.edit { it[API_KEY] = apiKey }
                                     messages.add("✓ Gemini API key validated")
                                 } else {
                                     messages.add("✗ Invalid Gemini API key")

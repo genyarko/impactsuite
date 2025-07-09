@@ -2,6 +2,7 @@ package com.example.mygemma3n.gemma
 
 import android.content.Context
 import com.example.mygemma3n.API_KEY
+import com.example.mygemma3n.data.GeminiApiConfig
 import com.example.mygemma3n.data.GeminiApiService
 import com.example.mygemma3n.data.ModelRepository
 import com.example.mygemma3n.dataStore
@@ -85,32 +86,22 @@ class GemmaModelManager @Inject constructor(
     }
 
     private suspend fun initializeApiModel(config: ModelConfig) = withContext(Dispatchers.IO) {
-        try {
-            // Get API key from storage or throw error
-            val apiKey = getStoredApiKey()
-                ?: throw IllegalStateException("API key not configured")
+        val apiKey = getStoredApiKey() ?: error("API key not configured")
 
-            // Initialize Gemini API with the selected model
-            geminiApiService.initialize(
-                // Fix: Correctly reference ApiConfig
-                GeminiApiService.Companion.ApiConfig(
-                    apiKey = apiKey,
-                    modelName = config.modelName,
-                    maxOutputTokens = config.maxTokens,
-                    temperature = 0.7f,
-                    topK = 40,
-                    topP = 0.95f
-                )
+        geminiApiService.initialize(
+            GeminiApiConfig(               // ← no companion
+                apiKey = apiKey,
+                modelName = config.modelName,
+                maxOutputTokens = config.maxTokens,
+                temperature = 0.7f,
+                topK = 40,
+                topP = 0.95f
             )
-
-            currentModelConfig = config
-            Timber.d("Initialized Gemini API with model: ${config.modelName}")
-
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to initialize API model")
-            throw e
-        }
+        )
+        currentModelConfig = config
+        Timber.d("Initialized Gemini API with model: ${config.modelName}")
     }
+
 
     private suspend fun getStoredApiKey(): String? =
         withContext(Dispatchers.IO) {

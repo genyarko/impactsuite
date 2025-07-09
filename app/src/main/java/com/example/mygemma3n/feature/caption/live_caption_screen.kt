@@ -1,16 +1,18 @@
 package com.example.mygemma3n.feature.caption
 
+import AudioFeedbackRow
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -18,12 +20,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @Composable
 fun LiveCaptionScreen(
     viewModel: LiveCaptionViewModel = hiltViewModel()
 ) {
-    val state by viewModel.captionState.collectAsState()
+    val state by viewModel.captionState.collectAsStateWithLifecycle()
 
     Box(
         modifier = Modifier
@@ -36,6 +39,12 @@ fun LiveCaptionScreen(
                 .align(Alignment.BottomCenter)
                 .padding(16.dp)
         ) {
+            AudioFeedbackRow(
+                isListening = state.isListening,
+                audioLevel  = state.lastAudioLevel,
+                agcEnabled  = true                 // or expose this from ViewModel
+            )
+            Spacer(Modifier.height(8.dp))
             // Performance indicator
             if (state.latencyMs > 0) {
                 Row(
@@ -85,10 +94,25 @@ fun LiveCaptionScreen(
                     Spacer(modifier = Modifier.height(4.dp))
 
                     Text(
-                        text = state.currentTranscript.ifEmpty {
-                            if (state.isListening) "Listening..." else "Tap mic to start"
+                        text = when {
+                            state.currentTranscript.isNotEmpty() -> state.currentTranscript
+                            state.isListening && state.isProcessingAudio -> "Processing speech..."
+                            state.isListening && state.lastAudioLevel < 0.1f -> "Listening... (speak clearly)"
+                            state.isListening -> "Listening..."
+                            else -> "Tap mic to start"
                         },
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = if (state.isInterimResult && state.currentTranscript.isNotEmpty()) {
+                            MaterialTheme.typography.bodyLarge.copy(
+                                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                            )
+                        } else {
+                            MaterialTheme.typography.bodyLarge
+                        },
+                        color = when {
+                            state.currentTranscript.isNotEmpty() -> MaterialTheme.colorScheme.onSurface
+                            state.isListening -> MaterialTheme.colorScheme.onSurfaceVariant
+                            else -> MaterialTheme.colorScheme.onSurface
+                        },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -141,7 +165,7 @@ fun LiveCaptionScreen(
                 )
 
                 Icon(
-                    Icons.Default.ArrowForward,
+                    Icons.AutoMirrored.Filled.ArrowForward,
                     contentDescription = null,
                     tint = Color.White,
                     modifier = Modifier.padding(horizontal = 8.dp)
@@ -272,12 +296,12 @@ fun LanguagePickerDialog(
                     modifier = Modifier.padding(16.dp)
                 )
 
-                Divider()
+                HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
 
                 LazyColumn(
                     modifier = Modifier.weight(1f)
                 ) {
-                    items(Language.values().toList()) { language ->
+                    items(Language.entries) { language ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -307,7 +331,7 @@ fun LanguagePickerDialog(
                     }
                 }
 
-                Divider()
+                HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
 
                 TextButton(
                     onClick = onDismiss,
