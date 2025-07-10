@@ -1,24 +1,34 @@
 package com.example.mygemma3n.feature.cbt
 
+import android.content.Context
+import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mygemma3n.data.GeminiApiService
 import com.example.mygemma3n.gemma.GemmaModelManager
+import com.example.mygemma3n.feature.caption.SpeechRecognitionService
+import com.example.mygemma3n.service.AudioCaptureService
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.flowOf
 import timber.log.Timber
 import java.util.UUID
 import javax.inject.Inject
 
 @HiltViewModel
 class CBTCoachViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val geminiApiService: GeminiApiService,
     private val modelManager: GemmaModelManager,
     private val emotionDetector: EmotionDetector,
     val cbtTechniques: CBTTechniques,
     private val sessionRepository: SessionRepository,
-    private val sessionManager: CBTSessionManager
+    private val sessionManager: CBTSessionManager,
+    private val speechService: SpeechRecognitionService
 ) : ViewModel() {
 
     private val _sessionState = MutableStateFlow(CBTSessionState())
@@ -28,6 +38,7 @@ class CBTCoachViewModel @Inject constructor(
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     private var currentSessionId: String? = null
+    private var recordingJob: Job? = null
 
     data class CBTSessionState(
         val isActive: Boolean = false,
@@ -36,6 +47,7 @@ class CBTCoachViewModel @Inject constructor(
         val conversation: List<Message> = emptyList(),
         val thoughtRecord: ThoughtRecord? = null,
         val isRecording: Boolean = false,
+        val liveTranscript: String = "",
         val currentStep: Int = 0,
         val sessionDuration: Long = 0L,
         val personalizedRecommendations: CBTSessionManager.PersonalizedRecommendations? = null,
@@ -84,6 +96,43 @@ class CBTCoachViewModel @Inject constructor(
         _sessionState.update {
             it.copy(isActive = false)
         }
+    }
+
+    fun startRecording() {
+        if (_sessionState.value.isRecording) return
+
+        val intent = Intent(context, AudioCaptureService::class.java).apply {
+            action = AudioCaptureService.ACTION_START_CAPTURE
+        }
+        context.startService(intent)
+
+        recordingJob = viewModelScope.launch {
+            _sessionState.update { it.copy(isRecording = true, liveTranscript = "") }
+
+            speechService
+                .transcribeAudioStream(
+                    AudioCaptureService.audioDataFlow.filterNotNull(),
+                    "en-US"
+                )
+                .collect { result ->
+                    _sessionState.update { it.copy(liveTranscript = result.transcript) }
+
+                    if (result.isFinal && result.transcript.isNotBlank()) {
+                        processTextInput(result.transcript)
+                        _sessionState.update { state -> state.copy(liveTranscript = "") }
+                    }
+                }
+        }
+    }
+
+    fun stopRecording() {
+        val intent = Intent(context, AudioCaptureService::class.java).apply {
+            action = AudioCaptureService.ACTION_STOP_CAPTURE
+        }
+        context.startService(intent)
+        recordingJob?.cancel()
+        recordingJob = null
+        _sessionState.update { it.copy(isRecording = false, liveTranscript = "") }
     }
 
     suspend fun processTextInput(userInput: String) {
@@ -308,17 +357,11 @@ class CBTCoachViewModel @Inject constructor(
     }
 
     private suspend fun transcribeAudio(audioData: FloatArray): String {
-        // Simplified transcription - in production, use a proper speech-to-text API
-        // For now, generate a placeholder based on detected emotion
-        val emotion = _sessionState.value.currentEmotion ?: Emotion.NEUTRAL
+        if (!speechService.isInitialized) return ""
 
-        val prompt = """
-            Generate a realistic user statement for someone feeling ${emotion.name.lowercase()}.
-            Make it brief (1-2 sentences) and authentic to what someone might say in a therapy session.
-            Focus on expressing the emotion naturally.
-        """.trimIndent()
-
-        return geminiApiService.generateTextComplete(prompt)
+        return speechService
+            .transcribeAudioStream(flowOf(audioData))
+            .firstOrNull()?.transcript.orEmpty()
     }
 
     fun createThoughtRecord(

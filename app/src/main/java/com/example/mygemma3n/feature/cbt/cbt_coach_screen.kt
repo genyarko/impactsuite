@@ -10,6 +10,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.*
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.*
@@ -22,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
+import com.example.mygemma3n.feature.caption.rememberAudioPermissionState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -31,6 +33,7 @@ fun CBTCoachScreen(
     val sessionState by viewModel.sessionState.collectAsStateWithLifecycle()
     val isLoading    by viewModel.isLoading.collectAsStateWithLifecycle()
     val coroutineScope = rememberCoroutineScope()
+    val audioPermission = rememberAudioPermissionState()
 
     var userInput by remember { mutableStateOf("") }
     var showThoughtRecord by remember { mutableStateOf(false) }
@@ -162,6 +165,33 @@ fun CBTCoachScreen(
                     enabled       = !isLoading,
                     shape         = RoundedCornerShape(24.dp)
                 )
+
+                IconButton(
+                    onClick = {
+                        if (sessionState.isRecording) {
+                            viewModel.stopRecording()
+                        } else {
+                            if (audioPermission.hasPermission) {
+                                viewModel.startRecording()
+                            } else {
+                                audioPermission.launchPermissionRequest()
+                            }
+                        }
+                    },
+                    enabled = !isLoading
+                ) {
+                    if (sessionState.isRecording) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Mic,
+                            contentDescription = "Record"
+                        )
+                    }
+                }
 
                 IconButton(
                     onClick  = {
