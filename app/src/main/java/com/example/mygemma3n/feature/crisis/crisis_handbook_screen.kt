@@ -1,6 +1,8 @@
 package com.example.mygemma3n.feature.crisis
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
 import android.content.Intent
 import android.location.Location
 import android.net.Uri
@@ -40,7 +42,12 @@ import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.maps.android.compose.*
+import kotlinx.coroutines.tasks.await
 import timber.log.Timber
+import com.google.android.gms.location.Priority
+import androidx.core.net.toUri
+import com.google.android.gms.tasks.CancellationTokenSource
+
 
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -50,6 +57,9 @@ fun CrisisHandbookScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    /* 1️⃣ host state lives here */
+    val snackbarHostState = remember { SnackbarHostState() }
 
     // Permission states
     val locationPermission = rememberPermissionState(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -78,16 +88,22 @@ fun CrisisHandbookScreen(
     // Get user location on launch
     LaunchedEffect(locationPermission.status) {
         if (locationPermission.status.isGranted) {
+            val fusedLocationClient =
+                LocationServices.getFusedLocationProviderClient(context)
+
             try {
-                val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
-                fusedLocationClient.lastLocation.addOnSuccessListener { location ->
-                    location?.let {
-                        userLocation = it
-                        viewModel.updateUserLocation(it)
-                    }
-                }
-            } catch (e: SecurityException) {
-                Timber.e(e, "Location permission error")
+                @SuppressLint("MissingPermission")   // we *did* check
+                val loc = fusedLocationClient.getCurrentLocation(
+                    Priority.PRIORITY_HIGH_ACCURACY, null
+                ).await()
+
+
+                loc?.let {
+                    userLocation = it
+                    viewModel.updateUserLocation(it)
+                } ?: Timber.w("No location available – using defaults")
+            } catch (se: SecurityException) {
+                Timber.e(se, "Location permission was revoked at runtime")
             }
         }
     }
@@ -98,6 +114,7 @@ fun CrisisHandbookScreen(
                 onBackClick = { /* Handle back navigation */ }
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             if (!showMap) {
                 ExtendedFloatingActionButton(
@@ -187,6 +204,11 @@ fun CrisisHandbookScreen(
                 }
             }
         }
+        state.error?.let { msg ->
+            LaunchedEffect(msg) {        // runs once per distinct message
+                snackbarHostState.showSnackbar(message = msg)
+            }
+        }
     }
 
     // Emergency contact dialog
@@ -205,6 +227,25 @@ fun CrisisHandbookScreen(
         }
     }
 }
+
+suspend fun getFreshLocation(context: Context): Location? {
+    val client = LocationServices.getFusedLocationProviderClient(context)
+
+    @SuppressLint("MissingPermission")
+    val loc = client.getCurrentLocation(
+        Priority.PRIORITY_HIGH_ACCURACY,
+        CancellationTokenSource().token
+    ).await()
+
+    val now = System.currentTimeMillis()          // ← add this line
+
+    return loc?.takeIf {
+        it.accuracy <= 100 &&          // ≤ 100 m
+                now - it.time <= 30_000        // ≤ 30 s old
+    }
+}
+
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -706,7 +747,7 @@ private fun EmergencyContactDialog(
 
     fun dialNumber(number: String) {
         val intent = Intent(Intent.ACTION_DIAL).apply {
-            data = Uri.parse("tel:$number")
+            data = "tel:$number".toUri()
         }
         context.startActivity(intent)
     }
@@ -778,7 +819,7 @@ private fun EmergencyContactDialog(
                             .fillMaxWidth()
                             .clickable {
                                 val smsIntent = Intent(Intent.ACTION_VIEW).apply {
-                                    data = Uri.parse("sms:$number")
+                                    data = "sms:$number".toUri()
                                 }
                                 context.startActivity(smsIntent)
                             }

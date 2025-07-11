@@ -1,7 +1,9 @@
 package com.example.mygemma3n.feature.crisis
 
 import android.content.Context
+import android.content.Intent
 import android.location.Location
+import android.widget.Toast
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mygemma3n.data.GeminiApiService
@@ -18,44 +20,120 @@ import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
 import com.example.mygemma3n.remote.EmergencyDatabase
+import com.example.mygemma3n.shared_utilities.isLocationEnabled
 import dagger.hilt.android.qualifiers.ApplicationContext
+import android.provider.Settings
+import timber.log.Timber
 
 
 @HiltViewModel
 class CrisisHandbookViewModel @Inject constructor(
-    @ApplicationContext private val appContext: Context,   // ✨ add this
+    @ApplicationContext private val appContext: Context,
     private val geminiApiService: GeminiApiService,
     private val functionCalling: CrisisFunctionCalling,
     private val offlineMapService: OfflineMapService,
     private val emergencyContacts: EmergencyContactsRepository
 ) : ViewModel() {
 
+    // Remove the init block that was causing the crash
+    // The lazy property will be initialized when first accessed
     private val emergencyDb: EmergencyDatabase by lazy {
         EmergencyDatabase.getInstance(appContext)
     }
+
     private val _state = MutableStateFlow(CrisisHandbookState())
     val state: StateFlow<CrisisHandbookState> = _state.asStateFlow()
 
     fun handleEmergencyQuery(query: String, location: Location? = null) {
+        // Don't process empty queries
+        if (query.isBlank()) {
+            _state.update {
+                it.copy(
+                    error = "Please enter a query",
+                    isProcessing = false
+                )
+            }
+            return
+        }
+
         viewModelScope.launch {
-            _state.update { it.copy(isProcessing = true, error = null) }
-
             try {
-                // First, try function calling for structured actions
-                val functionResult = functionCalling.processQuery(query, location)
+                // Clear previous state and show processing
+                _state.update {
+                    it.copy(
+                        isProcessing = true,
+                        error = null,
+                        response = null,
+                        nearbyFacilities = emptyList(),
+                        mapState = it.mapState?.copy(facilities = emptyList(), route = null)
+                    )
+                }
 
-                when (functionResult) {
-                    is FunctionCallResult.EmergencyContact -> {
-                        displayEmergencyContact(functionResult.contact)
+                // Log the query for debugging
+                Timber.d("Processing emergency query: $query")
+
+                // Add timeout to prevent hanging
+                kotlinx.coroutines.withTimeout(30000) { // 30 second timeout
+
+                    // Check if this is a first aid related query
+                    val firstAidKeywords = listOf(
+                        "hurt", "pain", "injury", "bleeding", "burn", "cut",
+                        "fall", "fell", "broken", "fracture", "wound", "bruise",
+                        "sprain", "knee", "ankle", "head", "arm", "leg"
+                    )
+
+                    val isFirstAidQuery = firstAidKeywords.any {
+                        query.contains(it, ignoreCase = true)
                     }
-                    is FunctionCallResult.NearestFacility -> {
-                        showOnOfflineMap(functionResult.facilities)
+
+                    if (isFirstAidQuery || query.contains("first aid", ignoreCase = true)) {
+                        Timber.d("Detected first aid query, generating response directly")
+
+                        // Generate first aid response directly
+                        val response = generateFirstAidResponse(query)
+
+                        _state.update {
+                            it.copy(
+                                response = response,
+                                isProcessing = false
+                            )
+                        }
+                        return@withTimeout
                     }
-                    is FunctionCallResult.FirstAidInstructions -> {
-                        displayStepByStepGuide(functionResult.steps)
-                    }
-                    is FunctionCallResult.GeneralResponse -> {
-                        // Use standard generation for general queries
+
+                    // Try function calling for other queries
+                    try {
+                        val functionResult = functionCalling.processQuery(query, location)
+                        Timber.d("Function result: ${functionResult::class.simpleName}")
+
+                        when (functionResult) {
+                            is FunctionCallResult.EmergencyContact -> {
+                                displayEmergencyContact(functionResult.contact)
+                            }
+                            is FunctionCallResult.NearestFacility -> {
+                                showOnOfflineMap(functionResult.facilities)
+                            }
+                            is FunctionCallResult.FirstAidInstructions -> {
+                                displayStepByStepGuide(functionResult.steps)
+                            }
+                            is FunctionCallResult.GeneralResponse -> {
+                                val response = if (functionResult.response.isNotEmpty()) {
+                                    functionResult.response
+                                } else {
+                                    generateEmergencyResponse(query)
+                                }
+
+                                _state.update {
+                                    it.copy(
+                                        response = response,
+                                        isProcessing = false
+                                    )
+                                }
+                            }
+                        }
+                    } catch (functionError: Exception) {
+                        Timber.e(functionError, "Function calling failed, using direct generation")
+                        // Fall back to direct generation
                         val response = generateEmergencyResponse(query)
                         _state.update {
                             it.copy(
@@ -65,16 +143,132 @@ class CrisisHandbookViewModel @Inject constructor(
                         }
                     }
                 }
-            } catch (e: Exception) {
+
+            } catch (timeoutError: kotlinx.coroutines.TimeoutCancellationException) {
+                Timber.e(timeoutError, "Query processing timed out")
                 _state.update {
                     it.copy(
                         isProcessing = false,
-                        error = "Error processing request: ${e.message}"
+                        error = "Request timed out. Please try again.",
+                        response = """
+                        The request took too long to process.
+                        
+                        For immediate help:
+                        📞 Emergency: 112
+                        🚑 Medical: 193
+                        
+                        Please try again with a simpler query.
+                    """.trimIndent()
+                    )
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Error processing emergency query")
+                _state.update {
+                    it.copy(
+                        isProcessing = false,
+                        error = "Error: ${e.message}",
+                        response = """
+                        Sorry, I couldn't process your request.
+                        
+                        For emergencies, please call:
+                        📞 112 (General Emergency)
+                        🚑 193 (Medical Emergency)
+                        
+                        Error: ${e.localizedMessage}
+                    """.trimIndent()
                     )
                 }
             }
         }
     }
+
+    private suspend fun generateFirstAidResponse(query: String): String {
+        val context = loadEmergencyContext()
+
+        val prompt = """
+        You are an emergency first aid assistant. The user has reported: "$query"
+        
+        Context: $context
+        
+        Provide immediate first aid guidance:
+        
+        1. IMMEDIATE ACTIONS (what to do right now)
+        2. ASSESS THE INJURY (what to check)
+        3. FIRST AID STEPS (numbered instructions)
+        4. WHEN TO SEEK MEDICAL HELP (warning signs)
+        5. DO NOT (common mistakes to avoid)
+        
+        Keep instructions clear, calm, and actionable.
+        Format with headers and bullet points for easy reading.
+    """.trimIndent()
+
+        return try {
+            val response = geminiApiService.generateTextComplete(prompt)
+
+            if (response.isBlank() || response.length < 50) {
+                // Provide a fallback response for knee injury
+                """
+            🏥 First Aid for Knee Injury from Bike Fall
+            
+            IMMEDIATE ACTIONS:
+            • Stay calm and don't put weight on the injured knee
+            • Sit or lie down in a comfortable position
+            • If bleeding, apply gentle pressure with a clean cloth
+            
+            ASSESS THE INJURY:
+            • Check for obvious deformity or bone protruding
+            • Look for severe swelling or inability to move the knee
+            • Note if you heard a "pop" sound when you fell
+            
+            FIRST AID STEPS:
+            1. Clean any wounds with water if available
+            2. Apply ice wrapped in a cloth for 15-20 minutes
+            3. Elevate the leg above heart level if possible
+            4. Rest and avoid putting weight on the knee
+            5. Consider taking over-the-counter pain medication
+            
+            SEEK MEDICAL HELP IF:
+            ⚠️ Severe pain or unable to bear any weight
+            ⚠️ Knee appears deformed or unstable
+            ⚠️ Numbness or tingling below the knee
+            ⚠️ Deep cuts that won't stop bleeding
+            ⚠️ Signs of infection (increasing pain, redness, warmth)
+            
+            DO NOT:
+            ❌ Try to "walk it off" if severely painful
+            ❌ Apply ice directly to skin
+            ❌ Ignore severe pain or deformity
+            
+            📞 If severe, call emergency services: 112 or 193
+            """.trimIndent()
+            } else {
+                response
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Error generating first aid response")
+            """
+        First Aid Guidance:
+        
+        For your injury, please follow R.I.C.E:
+        • Rest - Avoid using the injured area
+        • Ice - Apply for 15-20 minutes at a time
+        • Compression - Use a bandage if available
+        • Elevation - Raise the injured area
+        
+        Seek medical attention if:
+        • Severe pain or swelling
+        • Unable to move or bear weight
+        • Visible deformity
+        • Numbness or tingling
+        
+        Emergency numbers:
+        📞 112 (General Emergency)
+        🚑 193 (Medical Emergency)
+        """.trimIndent()
+        }
+    }
+
+
 
     private fun displayEmergencyContact(contact: EmergencyContactInfo) {
         _state.update { currentState ->
@@ -149,24 +343,51 @@ class CrisisHandbookViewModel @Inject constructor(
         val context = loadEmergencyContext()
 
         val prompt = """
-            EMERGENCY ASSISTANT - Respond quickly and clearly.
-            
-            Context: $context
-            Query: $query
-            
-            Provide:
-            1. Immediate actions (if urgent)
-            2. Clear, step-by-step guidance
-            3. When to seek professional help
-            
-            Keep response concise and actionable. Use bullet points for clarity.
-            Prioritize life-saving information first.
-        """.trimIndent()
+        EMERGENCY ASSISTANT - Respond quickly and clearly.
+        
+        Context: $context
+        User Query: $query
+        
+        Instructions:
+        - If this is about first aid, provide clear step-by-step instructions
+        - If this is a medical emergency query, provide immediate actions
+        - Always mention when to call emergency services
+        - Keep response concise and actionable
+        - Use bullet points or numbered lists for clarity
+        - Prioritize life-saving information first
+        
+        Response:
+    """.trimIndent()
 
         return try {
-            geminiApiService.generateTextComplete(prompt)
+            val response = geminiApiService.generateTextComplete(prompt)
+
+            // If response is empty or too short, provide a fallback
+            if (response.isBlank() || response.length < 20) {
+                """
+            I'm having trouble generating a response. 
+            
+            For any emergency:
+            📞 Call 112 or 193 immediately
+            
+            Please try rephrasing your query or select one of the quick actions above.
+            """.trimIndent()
+            } else {
+                response
+            }
         } catch (e: Exception) {
-            "Error generating response. Please call emergency services: 112"
+            Timber.e(e, "Error generating emergency response")
+            """
+        Error generating response. 
+        
+        📞 For emergencies, call:
+        - General Emergency: 112
+        - Medical Emergency: 193
+        - Police: 191
+        - Fire: 192
+        
+        Please try again or seek immediate help if needed.
+        """.trimIndent()
         }
     }
 
@@ -223,13 +444,35 @@ class CrisisHandbookViewModel @Inject constructor(
         }
     }
 
+    // In CrisisHandbookViewModel.getQuickActions(), temporarily add this debug action:
+
     fun getQuickActions(): List<QuickAction> {
         return listOf(
             QuickAction(
                 id = "call_emergency",
                 title = "Call Emergency",
                 icon = "phone",
-                action = { handleEmergencyQuery("emergency contact numbers") }
+                action = {
+                    clearStateForNewAction()
+                    // This will trigger the emergency contacts display
+                    displayEmergencyContact(
+                        EmergencyContactInfo(
+                            service = "emergency",
+                            primaryNumber = "112",
+                            secondaryNumber = "193",
+                            description = "General Emergency",
+                            smsNumber = null
+                        )
+                    )
+                    // Also load all emergency contacts
+                    viewModelScope.launch {
+                        _state.update { currentState ->
+                            currentState.copy(
+                                emergencyContacts = emergencyContacts.getLocalEmergencyContacts()
+                            )
+                        }
+                    }
+                }
             ),
             QuickAction(
                 id = "nearest_hospital",
@@ -237,6 +480,19 @@ class CrisisHandbookViewModel @Inject constructor(
                 icon = "hospital",
                 action = {
                     viewModelScope.launch {
+                        clearStateForNewAction()
+                        if (!appContext.isLocationEnabled()) {
+                            Toast.makeText(
+                                appContext,
+                                "Turn on Location (GPS) to find nearby hospitals",
+                                Toast.LENGTH_LONG
+                            ).show()
+
+                            val intent = Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            appContext.startActivity(intent)
+                            return@launch
+                        }
                         showNearestHospitalsDirectly()
                     }
                 }
@@ -245,95 +501,206 @@ class CrisisHandbookViewModel @Inject constructor(
                 id = "first_aid",
                 title = "First Aid",
                 icon = "medical",
-                action = { handleEmergencyQuery("first aid instructions") }
+                action = {
+                    clearStateForNewAction()
+                    // Show general first aid prompt
+                    _state.update {
+                        it.copy(
+                            response = """
+                        🏥 First Aid Assistant Ready
+                        
+                        Please describe the situation or injury:
+                        - Type of injury (cuts, burns, fractures, etc.)
+                        - Severity and symptoms
+                        - Any immediate concerns
+                        
+                        Or try these common scenarios:
+                        • "Someone is choking"
+                        • "Severe bleeding from a cut"
+                        • "Person fainted"
+                        • "Burn from hot water"
+                        • "Possible broken bone"
+                        
+                        Type your query below and press enter.
+                        """.trimIndent(),
+                            isProcessing = false
+                        )
+                    }
+                }
             ),
             QuickAction(
                 id = "report_accident",
                 title = "Report Accident",
                 icon = "warning",
                 action = {
+                    clearStateForNewAction()
                     showAccidentReportingGuide()
                 }
             )
         )
     }
 
+    private fun clearStateForNewAction() {
+        _state.update { currentState ->
+            currentState.copy(
+                response = null,
+                emergencyContacts = if (currentState.emergencyContacts.isNotEmpty()) {
+                    emptyList()  // Clear if showing specific contact
+                } else {
+                    currentState.emergencyContacts
+                },
+                nearbyFacilities = emptyList(),
+                mapState = currentState.mapState?.copy(
+                    facilities = emptyList(),
+                    route = null,
+                    estimatedTime = null
+                ),
+                error = null
+            )
+        }
+    }
+
+
+
+    fun checkDatabaseContents() {
+        viewModelScope.launch {
+            try {
+                val totalHospitals = emergencyDb.hospitalDao().countAll()
+                val allHospitals = emergencyDb.hospitalDao().getAllHospitals() // You'll need to add this query
+
+                val diagnosticInfo = buildString {
+                    appendLine("🔍 DATABASE DIAGNOSTIC")
+                    appendLine("Total hospitals: $totalHospitals")
+                    appendLine("\nHospitals by city:")
+
+                    val cities = allHospitals.groupBy { it.address.substringAfterLast(", ") }
+                    cities.forEach { (city, hospitals) ->
+                        appendLine("$city: ${hospitals.size} hospitals")
+                        hospitals.take(3).forEach { h ->
+                            appendLine("  - ${h.name}")
+                        }
+                    }
+                }
+
+                _state.update {
+                    it.copy(
+                        response = diagnosticInfo,
+                        isProcessing = false
+                    )
+                }
+
+                Timber.d(diagnosticInfo)
+            } catch (e: Exception) {
+                Timber.e(e, "Error checking database")
+                _state.update {
+                    it.copy(
+                        error = "Database check failed: ${e.message}",
+                        isProcessing = false
+                    )
+                }
+            }
+        }
+    }
+
     private suspend fun showNearestHospitalsDirectly() {
         _state.update { it.copy(isProcessing = true, error = null) }
 
         try {
-            val location = _state.value.mapState?.userLocation
+            val location = getFreshLocation(appContext)
             if (location == null) {
                 _state.update {
                     it.copy(
                         isProcessing = false,
-                        error = "Please enable location to find nearest hospitals"
+                        error = "Waiting for GPS lock… try again in a few seconds"
                     )
                 }
                 return
             }
 
-            // Get hospitals from database
-            val hospitals = emergencyDb.hospitalDao().getNearbyHospitals(
-                latitude = location.latitude,
-                longitude = location.longitude,
-                maxDistanceKm = 10.0,
-                specialization = "general"
-            )
+            // Log current location for debugging
+            Timber.d("User location: ${location.latitude}, ${location.longitude}")
 
-            if (hospitals.isNotEmpty()) {
-                showOnOfflineMap(hospitals)
-            } else {
-                // If no hospitals in database, show default Accra hospitals
-                val defaultHospitals = listOf(
-                    Hospital(
-                        id = "korle_bu",
-                        name = "Korle Bu Teaching Hospital",
-                        address = "Guggisberg Ave, Accra",
-                        phone = "0302674000",
-                        latitude = 5.5365,
-                        longitude = -0.2257,
-                        specialization = "general",
-                        hasEmergency = true
-                    ).apply {
-                        distanceKm = calculateDistance(location, this)
-                        estimatedMinutes = (distanceKm * 2.5).toInt()
-                    },
-                    Hospital(
-                        id = "ridge",
-                        name = "Ridge Hospital",
-                        address = "Castle Rd, Accra",
-                        phone = "0302667812",
-                        latitude = 5.5641,
-                        longitude = -0.1969,
-                        specialization = "general",
-                        hasEmergency = true
-                    ).apply {
-                        distanceKm = calculateDistance(location, this)
-                        estimatedMinutes = (distanceKm * 2.5).toInt()
-                    },
-                    Hospital(
-                        id = "37_military",
-                        name = "37 Military Hospital",
-                        address = "Liberation Rd, Accra",
-                        phone = "0302779906",
-                        latitude = 5.6202,
-                        longitude = -0.1713,
-                        specialization = "trauma",
-                        hasEmergency = true
-                    ).apply {
-                        distanceKm = calculateDistance(location, this)
-                        estimatedMinutes = (distanceKm * 2.5).toInt()
+            // Try different search radii - expanding search if nothing found nearby
+            val searchRadii = listOf(10.0, 25.0, 50.0, 100.0, 200.0, 500.0) // km
+            var hospitals = emptyList<Hospital>()
+            var searchRadius = 0.0
+
+            for (radius in searchRadii) {
+                try {
+                    hospitals = emergencyDb.hospitalDao().getNearbyHospitals(
+                        latitude = location.latitude,
+                        longitude = location.longitude,
+                        maxDistanceKm = radius,
+                        specialization = "general"
+                    )
+
+                    if (hospitals.isNotEmpty()) {
+                        searchRadius = radius
+                        Timber.d("Found ${hospitals.size} hospitals within ${radius}km")
+                        break
                     }
-                ).sortedBy { it.distanceKm }
+                } catch (e: Exception) {
+                    Timber.e(e, "Error accessing database at radius $radius")
+                }
+            }
 
-                showOnOfflineMap(defaultHospitals)
+            when {
+                hospitals.isNotEmpty() -> {
+                    // Found hospitals nearby
+                    showOnOfflineMap(hospitals.take(10)) // Show max 10 closest
+
+                    // If we had to search far, add a note
+                    if (searchRadius > 50) {
+                        _state.update { currentState ->
+                            currentState.copy(
+                                response = "Note: The nearest hospitals are ${searchRadius.toInt()}km away. In case of emergency, call 112 or 193 immediately for ambulance services."
+                            )
+                        }
+                    }
+                }
+
+                else -> {
+                    // No hospitals found even with expanded search
+                    _state.update {
+                        it.copy(
+                            isProcessing = false,
+                            response = """
+                            ⚠️ No hospitals found in the database near your location.
+                            
+                            📍 Your coordinates: ${String.format("%.4f", location.latitude)}, ${String.format("%.4f", location.longitude)}
+                            
+                            Emergency numbers (work nationwide):
+                            📞 General Emergency: 112
+                            👮 Police: 191
+                            🚑 Ambulance: 193
+                            🔥 Fire: 192
+                            
+                            What to do:
+                            1. Call 193 for medical emergencies
+                            2. Ask locals for the nearest hospital
+                            3. Try searching online for hospitals in your area
+                            
+                            The app's hospital database covers major cities but may not include all areas yet.
+                        """.trimIndent(),
+                            emergencyContacts = emergencyContacts.getLocalEmergencyContacts()
+                        )
+                    }
+
+                    // Log for debugging
+                    Timber.w("No hospitals found near lat=${location.latitude}, lon=${location.longitude} even with ${searchRadii.last()}km radius")
+
+                    // Check if database has any hospitals at all
+                    val totalHospitals = emergencyDb.hospitalDao().countAll()
+                    Timber.d("Total hospitals in database: $totalHospitals")
+                }
             }
         } catch (e: Exception) {
+            Timber.e(e, "Error in hospital search")
             _state.update {
                 it.copy(
                     isProcessing = false,
-                    error = "Error finding hospitals: ${e.message}"
+                    error = "Error finding hospitals: ${e.message}",
+                    emergencyContacts = emergencyContacts.getLocalEmergencyContacts()
                 )
             }
         }
@@ -355,7 +722,13 @@ class CrisisHandbookViewModel @Inject constructor(
     }
 
     private fun showAccidentReportingGuide() {
-        val guideText = """
+        viewModelScope.launch {
+            _state.update { it.copy(isProcessing = true, error = null) }
+
+            // Small delay to ensure UI updates
+            kotlinx.coroutines.delay(100)
+
+            val guideText = """
             📋 ACCIDENT REPORTING GUIDE
             
             1. ENSURE SAFETY FIRST
@@ -400,14 +773,14 @@ class CrisisHandbookViewModel @Inject constructor(
             ⚠️ If injuries are involved, do not move vehicles until police arrive!
         """.trimIndent()
 
-        _state.update {
-            it.copy(
-                response = guideText,
-                isProcessing = false
-            )
+            _state.update {
+                it.copy(
+                    response = guideText,
+                    isProcessing = false
+                )
+            }
         }
     }
-
 
     data class QuickAction(
         val id: String,

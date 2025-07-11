@@ -43,6 +43,7 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
+            manifestPlaceholders["logLevel"] = "DEBUG"
             buildConfigField("Boolean", "ENABLE_PERFORMANCE_MONITORING", "true")
         }
         release {
