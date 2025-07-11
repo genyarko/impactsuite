@@ -1,7 +1,9 @@
 package com.example.mygemma3n.feature.crisis
 
 import android.Manifest
+import android.content.Intent
 import android.location.Location
+import android.net.Uri
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -14,6 +16,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -36,7 +40,6 @@ import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.maps.android.compose.*
-import kotlinx.coroutines.launch
 import timber.log.Timber
 
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
@@ -223,7 +226,7 @@ private fun CrisisTopBar(
         },
         navigationIcon = {
             IconButton(onClick = onBackClick) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(
@@ -317,7 +320,7 @@ private fun CrisisMainContent(
                 modifier = Modifier.fillMaxWidth(),
                 trailingIcon = {
                     IconButton(onClick = onQuerySubmit) {
-                        Icon(Icons.Default.Send, contentDescription = "Submit")
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Submit")
                     }
                 },
                 singleLine = false,
@@ -673,7 +676,7 @@ private fun CrisisMapView(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = onBackClick) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                     Text(
                         "Emergency Facilities Map",
@@ -699,13 +702,24 @@ private fun EmergencyContactDialog(
     contact: EmergencyContactInfo,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
+
+    fun dialNumber(number: String) {
+        val intent = Intent(Intent.ACTION_DIAL).apply {
+            data = Uri.parse("tel:$number")
+        }
+        context.startActivity(intent)
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = {
             Icon(
                 Icons.Default.Phone,
                 contentDescription = null,
-                modifier = Modifier.size(48.dp),
+                modifier = Modifier
+                    .size(48.dp)
+                    .clickable { dialNumber(contact.primaryNumber) },
                 tint = MaterialTheme.colorScheme.primary
             )
         },
@@ -714,21 +728,79 @@ private fun EmergencyContactDialog(
         },
         text = {
             Column {
-                Text(
-                    "Primary: ${contact.primaryNumber}",
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Bold
-                )
-                contact.secondaryNumber?.let {
-                    Text("Secondary: $it")
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { dialNumber(contact.primaryNumber) }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Phone,
+                        contentDescription = "Call primary",
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "Primary: ${contact.primaryNumber}",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
-                contact.smsNumber?.let {
-                    Text("SMS: $it")
+
+                contact.secondaryNumber?.let { number ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { dialNumber(number) }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Phone,
+                            contentDescription = "Call secondary",
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.secondary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "Secondary: $number",
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    }
                 }
+
+                contact.smsNumber?.let { number ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                val smsIntent = Intent(Intent.ACTION_VIEW).apply {
+                                    data = Uri.parse("sms:$number")
+                                }
+                                context.startActivity(smsIntent)
+                            }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Email,
+                            contentDescription = "Send SMS",
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.tertiary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("SMS: $number")
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    "Tap the number to call directly",
-                    style = MaterialTheme.typography.bodySmall
+                    "Tap any number to call or SMS directly",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
                 )
             }
         },

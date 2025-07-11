@@ -10,11 +10,16 @@ import com.example.mygemma3n.feature.caption.SpeechRecognitionService
 import com.example.mygemma3n.service.AudioCaptureService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.plus
+import kotlinx.coroutines.withTimeout
 import timber.log.Timber
 import java.util.UUID
 import javax.inject.Inject
@@ -39,30 +44,15 @@ class CBTCoachViewModel @Inject constructor(
 
     private var currentSessionId: String? = null
     private var recordingJob: Job? = null
-
-    data class CBTSessionState(
-        val isActive: Boolean = false,
-        val currentEmotion: Emotion? = null,
-        val suggestedTechnique: CBTTechnique? = null,
-        val conversation: List<Message> = emptyList(),
-        val thoughtRecord: ThoughtRecord? = null,
-        val isRecording: Boolean = false,
-        val liveTranscript: String = "",
-        val currentStep: Int = 0,
-        val sessionDuration: Long = 0L,
-        val personalizedRecommendations: CBTSessionManager.PersonalizedRecommendations? = null,
-        val sessionInsights: CBTSessionManager.SessionInsights? = null
-    )
+    private val audioBuffer = mutableListOf<FloatArray>()  // Store all audio chunks
 
     init {
-        // Initialize the API if needed
         viewModelScope.launch {
             try {
                 if (!geminiApiService.isInitialized()) {
                     val modelConfig = modelManager.selectOptimalModel(requireQuality = true)
                     modelManager.getModel(modelConfig)
                 }
-                // Initialize CBT knowledge base
                 sessionManager.initializeKnowledgeBase()
             } catch (e: Exception) {
                 Timber.e(e, "Failed to initialize Gemma 3N API or knowledge base")
@@ -86,90 +76,153 @@ class CBTCoachViewModel @Inject constructor(
 
     fun endSession() {
         viewModelScope.launch {
-            currentSessionId?.let { sessionId ->
-                sessionRepository.updateSessionEffectiveness(
-                    sessionId,
-                    calculateSessionEffectiveness()
-                )
+            currentSessionId?.let { id ->
+                sessionRepository.updateSessionEffectiveness(id, calculateSessionEffectiveness())
             }
         }
-        _sessionState.update {
-            it.copy(isActive = false)
-        }
+        _sessionState.update { it.copy(isActive = false) }
     }
 
     fun startRecording() {
-        if (_sessionState.value.isRecording) return
+        if (sessionState.value.isRecording) return
 
-        val intent = Intent(context, AudioCaptureService::class.java).apply {
+        /* ─── 1. Launch the microphone service ─── */
+        Intent(context, AudioCaptureService::class.java).apply {
             action = AudioCaptureService.ACTION_START_CAPTURE
+            context.startService(this)
         }
-        context.startService(intent)
 
-        recordingJob = viewModelScope.launch {
-            _sessionState.update { it.copy(isRecording = true, liveTranscript = "") }
+        audioBuffer.clear()
+        _sessionState.update { it.copy(userTypedInput = "", isRecording = true, error = null) }
 
-            speechService
-                .transcribeAudioStream(
-                    AudioCaptureService.audioDataFlow.filterNotNull(),
-                    "en-US"
-                )
-                .collect { result ->
-                    _sessionState.update { it.copy(liveTranscript = result.transcript) }
-
-                    if (result.isFinal && result.transcript.isNotBlank()) {
-                        processTextInput(result.transcript)
-                        _sessionState.update { state -> state.copy(liveTranscript = "") }
-                    }
-                }
-        }
+        /* ─── 2. Collect audio chunks ─── */
+        recordingJob = AudioCaptureService.audioDataFlow
+            .filterNotNull()
+            .onEach { chunk ->
+                audioBuffer.add(chunk.clone())  // Store each chunk
+                Timber.d("Collected audio chunk ${audioBuffer.size}, size: ${chunk.size}")
+            }
+            .catch { e ->
+                Timber.e(e, "Audio collection error")
+                _sessionState.update { it.copy(error = "Recording error: ${e.message}") }
+            }
+            .launchIn(viewModelScope + Dispatchers.IO)
     }
 
     fun stopRecording() {
-        val intent = Intent(context, AudioCaptureService::class.java).apply {
+        if (!sessionState.value.isRecording) return
+
+        /* ─── 1. Tell AudioCaptureService to stop ─── */
+        Intent(context, AudioCaptureService::class.java).apply {
             action = AudioCaptureService.ACTION_STOP_CAPTURE
+            context.startService(this)
         }
-        context.startService(intent)
+
+        /* ─── 2. Stop collecting audio ─── */
         recordingJob?.cancel()
         recordingJob = null
-        _sessionState.update { it.copy(isRecording = false, liveTranscript = "") }
+
+        /* ─── 3. Update UI state ─── */
+        _sessionState.update { it.copy(isRecording = false) }
+
+        /* ─── 4. Transcribe the collected audio ─── */
+        viewModelScope.launch {
+            try {
+                _sessionState.update { it.copy(userTypedInput = "Transcribing...") }
+
+                if (audioBuffer.isEmpty()) {
+                    _sessionState.update {
+                        it.copy(
+                            userTypedInput = "",
+                            error = "No audio recorded. Please try again."
+                        )
+                    }
+                    return@launch
+                }
+
+                // Combine all audio chunks into one array
+                val totalSize = audioBuffer.sumOf { it.size }
+                val combinedAudio = FloatArray(totalSize)
+                var offset = 0
+                audioBuffer.forEach { chunk ->
+                    chunk.copyInto(combinedAudio, offset)
+                    offset += chunk.size
+                }
+
+                Timber.d("Transcribing ${audioBuffer.size} chunks, total size: $totalSize samples")
+
+                // Transcribe the entire audio at once
+                val transcript = transcribeFullAudio(combinedAudio)
+
+                if (transcript.isNotEmpty()) {
+                    _sessionState.update {
+                        it.copy(
+                            userTypedInput = transcript,
+                            error = null
+                        )
+                    }
+                } else {
+                    _sessionState.update {
+                        it.copy(
+                            userTypedInput = "",
+                            error = "No speech detected. Please speak clearly into the microphone."
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Transcription failed")
+                _sessionState.update {
+                    it.copy(
+                        userTypedInput = "",
+                        error = "Transcription failed: ${e.message}"
+                    )
+                }
+            }
+        }
     }
+
+    private suspend fun transcribeFullAudio(audioData: FloatArray): String {
+        if (!speechService.isInitialized) {
+            throw IllegalStateException("Speech service not initialized")
+        }
+
+        // Convert to PCM bytes
+        val pcmData = ByteArray(audioData.size * 2)
+        audioData.forEachIndexed { i, sample ->
+            val value = (sample.coerceIn(-1f, 1f) * 32767).toInt()
+            pcmData[i * 2] = (value and 0xFF).toByte()
+            pcmData[i * 2 + 1] = ((value shr 8) and 0xFF).toByte()
+        }
+
+        // Call the speech service directly
+        return speechService.transcribeAudioData(pcmData, "en-US")
+    }
+
+    /* ────────────── Conversation processing ─────────────────────────── */
 
     suspend fun processTextInput(userInput: String) {
         _isLoading.value = true
-
         try {
-            // Add user message
-            _sessionState.update {
-                it.copy(conversation = it.conversation + Message.User(userInput))
-            }
-
-            // Generate CBT response
-            val response = generateCBTResponse(userInput)
-
-            // Parse technique if mentioned
+            _sessionState.update { it.copy(conversation = it.conversation + Message.User(userInput)) }
+            val response  = generateCBTResponse(userInput)
             val technique = parseCBTTechnique(response)
 
-            // Add AI response
             _sessionState.update {
                 it.copy(
                     conversation = it.conversation + Message.AI(
-                        content     = response,
-                        techniqueId = technique?.id
+                        content      = response,
+                        techniqueId  = technique?.id
                     ),
                     suggestedTechnique = technique ?: it.suggestedTechnique
                 )
             }
-
-            // Save session progress
             saveSessionProgress()
-
         } catch (e: Exception) {
             Timber.e(e, "Error processing text input")
             _sessionState.update {
                 it.copy(
                     conversation = it.conversation + Message.AI(
-                        content = "I apologize, but I'm having trouble processing that. Could you please try again?"
+                        "I apologize, but I'm having trouble processing that. Could you please try again?"
                     )
                 )
             }
@@ -177,6 +230,32 @@ class CBTCoachViewModel @Inject constructor(
             _isLoading.value = false
         }
     }
+
+    private suspend fun parseCBTTechnique(response: String): CBTTechnique? {
+        // Simple technique detection based on keywords in the response
+        val lowercaseResponse = response.lowercase()
+
+        return when {
+            lowercaseResponse.contains("thought record") ||
+                    lowercaseResponse.contains("examining evidence") -> {
+                cbtTechniques.techniques.find { it.name.contains("Thought Record") }
+            }
+            lowercaseResponse.contains("breathing") ||
+                    lowercaseResponse.contains("relaxation") -> {
+                cbtTechniques.techniques.find { it.name.contains("Breathing") || it.name.contains("Relaxation") }
+            }
+            lowercaseResponse.contains("mindfulness") -> {
+                cbtTechniques.techniques.find { it.name.contains("Mindfulness") }
+            }
+            lowercaseResponse.contains("behavioral activation") ||
+                    lowercaseResponse.contains("activity") -> {
+                cbtTechniques.techniques.find { it.name.contains("Behavioral Activation") }
+            }
+            else -> null
+        }
+    }
+
+    // Rest of the methods remain the same...
 
     suspend fun processVoiceInput(audioData: FloatArray) {
         _isLoading.value = true
@@ -231,7 +310,6 @@ class CBTCoachViewModel @Inject constructor(
                     suggestedTechnique = recommendedTechnique
                 )
             }
-
 
             // Save session
             saveSessionProgress()
@@ -359,9 +437,15 @@ class CBTCoachViewModel @Inject constructor(
     private suspend fun transcribeAudio(audioData: FloatArray): String {
         if (!speechService.isInitialized) return ""
 
-        return speechService
-            .transcribeAudioStream(flowOf(audioData))
-            .firstOrNull()?.transcript.orEmpty()
+        // Convert to PCM bytes
+        val pcmData = ByteArray(audioData.size * 2)
+        audioData.forEachIndexed { i, sample ->
+            val value = (sample.coerceIn(-1f, 1f) * 32767).toInt()
+            pcmData[i * 2] = (value and 0xFF).toByte()
+            pcmData[i * 2 + 1] = ((value shr 8) and 0xFF).toByte()
+        }
+
+        return speechService.transcribeAudioData(pcmData, "en-US")
     }
 
     fun createThoughtRecord(
@@ -447,7 +531,6 @@ class CBTCoachViewModel @Inject constructor(
         }
     }
 
-
     private suspend fun saveSessionProgress() {
         val state = _sessionState.value
         currentSessionId?.let { sessionId ->
@@ -470,7 +553,6 @@ class CBTCoachViewModel @Inject constructor(
             sessionRepository.saveSession(session)
         }
     }
-
 
     private fun calculateSessionEffectiveness(): Float {
         val state = _sessionState.value
@@ -508,11 +590,45 @@ class CBTCoachViewModel @Inject constructor(
         return "A more balanced perspective on the situation"
     }
 
-    override fun onCleared() {
-        super.onCleared()
-        if (_sessionState.value.isActive) {
-            endSession()
+    fun updateUserTypedInput(text: String) {
+        _sessionState.update { it.copy(userTypedInput = text, error = null) }
+    }
+
+    // Add this test function to verify STT is working
+    fun testSpeechRecognition() {
+        viewModelScope.launch {
+            try {
+                _sessionState.update { it.copy(userTypedInput = "Testing speech recognition...") }
+
+                // Generate a test audio signal (1 second of 440Hz tone)
+                val testAudio = FloatArray(16000) { i ->
+                    (kotlin.math.sin(2 * kotlin.math.PI * 440 * i / 16000) * 0.3).toFloat()
+                }
+
+                val result = transcribeFullAudio(testAudio)
+
+                _sessionState.update {
+                    it.copy(
+                        userTypedInput = "",
+                        error = "Test complete. Result: ${if (result.isEmpty()) "No transcription (expected for test tone)" else result}"
+                    )
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "STT test failed")
+                _sessionState.update {
+                    it.copy(
+                        userTypedInput = "",
+                        error = "STT test failed: ${e.message}"
+                    )
+                }
+            }
         }
+    }
+
+    override fun onCleared() {
+        stopRecording()
+        if (_sessionState.value.isActive) endSession()
+        super.onCleared()
     }
 
     fun getPersonalizedRecommendations(currentIssue: String) {
@@ -555,7 +671,6 @@ class CBTCoachViewModel @Inject constructor(
             }
         }
     }
-
 
     suspend fun generateSessionSummary() {
         val state = _sessionState.value

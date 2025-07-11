@@ -6,9 +6,7 @@ import androidx.work.WorkManager
 import com.example.mygemma3n.data.*
 import com.example.mygemma3n.data.local.*
 import com.example.mygemma3n.data.local.dao.SubjectDao
-import com.example.mygemma3n.feature.caption.AudioCapture
 import com.example.mygemma3n.feature.caption.SpeechRecognitionService
-import com.example.mygemma3n.feature.caption.TranslationCache
 import com.example.mygemma3n.feature.cbt.*
 import com.example.mygemma3n.feature.crisis.EmergencyContactsRepository
 import com.example.mygemma3n.feature.crisis.OfflineMapService
@@ -16,7 +14,6 @@ import com.example.mygemma3n.feature.plant.PlantDatabase
 import com.example.mygemma3n.feature.quiz.EducationalContentRepository
 import com.example.mygemma3n.feature.quiz.QuizDatabase
 import com.example.mygemma3n.feature.quiz.QuizRepository
-import com.example.mygemma3n.gemma.GemmaEngine
 import com.example.mygemma3n.gemma.GemmaModelManager
 import com.example.mygemma3n.remote.EmergencyDatabase
 import com.example.mygemma3n.shared_utilities.*

@@ -13,8 +13,8 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import javax.inject.Inject
-import kotlin.math.log10     // NEW
-import kotlin.math.max      // NEW
+import kotlin.math.log10
+import kotlin.math.max
 
 @HiltViewModel
 class LiveCaptionViewModel @Inject constructor(
@@ -92,17 +92,12 @@ class LiveCaptionViewModel @Inject constructor(
                         val now = System.currentTimeMillis()
                         if (now - lastAudioUpdate > 100) {          // update ~10 Hz
                             val rms = AudioUtils.calculateRMS(audioData)
-
-                            /*  convert to dBFS (−∞..0 dB).
-                                We clamp floor at −90 dBFS for stability.            */
                             val dbfs = if (rms <= 0f) -90f else max(-90f, 20f * log10(rms))
-                            /*  Map −90 dBFS → 0.0  and  −20 dBFS → 1.0             */
                             val normalizedLevel = ((dbfs + 90f) / 70f).coerceIn(0f, 1f)
 
                             _captionState.update { state ->
                                 state.copy(
                                     lastAudioLevel = normalizedLevel,
-                                    /*  show spinner while level > −60 dBFS ≈ rms 0.001   */
                                     isProcessingAudio = dbfs > -60f
                                 )
                             }
@@ -113,7 +108,7 @@ class LiveCaptionViewModel @Inject constructor(
 
             /* ─── 2.  SPEECH-TO-TEXT  ─── */
             speechService
-                .transcribeAudioStream(
+                .transcribeLiveCaptions(                                   // ← updated call
                     AudioCaptureService.audioDataFlow.filterNotNull(),
                     _captionState.value.sourceLanguage.toGoogleLanguageCode()
                 )
@@ -186,7 +181,7 @@ class LiveCaptionViewModel @Inject constructor(
         val latencyMs: Long = 0,
         val error: String? = null,
         val isProcessingAudio: Boolean = false,
-        val lastAudioLevel: Float = 0f,          // 0.0–1.0 for UI bar
+        val lastAudioLevel: Float = 0f,
         val isInterimResult: Boolean = false
     )
 

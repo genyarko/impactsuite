@@ -35,8 +35,13 @@ fun CBTCoachScreen(
     val coroutineScope = rememberCoroutineScope()
     val audioPermission = rememberAudioPermissionState()
 
-    var userInput by remember { mutableStateOf("") }
+    var userInput  by remember { mutableStateOf("") }
     var showThoughtRecord by remember { mutableStateOf(false) }
+
+    /* Update userInput when state changes */
+    LaunchedEffect(sessionState.userTypedInput) {
+        userInput = sessionState.userTypedInput
+    }
 
     Column(
         modifier = Modifier
@@ -83,13 +88,13 @@ fun CBTCoachScreen(
                         )
                         sessionState.suggestedTechnique?.let {
                             LinearProgressIndicator(
-                            progress = { (sessionState.currentStep + 1f) / it.steps.size },
-                            modifier = Modifier
-                                                                .fillMaxWidth()
-                                                                .padding(top = 4.dp),
-                            color = ProgressIndicatorDefaults.linearColor,
-                            trackColor = ProgressIndicatorDefaults.linearTrackColor,
-                            strokeCap = ProgressIndicatorDefaults.LinearStrokeCap,
+                                progress = { (sessionState.currentStep + 1f) / it.steps.size },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp),
+                                color = ProgressIndicatorDefaults.linearColor,
+                                trackColor = ProgressIndicatorDefaults.linearTrackColor,
+                                strokeCap = ProgressIndicatorDefaults.LinearStrokeCap,
                             )
                         }
                     }
@@ -108,6 +113,24 @@ fun CBTCoachScreen(
                 MessageBubble(
                     message       = message,
                     cbtTechniques = viewModel.cbtTechniques
+                )
+            }
+        }
+
+        /* ───────── Error Display (if any) ───────── */
+        sessionState.error?.let { error ->
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer
+                )
+            ) {
+                Text(
+                    text = error,
+                    modifier = Modifier.padding(8.dp),
+                    color = MaterialTheme.colorScheme.onErrorContainer
                 )
             }
         }
@@ -159,11 +182,34 @@ fun CBTCoachScreen(
             if (sessionState.isActive) {
                 OutlinedTextField(
                     value         = userInput,
-                    onValueChange = { userInput = it },
+                    onValueChange = { new ->
+                        // Let the user type only when not recording
+                        if (!sessionState.isRecording) {
+                            userInput = new
+                            viewModel.updateUserTypedInput(new)
+                        }
+                    },
                     modifier      = Modifier.weight(1f),
-                    placeholder   = { Text("Share your thoughts…") },
-                    enabled       = !isLoading,
-                    shape         = RoundedCornerShape(24.dp)
+                    placeholder   = {
+                        Text(
+                            when {
+                                sessionState.isRecording -> "Recording... Speak now"
+                                userInput == "Transcribing..." -> "Transcribing..."
+                                else -> "Share your thoughts…"
+                            }
+                        )
+                    },
+                    enabled       = !isLoading,  // Allow viewing while recording
+                    readOnly      = sessionState.isRecording,  // Make read-only while recording
+                    shape         = RoundedCornerShape(24.dp),
+                    colors        = if (sessionState.isRecording) {
+                        OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.primary
+                        )
+                    } else {
+                        OutlinedTextFieldDefaults.colors()
+                    }
                 )
 
                 IconButton(
@@ -183,12 +229,17 @@ fun CBTCoachScreen(
                     if (sessionState.isRecording) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(24.dp),
-                            strokeWidth = 2.dp
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.primary
                         )
                     } else {
                         Icon(
                             imageVector = Icons.Default.Mic,
-                            contentDescription = "Record"
+                            contentDescription = "Record",
+                            tint = if (audioPermission.hasPermission)
+                                MaterialTheme.colorScheme.primary
+                            else
+                                MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -199,10 +250,11 @@ fun CBTCoachScreen(
                             coroutineScope.launch {
                                 viewModel.processTextInput(userInput)
                                 userInput = ""
+                                viewModel.updateUserTypedInput("")
                             }
                         }
                     },
-                    enabled = userInput.isNotBlank() && !isLoading
+                    enabled = userInput.isNotBlank() && !isLoading && !sessionState.isRecording
                 ) {
                     if (isLoading) {
                         CircularProgressIndicator(
@@ -222,7 +274,7 @@ fun CBTCoachScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text  = "Let’s begin",
+                        text  = "Let's begin",
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

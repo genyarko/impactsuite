@@ -33,7 +33,7 @@ enum class TechniqueCategory {
 
 @Singleton
 class CBTTechniques @Inject constructor() {
-    private val techniques = listOf(
+    val techniques = listOf(
         CBTTechnique(
             id = "thought_challenging",
             name = "Thought Challenging",
