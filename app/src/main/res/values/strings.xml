@@ -1,3 +1,5 @@
 <resources>
-    <string name="app_name">My Gemma 3N</string>
+    <string name="app_name">Impact Suite</string>
+    <string name="google_maps_key">AlzaSyA-t1S5pkVe3yX09bGW9u1BqC8JMpYowO4</string>
+
 </resources>

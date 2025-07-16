@@ -1,15 +1,15 @@
 package com.example.mygemma3n.di
 
-
 import android.content.Context
 import androidx.room.Room
 import androidx.work.WorkManager
+import com.example.mygemma3n.data.GeminiApiService
 import com.example.mygemma3n.data.ModelDownloadManager
 import com.example.mygemma3n.data.ModelRepository
+import com.example.mygemma3n.data.TextEmbeddingService
+import com.example.mygemma3n.data.UnifiedGemmaService
 import com.example.mygemma3n.data.local.*
 import com.example.mygemma3n.data.local.dao.SubjectDao
-import com.example.mygemma3n.feature.caption.AudioCapture
-import com.example.mygemma3n.feature.caption.TranslationCache
 import com.example.mygemma3n.feature.cbt.*
 import com.example.mygemma3n.feature.crisis.EmergencyContactsRepository
 import com.example.mygemma3n.feature.crisis.OfflineMapService
@@ -17,8 +17,6 @@ import com.example.mygemma3n.feature.plant.PlantDatabase
 import com.example.mygemma3n.feature.quiz.EducationalContentRepository
 import com.example.mygemma3n.feature.quiz.QuizDatabase
 import com.example.mygemma3n.feature.quiz.QuizRepository
-import com.example.mygemma3n.gemma.GemmaEngine
-import com.example.mygemma3n.gemma.GemmaModelManager
 import com.example.mygemma3n.remote.EmergencyDatabase
 import com.example.mygemma3n.shared_utilities.*
 import com.google.firebase.analytics.FirebaseAnalytics
@@ -34,7 +32,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import javax.inject.Singleton
-
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -54,7 +51,6 @@ object AppModule {
     @Singleton
     fun provideFirebaseAnalytics(): FirebaseAnalytics = Firebase.analytics
 
-
     // Databases
     @Provides
     @Singleton
@@ -62,17 +58,16 @@ object AppModule {
         @ApplicationContext context: Context
     ): AppDatabase {
         return Room.databaseBuilder(
-            context,
-            AppDatabase::class.java,
-            "vector_database"
-        ).fallbackToDestructiveMigration()
+                context,
+                AppDatabase::class.java,
+                "vector_database"
+            ).fallbackToDestructiveMigration(false)
             .build()
     }
 
     @Provides
     @Singleton
     fun provideSubjectDao(db: AppDatabase): SubjectDao = db.subjectDao()
-
 
     @Provides
     @Singleton
@@ -96,7 +91,7 @@ object AppModule {
             CBTDatabase::class.java,
             "cbt_database"
         )
-            .fallbackToDestructiveMigration()
+            .fallbackToDestructiveMigration(false)
             .build()
     }
 
@@ -110,7 +105,7 @@ object AppModule {
             PlantDatabase::class.java,
             "plant_database"
         )
-            .fallbackToDestructiveMigration()
+            .fallbackToDestructiveMigration(false)
             .addCallback(object : androidx.room.RoomDatabase.Callback() {
                 override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                     super.onCreate(db)
@@ -130,7 +125,7 @@ object AppModule {
             QuizDatabase::class.java,
             "quiz_database"
         )
-            .fallbackToDestructiveMigration()
+            .fallbackToDestructiveMigration(false)
             .build()
     }
 
@@ -152,8 +147,9 @@ object AppModule {
     @Provides
     @Singleton
     fun provideSessionRepository(
-        cbtDatabase: CBTDatabase
-    ): SessionRepository = SessionRepository(cbtDatabase)
+        cbtDatabase: CBTDatabase,
+        cbtTechniques: CBTTechniques,    // ← add this
+    ): SessionRepository = SessionRepository(cbtDatabase, cbtTechniques)
 
     @Provides
     @Singleton
@@ -168,21 +164,12 @@ object AppModule {
         gson: Gson
     ): QuizRepository = QuizRepository(quizDatabase, gson)
 
-    // Gemma Engine and Model Manager
+    // Gemma Service - UPDATED to use UnifiedGemmaService
     @Provides
     @Singleton
-    fun provideGemmaEngine(
-        @ApplicationContext context: Context,
-        performanceMonitor: PerformanceMonitor
-    ): GemmaEngine = GemmaEngine(context, performanceMonitor)
-
-    @Provides
-    @Singleton
-    fun provideGemmaModelManager(
-        @ApplicationContext context: Context,
-        modelRepository: ModelRepository,
-        performanceMonitor: PerformanceMonitor
-    ): GemmaModelManager = GemmaModelManager(context, modelRepository, performanceMonitor)
+    fun provideUnifiedGemmaService(
+        @ApplicationContext context: Context
+    ): UnifiedGemmaService = UnifiedGemmaService(context)
 
     // Shared Utilities
     @Provides
@@ -193,27 +180,29 @@ object AppModule {
         scope: CoroutineScope
     ): PerformanceMonitor = PerformanceMonitor(context, firebaseAnalytics, scope)
 
-    @Provides
-    @Singleton
+    @Provides @Singleton
     fun provideMultimodalProcessor(
-        modelManager: GemmaModelManager
-    ): MultimodalProcessor = MultimodalProcessor(modelManager)
+        gemma: UnifiedGemmaService
+    ): MultimodalProcessor = MultimodalProcessor(gemma)
 
     @Provides
     @Singleton
     fun provideSubjectRepository(dao: SubjectDao): SubjectRepository =
         SubjectRepository(dao)
 
-
-
-
-    @Provides
-    @Singleton
+    @Provides @Singleton
     fun provideOfflineRAG(
         vectorDatabase: VectorDatabase,
         subjectRepository: SubjectRepository,
-        modelManager: GemmaModelManager
-    ): OfflineRAG = OfflineRAG(vectorDatabase, subjectRepository, modelManager)
+        gemma: UnifiedGemmaService,
+        embedderService: TextEmbeddingService   // ← add this
+    ): OfflineRAG = OfflineRAG(
+        vectorDatabase,
+        subjectRepository,
+        gemma,
+        embedderService
+    )
+
 
 
     @Provides
@@ -222,19 +211,15 @@ object AppModule {
         @ApplicationContext context: Context,
         locationService: LocationService,
         emergencyDatabase: EmergencyDatabase,
-        gemmaEngine: GemmaEngine
+        unifiedGemmaService: UnifiedGemmaService
     ): CrisisFunctionCalling = CrisisFunctionCalling(
         context,
         locationService,
         emergencyDatabase,
-        gemmaEngine
+        unifiedGemmaService
     )
 
     // Feature-specific services
-
-
-
-
     @Provides
     @Singleton
     fun provideLocationService(
@@ -252,9 +237,19 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideEmotionDetector(): EmotionDetector = EmotionDetector()
+    fun provideEmotionDetector(
+        gemmaService: UnifiedGemmaService
+    ): EmotionDetector = EmotionDetector(gemmaService)
+
 
     @Provides
     @Singleton
     fun provideCBTTechniques(): CBTTechniques = CBTTechniques()
+
+    @Provides
+    @Singleton
+    fun provideGeminiApiService(
+        @ApplicationContext context: Context
+    ): GeminiApiService = GeminiApiService(context)
+
 }

@@ -1,6 +1,7 @@
 package com.example.mygemma3n.shared_utilities
 
 import android.graphics.Bitmap
+import com.example.mygemma3n.data.UnifiedGemmaService
 import com.example.mygemma3n.gemma.GemmaModelManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -10,25 +11,44 @@ import java.nio.ByteOrder
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.min
+import androidx.core.graphics.scale
 
 @Singleton
 class MultimodalProcessor @Inject constructor(
-    private val modelManager: GemmaModelManager
+    private val gemma: UnifiedGemmaService
 ) {
 
-    enum class FeatureType {
-        LIVE_CAPTION,
-        QUIZ_GENERATOR,
-        CBT_COACH,
-        PLANT_SCANNER,
-        CRISIS_HANDBOOK
+    suspend fun processText(
+        text: String,
+        maxTokens: Int = 256
+    ): String = gemma.generateWithModel(         // one-shot helper in UnifiedGemmaService
+        prompt       = text.trim(),
+        modelVariant = UnifiedGemmaService.ModelVariant.FAST_2B,
+        maxTokens    = maxTokens,
+        temperature  = 0.7f
+    )
+
+    suspend fun processWithImage(
+        text: String,
+        image: Bitmap,
+        maxTokens: Int = 256
+    ): String {
+        val prompt = buildPrompt(text, image = image)
+        return gemma.generateWithModel(
+            prompt       = prompt,
+            modelVariant = UnifiedGemmaService.ModelVariant.QUALITY_4B,
+            maxTokens    = maxTokens,
+            temperature  = 0.7f
+        )
     }
 
+    enum class FeatureType { LIVE_CAPTION, QUIZ_GENERATOR, CBT_COACH, PLANT_SCANNER, CRISIS_HANDBOOK }
+
     data class MultimodalInput(
-        val text: String? = null,
-        val image: Bitmap? = null,
+        val text: String?             = null,
+        val image: Bitmap?            = null,
         val audioSamples: FloatArray? = null,
-        val audioSampleRate: Int = 16000
+        val audioSampleRate: Int      = 16_000
     ) {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
@@ -64,59 +84,52 @@ class MultimodalProcessor @Inject constructor(
         feature: FeatureType,
         maxTokens: Int = 512
     ): ProcessingResult = withContext(Dispatchers.Default) {
-        val startTime = System.currentTimeMillis()
+        val t0      = System.currentTimeMillis()
+        val variant = chooseVariant(feature, input)
+        val prompt  = buildPrompt(input.text, input.image, input.audioSamples)
 
-        // Select optimal model based on feature and input
-        val (model, modelName) = selectOptimalModel(feature, input)
-
-        // Prepare inputs according to Gemma 3n multimodal format
-        val inputTensors = prepareInterleavedInput(input, model)
-
-        // Run inference
-        val outputs = HashMap<Int, Any>()
-        val outputBuffer = ByteBuffer.allocateDirect(VOCAB_SIZE * 4).order(ByteOrder.nativeOrder())
-        outputs[0] = outputBuffer
-
-        model.runForMultipleInputsOutputs(
-            inputTensors.values.toTypedArray(),
-            outputs
+        val output  = gemma.generateWithModel(
+            prompt       = prompt,
+            modelVariant = variant,
+            maxTokens    = maxTokens,
+            temperature  = 0.7f
         )
-
-        // Decode output tokens
-        val result = decodeOutput(outputs)
-
-        val processingTime = System.currentTimeMillis() - startTime
 
         ProcessingResult(
-            text = result,
-            processingTimeMs = processingTime,
-            modelUsed = modelName
+            text             = output.trim(),
+            processingTimeMs = System.currentTimeMillis() - t0,
+            modelUsed        = variant.displayName
         )
     }
 
-    private suspend fun selectOptimalModel(
+    /*────────────── Model selection ─────────────*/
+
+    private fun chooseVariant(
         feature: FeatureType,
         input: MultimodalInput
-    ): Pair<Interpreter, String> {
-        return when {
-            // Crisis response needs fast 2B model for low latency
-            feature == FeatureType.CRISIS_HANDBOOK && input.audioSamples != null -> {
-                modelManager.getModel(GemmaModelManager.ModelConfig.FAST_2B) to "gemma3n-2b"
-            }
-            // Plant scanner needs quality 4B model for accuracy
-            feature == FeatureType.PLANT_SCANNER && input.image != null -> {
-                modelManager.getModel(GemmaModelManager.ModelConfig.QUALITY_4B) to "gemma3n-4b"
-            }
-            // Live caption needs balanced performance
-            feature == FeatureType.LIVE_CAPTION -> {
-                modelManager.getModel(GemmaModelManager.ModelConfig.BALANCED_3B) to "gemma3n-3b"
-            }
-            // Default to 3B for other features
-            else -> {
-                modelManager.getModel(GemmaModelManager.ModelConfig.BALANCED_3B) to "gemma3n-3b"
-            }
+    ): UnifiedGemmaService.ModelVariant =
+        when {
+            feature == FeatureType.CRISIS_HANDBOOK -> UnifiedGemmaService.ModelVariant.FAST_2B   // low-latency :contentReference[oaicite:3]{index=3}
+            feature == FeatureType.PLANT_SCANNER && input.image != null ->
+                UnifiedGemmaService.ModelVariant.QUALITY_4B                                        // higher accuracy on vision-rich tasks :contentReference[oaicite:4]{index=4}
+            else -> UnifiedGemmaService.ModelVariant.FAST_2B
         }
-    }
+
+    /*────────────── Prompt builder ─────────────*/
+
+    private fun buildPrompt(
+        text: String?,
+        image: Bitmap?            = null,
+        audioSamples: FloatArray? = null
+    ): String = buildString {
+        if (!text.isNullOrBlank()) appendLine(text.trim())
+        image?.let { appendLine("[user-provided image attached]") }                  // current LiteRT is text-only :contentReference[oaicite:5]{index=5}
+        audioSamples?.let { appendLine("[audio clip of ${audioSamples.size} samples]") }
+    }.trim()
+
+
+
+
 
     private fun prepareInterleavedInput(
         input: MultimodalInput,
@@ -161,29 +174,20 @@ class MultimodalProcessor @Inject constructor(
         return tokens.take(MAX_SEQUENCE_LENGTH).toIntArray()
     }
 
-    private fun preprocessImage(bitmap: Bitmap): ByteBuffer {
-        val modelInputSize = 224 // Gemma 3n uses 224x224 images
-        val resizedBitmap = Bitmap.createScaledBitmap(bitmap, modelInputSize, modelInputSize, true)
+    private fun preprocessImage(bitmap: Bitmap): FloatArray {
+        val size = 224                                        // 224×224 expected by Gemma vision adaptor :contentReference[oaicite:6]{index=6}
+        val bmp  = bitmap.scale(size, size)
+        val px   = IntArray(size * size)
+        bmp.getPixels(px, 0, size, 0, 0, size, size)
 
-        val buffer = ByteBuffer.allocateDirect(
-            modelInputSize * modelInputSize * 3 * 4 // RGB float
-        ).order(ByteOrder.nativeOrder())
-
-        val pixels = IntArray(modelInputSize * modelInputSize)
-        resizedBitmap.getPixels(
-            pixels, 0, modelInputSize, 0, 0,
-            modelInputSize, modelInputSize
-        )
-
-        // Convert to normalized float values
-        for (pixel in pixels) {
-            buffer.putFloat(((pixel shr 16 and 0xFF) - 127.5f) / 127.5f) // R
-            buffer.putFloat(((pixel shr 8 and 0xFF) - 127.5f) / 127.5f)  // G
-            buffer.putFloat(((pixel and 0xFF) - 127.5f) / 127.5f)        // B
+        val result = FloatArray(px.size * 3)
+        for (i in px.indices) {
+            val p = px[i]
+            result[i * 3]     = ((p shr 16 and 0xFF) - 127.5f) / 127.5f   // R
+            result[i * 3 + 1] = ((p shr 8  and 0xFF) - 127.5f) / 127.5f   // G
+            result[i * 3 + 2] = ((p        and 0xFF) - 127.5f) / 127.5f   // B
         }
-
-        buffer.rewind()
-        return buffer
+        return result                                                  // ready for future vision signature
     }
 
     private fun preprocessAudio(
@@ -208,6 +212,31 @@ class MultimodalProcessor @Inject constructor(
         buffer.rewind()
 
         return buffer
+    }
+
+    private fun preprocessAudio(
+        samples: FloatArray,
+        fromRate: Int,
+        toRate: Int = 16_000
+    ): FloatArray {
+        if (fromRate == toRate) return samples
+        val ratio   = fromRate.toFloat() / toRate
+        val newLen  = (samples.size / ratio).toInt()
+        return FloatArray(newLen) { i -> samples[(i * ratio).toInt()] }  // simple linear resample :contentReference[oaicite:7]{index=7}
+    }
+
+    private fun extractMelFrames(samples: FloatArray): FloatArray {
+        // Minimal energy-per-frame mel approximation — replace with proper DSP later. :contentReference[oaicite:8]{index=8}
+        val frame = 512; val hop = 256; val bins = 80
+        val frames = (samples.size - frame) / hop + 1
+        val feats  = FloatArray(frames * bins)
+        for (f in 0 until frames) {
+            val start = f * hop
+            var energy = 0f
+            for (j in 0 until frame) energy += samples[start + j] * samples[start + j]
+            for (b in 0 until bins) feats[f * bins + b] = energy / bins
+        }
+        return feats
     }
 
     private fun resampleAudio(
@@ -289,4 +318,6 @@ class MultimodalProcessor @Inject constructor(
         private const val MAX_SEQUENCE_LENGTH = 512
         private const val EOS_TOKEN = 2
     }
+
+
 }

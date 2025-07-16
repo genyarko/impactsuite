@@ -12,7 +12,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Cancel
@@ -31,7 +34,10 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ProgressIndicatorDefaults
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -40,6 +46,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -47,236 +54,213 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.example.mygemma3n.feature.quiz.Subject
+import com.example.mygemma3n.shared_utilities.OfflineRAG
 
-// QuizScreen.kt - Compose UI
+/* top-level screen ------------------------------------------------------- */
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuizScreen(
     viewModel: QuizGeneratorViewModel = hiltViewModel()
 ) {
-    val state by viewModel.quizState.collectAsState()
+    val state by viewModel.state.collectAsState()
 
-    // Add debug logging
+    /* simple debug log */
     LaunchedEffect(state) {
-        println("QuizScreen State: subjects=${state.subjects.size}, isGenerating=${state.isGenerating}, hasQuiz=${state.currentQuiz != null}")
+        println("QuizScreen State: subjects=${state.subjects.size}, " +
+                "isGenerating=${state.isGenerating}, hasQuiz=${state.currentQuiz != null}")
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Adaptive Quiz Generator") },
+                title  = { Text("Adaptive Quiz Generator") },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
                 )
             )
         }
-    ) { paddingValues ->
+    ) { pv ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues)
+                .padding(pv)
         ) {
             when {
                 state.currentQuiz == null && !state.isGenerating -> {
-                    // Show setup screen OR empty state
                     if (state.subjects.isEmpty()) {
-                        // Show empty state with manual subject selection
-                        EmptyStateQuizSetup(
-                            onGenerateQuiz = { s, t, c ->
-                                viewModel.generateAdaptiveQuiz(s, t, c)
-                            }
-                        )
+                        EmptyStateQuizSetup { s, t, c ->
+                            viewModel.generateAdaptiveQuiz(s, t, c)
+                        }
                     } else {
                         QuizSetupScreen(
-                            subjects = state.subjects,
-                            onGenerateQuiz = { s, t, c ->
+                            subjects = state.subjects,                 // ← first param
+                            onGenerateQuiz = { s, t, c ->              // ← second param
                                 viewModel.generateAdaptiveQuiz(s, t, c)
                             }
                         )
                     }
                 }
 
-                state.isGenerating -> {
-                    // Generation Progress
-                    Column(
-                        modifier = Modifier.align(Alignment.Center),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        CircularProgressIndicator()
-                        Text(
-                            "Generating adaptive quiz...",
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                        Text(
-                            "Questions created: ${state.questionsGenerated}",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
-                }
+                state.isGenerating -> GenerationProgress(state.questionsGenerated)
 
-                state.currentQuiz != null -> {
-                    // Quiz Taking Screen
+                else -> state.currentQuiz?.let { quiz ->
                     QuizTakingScreen(
-                        quiz = state.currentQuiz!!,
-                        onAnswerSubmit = { questionId, answer ->
-                            viewModel.submitAnswer(questionId, answer)
-                        },
-                        onQuizComplete = {
-                            viewModel.completeQuiz()
-                        }
+                        quiz           = quiz,
+                        onAnswerSubmit = viewModel::submitAnswer,
+                        onQuizComplete = viewModel::completeQuiz
                     )
                 }
             }
+
         }
     }
 }
 
-// New composable for when subjects list is empty
+/* simple circular progress indicator ----------------------------------- */
+
+@Composable
+private fun GenerationProgress(done: Int, modifier: Modifier = Modifier) { // Added modifier parameter
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())            // NEW
+            .fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        CircularProgressIndicator()
+        Text("Generating adaptive quiz…", style = MaterialTheme.typography.bodyLarge)
+        Text("Questions created: $done", style = MaterialTheme.typography.bodyMedium)
+    }
+}
+/* ────────────────────────────────────────────────────────────────────────
+ * Empty-state & normal setup screens
+ * ──────────────────────────────────────────────────────────────────────── */
+
 @Composable
 fun EmptyStateQuizSetup(
     onGenerateQuiz: (Subject, String, Int) -> Unit
 ) {
-    var selectedSubject by remember { mutableStateOf<Subject?>(null) }
-    var topicText by remember { mutableStateOf("") }
-    var questionCount by remember { mutableStateOf(10f) }
+    /* local UI state */
+    var subject     by remember { mutableStateOf<Subject?>(null) }
+    var topicText   by remember { mutableStateOf("") }
+    var questionCnt by remember { mutableStateOf(10f) }
 
-    // All available subjects from the enum
-    val allSubjects = remember { Subject.values().toList() }
+    /* the enum you own, not OfflineRAG */
+    val subjects = remember { Subject.values().toList() }
 
     Column(
         modifier = Modifier
+            .verticalScroll(rememberScrollState())   // make the whole screen scroll
             .fillMaxSize()
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            "Create a new adaptive quiz",
-            style = MaterialTheme.typography.headlineSmall
-        )
-
+        Text("Create a new adaptive quiz", style = MaterialTheme.typography.headlineSmall)
         Text(
             "No educational content loaded. You can still create a quiz!",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        // Subject selection
+        /* subject chooser */
         Card(
             modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            elevation = CardDefaults.cardElevation(4.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(16.dp)
-            ) {
-                Text(
-                    "Select Subject:",
-                    style = MaterialTheme.typography.labelLarge
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                allSubjects.forEach { subject ->
+            Column(Modifier.padding(16.dp)) {
+                Text("Select Subject:", style = MaterialTheme.typography.labelLarge)
+                Spacer(Modifier.height(8.dp))
+                subjects.forEach { s ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        androidx.compose.material3.RadioButton(
-                            selected = selectedSubject == subject,
-                            onClick = { selectedSubject = subject }
+                        RadioButton(
+                            selected = subject == s,
+                            onClick  = { subject = s }
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(subject.name)
+                        Spacer(Modifier.width(8.dp))
+                        Text(s.name)
                     }
                 }
             }
         }
 
-        // Topic text field
         OutlinedTextField(
             value = topicText,
             onValueChange = { topicText = it },
             label = { Text("Topic (optional)") },
-            placeholder = { Text("e.g., Linear Equations, Cell Biology") },
+            placeholder = { Text("e.g., Linear Equations") },
             modifier = Modifier.fillMaxWidth()
         )
 
-        // Question count slider
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Text("Number of questions: ${questionCount.toInt()}")
-            androidx.compose.material3.Slider(
-                value = questionCount,
-                onValueChange = { questionCount = it },
-                valueRange = 5f..20f,
-                steps = 14
+        Column(Modifier.fillMaxWidth()) {
+            Text("Number of questions: ${questionCnt.toInt()}")
+            Slider(
+                value       = questionCnt,
+                onValueChange = { questionCnt = it },
+                valueRange  = 5f..20f,
+                steps       = 14
             )
         }
 
-        // Generate button
         Button(
             onClick = {
-                selectedSubject?.let { subject ->
-                    onGenerateQuiz(subject, topicText.trim(), questionCount.toInt())
-                }
+                subject?.let { onGenerateQuiz(it, topicText.trim(), questionCnt.toInt()) }
             },
-            enabled = selectedSubject != null,
+            enabled = subject != null,
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("Generate Quiz")
             Spacer(Modifier.width(4.dp))
-            Icon(Icons.Default.ArrowForward, contentDescription = null)
+            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
         }
     }
 }
-/* ────────────────────────────────────────────────────────────────
- * QuizSetupScreen – select subject / topic / #questions
- * ──────────────────────────────────────────────────────────────── */
+
+
 @Composable
 fun QuizSetupScreen(
     subjects: List<Subject>,
     onGenerateQuiz: (Subject, String, Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var selectedSubject by remember { mutableStateOf<Subject?>(null) }
-    var topicText by remember { mutableStateOf("") }
-    var questionCount by remember { mutableStateOf(10f) }
+    var subject     by remember { mutableStateOf<Subject?>(null) }
+    var topicText   by remember { mutableStateOf("") }
+    var questionCnt by remember { mutableStateOf(10f) }
 
     Column(
         modifier = modifier
+            .verticalScroll(rememberScrollState())            // NEW
             .fillMaxSize()
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            "Create a new adaptive quiz",
-            style = MaterialTheme.typography.headlineSmall
-        )
+        Text("Create a new adaptive quiz", style = MaterialTheme.typography.headlineSmall)
 
-        // 1. Subject dropdown
+        /* subject dropdown (simplified) */
         OutlinedButton(
-            onClick = { /* show menu – simple selector for brevity */ },
+            onClick = { /* todo menu */ },
             modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(selectedSubject?.name ?: "Choose subject")
-        }
-        // Simple drop-down menu
+        ) { Text(subject?.name ?: "Choose subject") }
+
         androidx.compose.material3.DropdownMenu(
-            expanded = selectedSubject == null,   // opens first time
-            onDismissRequest = { /* no-op */ }
+            expanded = subject == null,
+            onDismissRequest = {}
         ) {
-            subjects.forEach { subj ->
+            subjects.forEach { s ->
                 androidx.compose.material3.DropdownMenuItem(
-                    text = { Text(subj.name) },
-                    onClick = { selectedSubject = subj }
+                    text    = { Text(s.name) },
+                    onClick = { subject = s }
                 )
             }
         }
 
-        // 2. Topic text field
         OutlinedTextField(
             value = topicText,
             onValueChange = { topicText = it },
@@ -284,35 +268,31 @@ fun QuizSetupScreen(
             modifier = Modifier.fillMaxWidth()
         )
 
-        // 3. Question count slider
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Text("Number of questions: ${questionCount.toInt()}")
+        Column(Modifier.fillMaxWidth()) {
+            Text("Number of questions: ${questionCnt.toInt()}")
             androidx.compose.material3.Slider(
-                value = questionCount,
-                onValueChange = { questionCount = it },
-                valueRange = 5f..20f,
-                steps = 15
+                value       = questionCnt,
+                onValueChange = { questionCnt = it },
+                valueRange  = 5f..20f,
+                steps       = 15
             )
         }
 
-        // 4. Generate button
         Button(
             onClick = {
-                val subj = selectedSubject ?: return@Button
-                onGenerateQuiz(subj, topicText.trim(), questionCount.toInt())
+                subject?.let { s -> onGenerateQuiz(s, topicText.trim(), questionCnt.toInt()) }
             },
-            enabled = selectedSubject != null
+            enabled = subject != null
         ) {
             Text("Generate Quiz")
             Spacer(Modifier.width(4.dp))
-            Icon(Icons.Default.ArrowForward, contentDescription = null)
+            Icon(Icons.AutoMirrored.Filled.ArrowForward, null)
         }
     }
 }
 
-/* ────────────────────────────────────────────────────────────────
- * AnswerOption – used by QuizTakingScreen for MCQ choices
- * ──────────────────────────────────────────────────────────────── */
+/*──────────────────────── Answer option helper ────────────────────────*/
+
 @Composable
 fun AnswerOption(
     text: String,
@@ -322,30 +302,29 @@ fun AnswerOption(
     enabled: Boolean,
     onClick: () -> Unit
 ) {
-    val containerColor = when {
+    val container = when {
         isCorrect  -> MaterialTheme.colorScheme.primary
         isWrong    -> MaterialTheme.colorScheme.error
         isSelected -> MaterialTheme.colorScheme.secondaryContainer
         else       -> MaterialTheme.colorScheme.surface
     }
-    val contentColor =
-        if (isCorrect || isWrong)
-            MaterialTheme.colorScheme.onPrimary
-        else
-            MaterialTheme.colorScheme.onSurface
+    val content = if (isCorrect || isWrong)
+        MaterialTheme.colorScheme.onPrimary
+    else
+        MaterialTheme.colorScheme.onSurface
 
     ElevatedButton(
         onClick  = onClick,
         enabled  = enabled,
         colors   = ButtonDefaults.elevatedButtonColors(
-            containerColor = containerColor,
-            contentColor   = contentColor
+            containerColor = container,
+            contentColor   = content
         ),
         modifier = Modifier.fillMaxWidth()
-    ) {
-        Text(text)
-    }
+    ) { Text(text) }
 }
+
+/*──────────────────────── Main quiz runner ───────────────────────────*/
 
 @Composable
 fun QuizTakingScreen(
@@ -354,88 +333,64 @@ fun QuizTakingScreen(
     onQuizComplete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var currentQuestionIndex by remember { mutableStateOf(0) }
-    val currentQuestion = quiz.questions[currentQuestionIndex]
-    var selectedAnswer by remember(currentQuestion.id) { mutableStateOf<String?>(null) }
+    var index         by remember { mutableIntStateOf(0) }
+    val q             = quiz.questions[index]
+    var chosenAnswer  by remember(q.id) { mutableStateOf<String?>(null) }
 
     Column(
         modifier = modifier
+            .verticalScroll(rememberScrollState())
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        // Progress indicator
         LinearProgressIndicator(
-            progress = (currentQuestionIndex + 1) / quiz.questions.size.toFloat(),
-            modifier = Modifier.fillMaxWidth()
+            progress = { (index + 1) / quiz.questions.size.toFloat() },
+            modifier = Modifier.fillMaxWidth(),
+            color = ProgressIndicatorDefaults.linearColor,
+            trackColor = ProgressIndicatorDefaults.linearTrackColor,
+            strokeCap = ProgressIndicatorDefaults.LinearStrokeCap,
         )
+        Spacer(Modifier.height(16.dp))
+        Text("Question ${index + 1} of ${quiz.questions.size}",
+            style = MaterialTheme.typography.labelLarge)
+        Spacer(Modifier.height(8.dp))
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Question counter
-        Text(
-            text = "Question ${currentQuestionIndex + 1} of ${quiz.questions.size}",
-            style = MaterialTheme.typography.labelLarge
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Question
         Card(
             modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            elevation = CardDefaults.cardElevation(4.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(16.dp)
-            ) {
-                Text(
-                    text = currentQuestion.questionText,
-                    style = MaterialTheme.typography.headlineSmall
-                )
+            Column(Modifier.padding(16.dp)) {
+                Text(q.questionText, style = MaterialTheme.typography.headlineSmall)
 
-                if (currentQuestion.hint != null && !currentQuestion.isAnswered) {
-                    Spacer(modifier = Modifier.height(8.dp))
-
+                if (q.hint != null && !q.isAnswered) {
+                    Spacer(Modifier.height(8.dp))
                     var showHint by remember { mutableStateOf(false) }
-
-                    TextButton(
-                        onClick = { showHint = !showHint }
-                    ) {
-                        Icon(
-                            Icons.Default.ThumbUp,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
+                    TextButton(onClick = { showHint = !showHint }) {
+                        Icon(Icons.Default.ThumbUp, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
                         Text(if (showHint) "Hide Hint" else "Show Hint")
                     }
-
                     if (showHint) {
-                        Text(
-                            text = currentQuestion.hint,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Text(q.hint, style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(Modifier.height(24.dp))
 
-        // Answer options
-        when (currentQuestion.questionType) {
-            QuestionType.MULTIPLE_CHOICE -> {
-                currentQuestion.options.forEach { option ->
-                    AnswerOption(
-                        text = option,
-                        isSelected = selectedAnswer == option,
-                        isCorrect = currentQuestion.isAnswered && option == currentQuestion.correctAnswer,
-                        isWrong = currentQuestion.isAnswered && option == currentQuestion.userAnswer && option != currentQuestion.correctAnswer,
-                        enabled = !currentQuestion.isAnswered,
-                        onClick = { selectedAnswer = option }
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
+        when (q.questionType) {
+            QuestionType.MULTIPLE_CHOICE -> q.options.forEach { opt ->
+                AnswerOption(
+                    text        = opt,
+                    isSelected  = chosenAnswer == opt,
+                    isCorrect   = q.isAnswered && opt == q.correctAnswer,
+                    isWrong     = q.isAnswered && opt == q.userAnswer && opt != q.correctAnswer,
+                    enabled     = !q.isAnswered,
+                    onClick     = { chosenAnswer = opt }
+                )
+                Spacer(Modifier.height(8.dp))
             }
 
             QuestionType.TRUE_FALSE -> {
@@ -443,173 +398,144 @@ fun QuizTakingScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
-                    listOf("True", "False").forEach { option ->
+                    listOf("True", "False").forEach { opt ->
                         ElevatedButton(
-                            onClick = { selectedAnswer = option },
-                            enabled = !currentQuestion.isAnswered,
-                            colors = ButtonDefaults.elevatedButtonColors(
+                            onClick  = { chosenAnswer = opt },
+                            enabled  = !q.isAnswered,
+                            colors   = ButtonDefaults.elevatedButtonColors(
                                 containerColor = when {
-                                    currentQuestion.isAnswered && option == currentQuestion.correctAnswer ->
-                                        MaterialTheme.colorScheme.primary
-                                    currentQuestion.isAnswered && option == currentQuestion.userAnswer && option != currentQuestion.correctAnswer ->
-                                        MaterialTheme.colorScheme.error
-                                    selectedAnswer == option ->
-                                        MaterialTheme.colorScheme.secondaryContainer
+                                    q.isAnswered && opt == q.correctAnswer -> MaterialTheme.colorScheme.primary
+                                    q.isAnswered && opt == q.userAnswer && opt != q.correctAnswer -> MaterialTheme.colorScheme.error
+                                    chosenAnswer == opt -> MaterialTheme.colorScheme.secondaryContainer
                                     else -> MaterialTheme.colorScheme.surface
                                 }
                             )
-                        ) {
-                            Text(option)
-                        }
+                        ) { Text(opt) }
                     }
                 }
             }
 
             QuestionType.FILL_IN_BLANK -> {
-                var textAnswer by remember { mutableStateOf("") }
-
+                var txt by remember { mutableStateOf("") }
                 OutlinedTextField(
-                    value = textAnswer,
+                    value = txt,
                     onValueChange = {
-                        textAnswer = it
-                        selectedAnswer = it
+                        txt = it
+                        chosenAnswer = it
                     },
                     label = { Text("Your answer") },
-                    enabled = !currentQuestion.isAnswered,
+                    enabled = !q.isAnswered,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
 
             QuestionType.SHORT_ANSWER -> {
-                var textAnswer by remember { mutableStateOf("") }
-
+                var txt by remember { mutableStateOf("") }
                 OutlinedTextField(
-                    value = textAnswer,
+                    value = txt,
                     onValueChange = {
-                        textAnswer = it
-                        selectedAnswer = it
+                        txt = it
+                        chosenAnswer = it
                     },
                     label = { Text("Your answer") },
-                    enabled = !currentQuestion.isAnswered,
+                    enabled = !q.isAnswered,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 96.dp)
                 )
             }
+
             QuestionType.MATCHING -> {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        text = "Matching questions are not supported yet.",
+                    Text("Matching questions are not supported yet.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    OutlinedButton(onClick = { selectedAnswer = "skipped" }) {
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedButton(onClick = { chosenAnswer = "skipped" }) {
                         Text("Skip Question")
                     }
                 }
             }
         }
 
-        // Feedback section
-        if (currentQuestion.isAnswered && currentQuestion.feedback != null) {
-            Spacer(modifier = Modifier.height(16.dp))
-
+        /* feedback card */
+        if (q.isAnswered && q.feedback != null) {
+            Spacer(Modifier.height(16.dp))
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (currentQuestion.userAnswer == currentQuestion.correctAnswer)
+                    containerColor = if (q.userAnswer == q.correctAnswer)
                         MaterialTheme.colorScheme.primaryContainer
                     else
                         MaterialTheme.colorScheme.errorContainer
                 )
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            if (currentQuestion.userAnswer == currentQuestion.correctAnswer)
+                            if (q.userAnswer == q.correctAnswer)
                                 Icons.Default.CheckCircle
                             else
                                 Icons.Default.Cancel,
-                            contentDescription = null
+                            null
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(Modifier.width(8.dp))
                         Text(
-                            text = if (currentQuestion.userAnswer == currentQuestion.correctAnswer)
-                                "Correct!" else "Incorrect",
+                            if (q.userAnswer == q.correctAnswer) "Correct!" else "Incorrect",
                             style = MaterialTheme.typography.titleMedium
                         )
                     }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text(
-                        text = currentQuestion.feedback,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-
-                    if (currentQuestion.explanation != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Explanation: ${currentQuestion.explanation}",
-                            style = MaterialTheme.typography.bodySmall
-                        )
+                    Spacer(Modifier.height(8.dp))
+                    Text(q.feedback, style = MaterialTheme.typography.bodyMedium)
+                    q.explanation?.let {
+                        Spacer(Modifier.height(8.dp))
+                        Text("Explanation: $it",
+                            style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(Modifier.weight(1f))
 
-        // Navigation buttons
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            if (currentQuestionIndex > 0) {
-                OutlinedButton(
-                    onClick = { currentQuestionIndex-- }
-                ) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = null)
-                    Spacer(modifier = Modifier.width(4.dp))
+            if (index > 0) {
+                OutlinedButton(onClick = { index-- }) {
+                    Icon(Icons.Default.ArrowBack, null)
+                    Spacer(Modifier.width(4.dp))
                     Text("Previous")
                 }
             } else {
-                Spacer(modifier = Modifier.width(1.dp))
+                Spacer(Modifier.width(1.dp))
             }
 
-            if (!currentQuestion.isAnswered && selectedAnswer != null) {
-                Button(
-                    onClick = {
-                        onAnswerSubmit(currentQuestion.id, selectedAnswer!!)
+            when {
+                !q.isAnswered && chosenAnswer != null -> {
+                    Button(onClick = { onAnswerSubmit(q.id, chosenAnswer!!) }) {
+                        Text("Submit Answer")
                     }
-                ) {
-                    Text("Submit Answer")
                 }
-            } else if (currentQuestion.isAnswered) {
-                if (currentQuestionIndex < quiz.questions.size - 1) {
-                    Button(
-                        onClick = {
-                            currentQuestionIndex++
-                            selectedAnswer = null
-                        }
-                    ) {
+
+                q.isAnswered && index < quiz.questions.size - 1 -> {
+                    Button(onClick = {
+                        index++
+                        chosenAnswer = null
+                    }) {
                         Text("Next")
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Icon(Icons.Default.ArrowForward, contentDescription = null)
+                        Spacer(Modifier.width(4.dp))
+                        Icon(Icons.Default.ArrowForward, null)
                     }
-                } else {
-                    Button(
-                        onClick = onQuizComplete
-                    ) {
-                        Icon(Icons.Default.Done, contentDescription = null)
-                        Spacer(modifier = Modifier.width(4.dp))
+                }
+
+                q.isAnswered -> {
+                    Button(onClick = onQuizComplete) {
+                        Icon(Icons.Default.Done, null)
+                        Spacer(Modifier.width(4.dp))
                         Text("Complete Quiz")
                     }
                 }

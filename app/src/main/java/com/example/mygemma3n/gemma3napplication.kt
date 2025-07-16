@@ -12,6 +12,7 @@ class Gemma3nApplication : Application() {
 
         // 1. Init Timber for debug logging
         if (BuildConfig.DEBUG) {
+            deleteDatabase("emergency_database")
             Timber.plant(Timber.DebugTree())
         }
 

@@ -12,3 +12,4 @@ private val SHOW_COMPLETED = booleanPreferencesKey("show_completed")
 private val SORT_ORDER     = stringPreferencesKey("sort_order")
 val EMBEDDER_KEY = stringPreferencesKey("embedder_model")
 
+val SPEECH_API_KEY = stringPreferencesKey("google_speech_api_key")

@@ -8,6 +8,10 @@ datastorePreferences = "1.1.7"
 datastorePreferencesVersion = "1.1.0"
 edgeLitert = "0.9.0"
 firebaseBom = "33.16.0"
+gax = "2.68.1"
+generativeai = "0.9.0"
+googleAuthLibraryOauth2Http = "1.37.1"
+googleCloudSpeech = "4.63.0"
 gson = "2.13.1"
 hiltAndroidTesting = "2.56.2"
 hiltCompiler = "2.56.2"
@@ -38,6 +42,8 @@ hiltCommon = "1.2.0"
 playServicesMeasurementApi = "22.5.0"
 localagentsRag = "0.2.0"
 media3CommonKtx = "1.7.1"
+tasksCore = "0.20230731"
+tasksCoreVersion = "0.10.24"
 tasksGenai = "0.10.25"
 tasksText = "0.20230731"
 tensorflowLite = "2.17.0"
@@ -84,6 +90,10 @@ firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "fir
 firebase-crashlytics = { module = "com.google.firebase:firebase-crashlytics", version.ref = "firebaseCrashlytics" }
 firebase-analytics = { module = "com.google.firebase:firebase-analytics", version.ref = "firebaseAnalytics" }
 firebase-perf-ktx = { module = "com.google.firebase:firebase-perf-ktx" }
+gax = { module = "com.google.api:gax", version.ref = "gax" }
+generativeai = { module = "com.google.ai.client.generativeai:generativeai", version.ref = "generativeai" }
+google-auth-library-oauth2-http = { module = "com.google.auth:google-auth-library-oauth2-http", version.ref = "googleAuthLibraryOauth2Http" }
+google-cloud-speech = { module = "com.google.cloud:google-cloud-speech", version.ref = "googleCloudSpeech" }
 gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
 hilt-android = { module = "com.google.dagger:hilt-android", version.ref = "hiltAndroidTesting" }
 hilt-android-compiler = { module = "com.google.dagger:hilt-android-compiler", version.ref = "hiltAndroidTesting" }
@@ -118,6 +128,8 @@ androidx-media3-common-ktx = { group = "androidx.media3", name = "media3-common-
 androidx-hilt-work = { group = "androidx.hilt", name = "hilt-work", version.ref = "hiltWork" }
 androidx-hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hiltCommon" }
 androidx-navigation-compose-jvmstubs = { group = "androidx.navigation", name = "navigation-compose-jvmstubs", version.ref = "navigationComposeJvmstubs" }
+tasks-core = { module = "com.google.mediapipe:tasks-core", version.ref = "tasksCore" }
+tasks-core-v01024 = { module = "com.google.mediapipe:tasks-core", version.ref = "tasksCoreVersion" }
 tasks-genai = { module = "com.google.mediapipe:tasks-genai", version.ref = "tasksGenai" }
 tasks-text = { module = "com.google.mediapipe:tasks-text", version.ref = "tasksText" }
 tensorflow-lite = { module = "org.tensorflow:tensorflow-lite", version.ref = "tensorflowLite" }

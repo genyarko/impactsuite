@@ -69,6 +69,9 @@ data class FirstAidWarning(
 // DAOs
 @Dao
 interface HospitalDao {
+
+    @Query("SELECT COUNT(*) FROM hospitals")
+    suspend fun countAll(): Int
     @Query("""
         SELECT * FROM hospitals 
         WHERE specialization = :specialization OR specialization = 'general'
@@ -82,6 +85,10 @@ interface HospitalDao {
         longitude: Double,
         specialization: String
     ): List<Hospital>
+
+
+    @Query("SELECT * FROM hospitals")
+    suspend fun getAllHospitals(): List<Hospital>
 
     suspend fun getNearbyHospitals(
         latitude: Double,
@@ -220,7 +227,7 @@ class EmergencyConverters {
         FirstAidStep::class,
         FirstAidWarning::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(EmergencyConverters::class)
@@ -261,6 +268,8 @@ abstract class EmergencyDatabase : RoomDatabase() {
                 .build()
         }
 
+        // Add this to your EmergencyDatabase.kt file, replacing the existing prepopulateEmergencyData method
+
         private suspend fun prepopulateEmergencyData(database: EmergencyDatabase) {
             // Add default emergency contacts
             database.contactDao().insertContacts(
@@ -297,9 +306,10 @@ abstract class EmergencyDatabase : RoomDatabase() {
                 )
             )
 
-            // Add sample hospitals for Accra
+            // Add hospitals for multiple cities in Ghana
             database.hospitalDao().insertHospitals(
                 listOf(
+                    // ACCRA HOSPITALS
                     Hospital(
                         id = "korle_bu",
                         name = "Korle Bu Teaching Hospital",
@@ -335,11 +345,283 @@ abstract class EmergencyDatabase : RoomDatabase() {
                         hasEmergency = true,
                         beds = 600,
                         rating = 4.5f
+                    ),
+                    Hospital(
+                        id = "ga_east",
+                        name = "Ga East Municipal Hospital",
+                        address = "Abokobi, Accra",
+                        phone = "0302970344",
+                        latitude = 5.7061,
+                        longitude = -0.2464,
+                        specialization = "general",
+                        hasEmergency = true,
+                        beds = 100,
+                        rating = 3.8f
+                    ),
+                    Hospital(
+                        id = "lekma",
+                        name = "LEKMA Hospital",
+                        address = "Teshie, Accra",
+                        phone = "0303314850",
+                        latitude = 5.5837,
+                        longitude = -0.1007,
+                        specialization = "general",
+                        hasEmergency = true,
+                        beds = 120,
+                        rating = 3.9f
+                    ),
+
+                    // KUMASI HOSPITALS
+                    Hospital(
+                        id = "komfo_anokye",
+                        name = "Komfo Anokye Teaching Hospital",
+                        address = "Bantama Road, Kumasi",
+                        phone = "0322022301",
+                        latitude = 6.6971,
+                        longitude = -1.6163,
+                        specialization = "general",
+                        hasEmergency = true,
+                        beds = 1200,
+                        rating = 4.3f
+                    ),
+                    Hospital(
+                        id = "manhyia",
+                        name = "Manhyia Government Hospital",
+                        address = "Manhyia, Kumasi",
+                        phone = "0322033534",
+                        latitude = 6.7047,
+                        longitude = -1.6062,
+                        specialization = "general",
+                        hasEmergency = true,
+                        beds = 300,
+                        rating = 3.9f
+                    ),
+                    Hospital(
+                        id = "suntreso",
+                        name = "Suntreso Government Hospital",
+                        address = "Suntreso, Kumasi",
+                        phone = "0322029462",
+                        latitude = 6.6244,
+                        longitude = -1.6521,
+                        specialization = "general",
+                        hasEmergency = true,
+                        beds = 150,
+                        rating = 3.7f
+                    ),
+                    Hospital(
+                        id = "knust",
+                        name = "KNUST Hospital",
+                        address = "University Campus, Kumasi",
+                        phone = "0322060258",
+                        latitude = 6.6745,
+                        longitude = -1.5717,
+                        specialization = "general",
+                        hasEmergency = true,
+                        beds = 200,
+                        rating = 4.1f
+                    ),
+
+                    // TAKORADI HOSPITALS
+                    Hospital(
+                        id = "effia_nkwanta",
+                        name = "Effia Nkwanta Regional Hospital",
+                        address = "Effiakuma, Takoradi",
+                        phone = "0312021915",
+                        latitude = 4.9256,
+                        longitude = -1.7531,
+                        specialization = "general",
+                        hasEmergency = true,
+                        beds = 600,
+                        rating = 4.0f
+                    ),
+                    Hospital(
+                        id = "takoradi_hospital",
+                        name = "Takoradi Government Hospital",
+                        address = "Takoradi",
+                        phone = "0312023467",
+                        latitude = 4.8994,
+                        longitude = -1.7601,
+                        specialization = "general",
+                        hasEmergency = true,
+                        beds = 250,
+                        rating = 3.8f
+                    ),
+
+                    // CAPE COAST HOSPITALS
+                    Hospital(
+                        id = "cape_coast_teaching",
+                        name = "Cape Coast Teaching Hospital",
+                        address = "Abura, Cape Coast",
+                        phone = "0332132067",
+                        latitude = 5.1315,
+                        longitude = -1.2795,
+                        specialization = "general",
+                        hasEmergency = true,
+                        beds = 400,
+                        rating = 4.2f
+                    ),
+                    Hospital(
+                        id = "cape_coast_metro",
+                        name = "Cape Coast Metropolitan Hospital",
+                        address = "Ankaful, Cape Coast",
+                        phone = "0332091325",
+                        latitude = 5.1467,
+                        longitude = -1.2664,
+                        specialization = "general",
+                        hasEmergency = true,
+                        beds = 150,
+                        rating = 3.7f
+                    ),
+
+                    // TAMALE HOSPITALS
+                    Hospital(
+                        id = "tamale_teaching",
+                        name = "Tamale Teaching Hospital",
+                        address = "Tamale",
+                        phone = "0372022454",
+                        latitude = 9.4034,
+                        longitude = -0.8424,
+                        specialization = "general",
+                        hasEmergency = true,
+                        beds = 800,
+                        rating = 4.1f
+                    ),
+                    Hospital(
+                        id = "tamale_central",
+                        name = "Tamale Central Hospital",
+                        address = "Tamale",
+                        phone = "0372027928",
+                        latitude = 9.4075,
+                        longitude = -0.8533,
+                        specialization = "general",
+                        hasEmergency = true,
+                        beds = 200,
+                        rating = 3.8f
+                    ),
+
+                    // HO HOSPITALS
+                    Hospital(
+                        id = "ho_teaching",
+                        name = "Ho Teaching Hospital",
+                        address = "Ho",
+                        phone = "0362027570",
+                        latitude = 6.6083,
+                        longitude = 0.4713,
+                        specialization = "general",
+                        hasEmergency = true,
+                        beds = 320,
+                        rating = 4.0f
+                    ),
+                    Hospital(
+                        id = "volta_regional",
+                        name = "Volta Regional Hospital",
+                        address = "Ho",
+                        phone = "0362024246",
+                        latitude = 6.6121,
+                        longitude = 0.4698,
+                        specialization = "general",
+                        hasEmergency = true,
+                        beds = 250,
+                        rating = 3.9f
+                    ),
+
+                    // KOFORIDUA HOSPITALS
+                    Hospital(
+                        id = "eastern_regional",
+                        name = "Eastern Regional Hospital",
+                        address = "Koforidua",
+                        phone = "0342020401",
+                        latitude = 6.0836,
+                        longitude = -0.2579,
+                        specialization = "general",
+                        hasEmergency = true,
+                        beds = 400,
+                        rating = 3.9f
+                    ),
+                    Hospital(
+                        id = "st_josephs",
+                        name = "St. Joseph's Hospital",
+                        address = "Koforidua",
+                        phone = "0342023324",
+                        latitude = 6.0874,
+                        longitude = -0.2621,
+                        specialization = "general",
+                        hasEmergency = true,
+                        beds = 180,
+                        rating = 4.1f
+                    ),
+
+                    // TEMA HOSPITALS
+                    Hospital(
+                        id = "tema_general",
+                        name = "Tema General Hospital",
+                        address = "Community 9, Tema",
+                        phone = "0303202097",
+                        latitude = 5.6698,
+                        longitude = -0.0167,
+                        specialization = "general",
+                        hasEmergency = true,
+                        beds = 350,
+                        rating = 3.9f
+                    ),
+                    Hospital(
+                        id = "tema_polyclinic",
+                        name = "Tema Polyclinic",
+                        address = "Community 1, Tema",
+                        phone = "0303204170",
+                        latitude = 5.6173,
+                        longitude = -0.0075,
+                        specialization = "general",
+                        hasEmergency = true,
+                        beds = 100,
+                        rating = 3.7f
+                    ),
+
+                    // SUNYANI HOSPITALS
+                    Hospital(
+                        id = "sunyani_regional",
+                        name = "Sunyani Regional Hospital",
+                        address = "Sunyani",
+                        phone = "0352027131",
+                        latitude = 7.3392,
+                        longitude = -2.3267,
+                        specialization = "general",
+                        hasEmergency = true,
+                        beds = 300,
+                        rating = 3.8f
+                    ),
+
+                    // BOLGATANGA HOSPITALS
+                    Hospital(
+                        id = "upper_east_regional",
+                        name = "Upper East Regional Hospital",
+                        address = "Bolgatanga",
+                        phone = "0382022218",
+                        latitude = 10.7854,
+                        longitude = -0.8521,
+                        specialization = "general",
+                        hasEmergency = true,
+                        beds = 250,
+                        rating = 3.7f
+                    ),
+
+                    // WA HOSPITALS
+                    Hospital(
+                        id = "upper_west_regional",
+                        name = "Upper West Regional Hospital",
+                        address = "Wa",
+                        phone = "0392022333",
+                        latitude = 10.0601,
+                        longitude = -2.5099,
+                        specialization = "general",
+                        hasEmergency = true,
+                        beds = 200,
+                        rating = 3.6f
                     )
                 )
             )
 
-            // Add first aid instructions
+            // Add first aid instructions (keeping existing code)
             val cprCondition = "cpr"
             database.firstAidDao().apply {
                 insertInstruction(

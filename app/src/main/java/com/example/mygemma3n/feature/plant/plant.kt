@@ -2,14 +2,20 @@ package com.example.mygemma3n.feature.plant
 
 import android.graphics.Bitmap
 import androidx.room.*
+import com.example.mygemma3n.shared_utilities.stripFences
 import com.google.gson.Gson
 import com.google.gson.JsonSyntaxException
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
+import org.json.JSONObject
+import timber.log.Timber
 import java.util.Date
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.example.mygemma3n.feature.plant.parseAnalysisFromJson
+
 
 // Plant Scanner State
 data class PlantScanState(
@@ -21,16 +27,17 @@ data class PlantScanState(
 
 // Plant Analysis Data
 data class PlantAnalysis(
-    val id: String = java.util.UUID.randomUUID().toString(),
+    val id: String = UUID.randomUUID().toString(),
     val timestamp: Long = System.currentTimeMillis(),
-    val species: String,
-    val confidence: Float,
+    val species: String = "",
+    val confidence: Float = 0f,
     val disease: String? = null,
-    val severity: String? = null, // healthy, mild, moderate, severe
+    val severity: String? = null,
     val recommendations: List<String> = emptyList(),
     val imageUri: String? = null,
     val additionalInfo: PlantInfo? = null
 )
+
 
 // Plant Database
 @Entity(tableName = "plant_info")
@@ -215,21 +222,35 @@ fun preprocessImage(bitmap: Bitmap): ByteArray {
     return bytes
 }
 
-inline fun <reified T> parseJsonResponse(json: String): T {
-    return try {
-        // Clean the response to extract JSON
-        val jsonStart = json.indexOf("{")
-        val jsonEnd = json.lastIndexOf("}") + 1
+ fun parseAnalysisFromJson(raw: String, imageUri: String?): PlantAnalysis = try {
+    val obj = JSONObject(stripFences(raw))
+    val recs = obj.optJSONArray("recommendations")?.let { arr ->
+        List(arr.length()) { i -> arr.getString(i) }
+    } ?: emptyList()
 
-        if (jsonStart != -1 && jsonEnd > jsonStart) {
-            val cleanJson = json.substring(jsonStart, jsonEnd)
-            Gson().fromJson(cleanJson, T::class.java)
-        } else {
-            // Return default instance if JSON not found
-            T::class.java.getDeclaredConstructor().newInstance()
-        }
-    } catch (e: Exception) {
-        // Return default instance on parse error
-        T::class.java.getDeclaredConstructor().newInstance()
-    }
+    PlantAnalysis(
+        id              = UUID.randomUUID().toString(),
+        timestamp       = System.currentTimeMillis(),
+        species         = obj.getString("species"),
+        confidence      = obj.getDouble("confidence").toFloat(),
+        disease         = obj.optString("disease", null),
+        severity        = obj.optString("severity", null),
+        recommendations = recs,
+        imageUri        = imageUri,
+        additionalInfo  = null  // parse nested JSON here if needed
+    )
+} catch (e: Exception) {
+    Timber.e(e, "JSON parse error – fallback")
+    PlantAnalysis(
+        id              = UUID.randomUUID().toString(),
+        timestamp       = System.currentTimeMillis(),
+        species         = "",
+        confidence      = 0f,
+        disease         = null,
+        severity        = null,
+        recommendations = emptyList(),
+        imageUri        = imageUri,
+        additionalInfo  = null
+    )
 }
+
