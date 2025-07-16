@@ -43,6 +43,7 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
+            manifestPlaceholders["logLevel"] = "DEBUG"
             buildConfigField("Boolean", "ENABLE_PERFORMANCE_MONITORING", "true")
         }
         release {
@@ -81,12 +82,19 @@ android {
 
     packagingOptions {
         resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-        }
-        jniLibs {
-            useLegacyPackaging = true
-            // Keep all native libraries for AI Edge
-            pickFirsts += "**/*.so"
+            // Exclude these to prevent merge conflicts
+            excludes.add("META-INF/DEPENDENCIES")
+            excludes.add("META-INF/INDEX.LIST")
+            excludes.add("META-INF/LICENSE")
+            excludes.add("META-INF/LICENSE.txt")
+            excludes.add("META-INF/NOTICE")
+            excludes.add("META-INF/NOTICE.txt")
+            excludes.add("META-INF/notice.txt")
+            excludes.add("META-INF/ASL2.0")
+            excludes.add("META-INF/io.netty.versions.properties")
+            excludes.add("META-INF/*.kotlin_module")
+            // Or use a wildcard to cover all META-INF files:
+            // excludes.add("META-INF/*")
         }
     }
 
@@ -152,6 +160,9 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
 
+    // Gemini API - THIS IS THE KEY ADDITION
+    implementation(libs.generativeai)
+
 // Permissions
     implementation(libs.accompanist.permissions)
 
@@ -216,6 +227,16 @@ dependencies {
 
     implementation(libs.androidx.datastore.preferences.v110)
 
+    // Google Cloud Speech-to-Text with exclusions
+    implementation(libs.google.cloud.speech) {
+        exclude(group = "com.google.protobuf", module = "protobuf-java")
+        exclude(group = "com.google.api.grpc", module = "proto-google-common-protos")
+        exclude(group = "com.google.firebase", module = "protolite-well-known-types")
+    }
+
+
+
+
 }
 
 // Enable Gemma 3n model optimizations
@@ -224,5 +245,15 @@ android {
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
         }
+    }
+}
+
+configurations.all {
+    resolutionStrategy {
+        force(
+            "com.google.protobuf:protobuf-java:3.21.12",
+            "com.google.api.grpc:proto-google-common-protos:2.29.0",
+            "com.google.firebase:protolite-well-known-types:18.0.1"
+        )
     }
 }

@@ -2,18 +2,15 @@ package com.example.mygemma3n.shared_utilities
 
 import android.content.Context
 import android.location.Location
-import com.example.mygemma3n.gemma.GemmaEngine
+import com.example.mygemma3n.data.UnifiedGemmaService
 import com.example.mygemma3n.remote.EmergencyDatabase
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
-
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
-import com.example.mygemma3n.gemma.GemmaEngine.ModelVariant
-
 
 // Function definitions
 data class FunctionParameter(
@@ -92,7 +89,7 @@ class CrisisFunctionCalling @Inject constructor(
     private val context: Context,
     private val locationService: LocationService,
     private val emergencyDb: EmergencyDatabase,
-    private val gemmaEngine: GemmaEngine
+    private val gemmaService: UnifiedGemmaService  // Updated to use UnifiedGemmaService
 ) {
     private val functionRegistry = FunctionRegistry()
     private val gson = Gson()
@@ -172,22 +169,21 @@ class CrisisFunctionCalling @Inject constructor(
         )
     }
 
-
     suspend fun processQuery(query: String): FunctionCallResult =
         withContext(Dispatchers.Default) {
             try {
-                // 1️⃣ Build prompt
+                // Build prompt
                 val prompt = buildFunctionPrompt(query)
 
-                // 2️⃣ Run Gemma (fast 2-B)
-                val response = gemmaEngine.generateWithModel(
+                // Run Gemma using UnifiedGemmaService
+                val response = gemmaService.generateWithModel(
                     prompt = prompt,
-                    modelVariant = ModelVariant.FAST_2B,
+                    modelVariant = UnifiedGemmaService.ModelVariant.FAST_2B,
                     maxTokens = 256,
-                    temperature = 0.1f      // deterministic calls
+                    temperature = 0.1f  // deterministic for function calls
                 )
 
-                // 3️⃣ Parse & execute function call if present
+                // Parse & execute function call if present
                 val functionCall = parseFunctionCall(response)
                 if (functionCall != null) {
                     functionRegistry.execute(functionCall)
@@ -199,7 +195,6 @@ class CrisisFunctionCalling @Inject constructor(
                 FunctionCallResult.Error("Failed to process query: ${e.message}")
             }
         }
-
 
     private fun buildFunctionPrompt(query: String): String {
         val functionsJson = gson.toJson(functionRegistry.getFunctions())
@@ -316,9 +311,9 @@ class CrisisFunctionCalling @Inject constructor(
             Be concise and action-oriented.
         """.trimIndent()
 
-        return gemmaEngine.generateWithModel(
+        return gemmaService.generateWithModel(
             prompt = analysisPrompt,
-            modelVariant = GemmaEngine.ModelVariant.FAST_2B,
+            modelVariant = UnifiedGemmaService.ModelVariant.FAST_2B,
             maxTokens = 150
         )
     }

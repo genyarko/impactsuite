@@ -22,10 +22,12 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.exp
 import kotlin.random.Random
+import dagger.hilt.android.qualifiers.ApplicationContext
+
 
 @Singleton
 class GemmaEngine @Inject constructor(
-    private val context: Context,
+    @ApplicationContext private val context: Context,
     private val performanceMonitor: PerformanceMonitor
 ) {
     // ---------- NEW: model variants ------------------------------------------------------------

@@ -25,12 +25,15 @@ import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.apply
+import dagger.hilt.android.qualifiers.ApplicationContext
+
 import org.tensorflow.lite.gpu.GpuDelegateFactory.Options as GpuOptions
 
 
 
 @Singleton
 class GemmaModelManager @Inject constructor(
+    @ApplicationContext
     private val context: Context,
     val modelRepository: ModelRepository,
     private val performanceMonitor: PerformanceMonitor

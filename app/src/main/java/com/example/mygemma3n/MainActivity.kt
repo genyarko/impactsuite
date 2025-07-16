@@ -7,12 +7,19 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -24,58 +31,79 @@ import com.example.mygemma3n.feature.plant.PlantScannerViewModel
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.lifecycleScope
+import androidx.navigation.NavHostController
+import com.example.mygemma3n.data.GeminiApiConfig
+import com.example.mygemma3n.data.GeminiApiService
+import com.example.mygemma3n.data.validateKey
+import com.example.mygemma3n.di.SpeechRecognitionServiceEntryPoint
+import com.example.mygemma3n.feature.caption.SpeechRecognitionService
+import com.example.mygemma3n.feature.cbt.CBTCoachScreen
+import com.example.mygemma3n.feature.crisis.CrisisHandbookScreen
 import com.google.android.play.core.assetpacks.AssetPackManagerFactory
 import com.google.android.play.core.assetpacks.AssetPackStateUpdateListener
 import com.google.android.play.core.assetpacks.model.AssetPackStatus
 import com.google.android.play.core.assetpacks.AssetPackManager
 import dagger.hilt.android.AndroidEntryPoint
+import dagger.hilt.android.EntryPointAccessors
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import timber.log.Timber
+import javax.inject.Inject
 
+
+// ───── Preference keys ──────────────────────────────────────────────────────
+val API_KEY        = stringPreferencesKey("gemini_api_key")
+val MAPS_API_KEY   = stringPreferencesKey("google_maps_api_key")
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    @Inject lateinit var geminiApiService: GeminiApiService
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
 
-        setContent {
-            Gemma3nTheme {
-                Gemma3nApp()
+        lifecycleScope.launch {
+            val key = dataStore.data.map { it[API_KEY].orEmpty() }.first()
+            if (key.isNotBlank()) {
+                runCatching {
+                    geminiApiService.initialize(GeminiApiConfig(apiKey = key))
+                }.onFailure { Timber.e(it) }
             }
         }
+
+        setContent { Gemma3nTheme { Gemma3nApp(geminiApiService) } }
     }
 }
 
+// ───── Root Composable ──────────────────────────────────────────────────────
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
-fun Gemma3nApp() {
+fun Gemma3nApp(geminiApiService: com.example.mygemma3n.data.GeminiApiService) {
     val navController = rememberNavController()
 
-    // Request necessary permissions
-    val permissions = rememberMultiplePermissionsState(
-        permissions = listOf(
+    // ask for CAMERA / AUDIO / LOCATION once at start‑up
+    val perms = rememberMultiplePermissionsState(
+        listOf(
             Manifest.permission.CAMERA,
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.ACCESS_FINE_LOCATION
         )
     )
+    LaunchedEffect(Unit) { perms.launchMultiplePermissionRequest() }
 
-    LaunchedEffect(Unit) {
-        permissions.launchMultiplePermissionRequest()
-    }
-
-    Scaffold(
-        modifier = Modifier.fillMaxSize()
-    ) { paddingValues ->
+    Scaffold { inner ->
         Gemma3nNavigation(
             navController = navController,
-            modifier = Modifier.padding(paddingValues)
+            geminiApiService = geminiApiService,
+            modifier = Modifier.padding(inner)
         )
     }
 }
@@ -83,7 +111,8 @@ fun Gemma3nApp() {
 // Navigation
 @Composable
 fun Gemma3nNavigation(
-    navController: androidx.navigation.NavHostController,
+    navController: NavHostController,
+    geminiApiService: GeminiApiService,
     modifier: Modifier = Modifier
 ) {
     NavHost(
@@ -104,403 +133,579 @@ fun Gemma3nNavigation(
             CBTCoachScreen()
         }
         composable("plant_scanner") {
-            val vm: PlantScannerViewModel = hiltViewModel()
-            PlantScannerScreen(onScanClick = { bitmap ->
-                vm.analyzeImage(bitmap)
-            })
+            PlantScannerScreen()
         }
         composable("crisis_handbook") {
             CrisisHandbookScreen()
         }
+        composable("api_settings") {
+            val context = LocalContext.current
+            val speechService = remember {
+                EntryPointAccessors.fromApplication(
+                    context.applicationContext,
+                    SpeechRecognitionServiceEntryPoint::class.java
+                ).speechRecognitionService()
+            }
+            ApiSettingsScreen(
+                geminiApiService = geminiApiService,
+                speechService = speechService
+            )
+        }
     }
 }
 
-// Home screen with asset pack download
+// Updated Home screen with Gemini API
+// ───── Home screen ──────────────────────────────────────────────────────────
 @Composable
-fun HomeScreen(navController: androidx.navigation.NavHostController) {
-    var downloadProgress by remember { mutableStateOf(0f) }
-    var isModelReady by remember { mutableStateOf(false) }
-    var isPreparingModel by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    val context = androidx.compose.ui.platform.LocalContext.current
+fun HomeScreen(navController: NavHostController) {
+    var downloadProgress  by remember { mutableStateOf(0f) }
+    var isModelReady      by remember { mutableStateOf(false) }
+    var isPreparingModel  by remember { mutableStateOf(false) }
+    var errorMessage      by remember { mutableStateOf<String?>(null) }
+    var availableModels   by remember { mutableStateOf<List<String>>(emptyList()) }
+    val ctx = LocalContext.current
 
-    // in MainActivity.kt, inside HomeScreen’s LaunchedEffect:
+    // run once
     LaunchedEffect(Unit) {
-        checkModelAvailability(context) { progress, ready, preparing, error ->
-            downloadProgress = progress
-            isModelReady    = ready
-            isPreparingModel= preparing
-            errorMessage    = error
+        checkModelAvailability(ctx) { prog, ready, prep, err, models ->
+            downloadProgress = prog
+            isModelReady     = ready
+            isPreparingModel = prep
+            errorMessage     = err
+            availableModels  = models
         }
     }
 
-
     Column(
-        modifier = Modifier
+        Modifier
             .fillMaxSize()
             .padding(16.dp),
         verticalArrangement = Arrangement.Center
     ) {
-        Text(
-            text = "Gemma 3n Impact Suite",
-            style = MaterialTheme.typography.headlineLarge
-        )
+        Text("Gemma 3n Impact Suite", style = MaterialTheme.typography.headlineLarge)
+        Spacer(Modifier.height(32.dp))
 
-        Spacer(modifier = Modifier.height(32.dp))
-
-        // Show appropriate status
+        // status UI (download, errors, list of found models, …)
         when {
-            errorMessage != null -> {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp)
-                    ) {
-                        Text(
-                            "Error loading model:",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onErrorContainer
-                        )
-                        Text(
-                            errorMessage!!,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onErrorContainer
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-            isPreparingModel -> {
-                LinearProgressIndicator(
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text("Preparing model for first use...")
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-            downloadProgress > 0 && downloadProgress < 100 && !isModelReady -> {
-                LinearProgressIndicator(
-                    progress = { downloadProgress / 100f },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text("Downloading model: ${downloadProgress.toInt()}%")
-                Spacer(modifier = Modifier.height(16.dp))
-            }
+            errorMessage != null -> ErrorCard(errorMessage!!)
+            isPreparingModel     -> StatusBar("Preparing model…")
+            downloadProgress in 0f..99f && !isModelReady ->
+                StatusBar("Downloading model: ${downloadProgress.toInt()}%", downloadProgress / 100)
+            isModelReady && availableModels.isNotEmpty() -> AvailableModelsCard(availableModels)
         }
 
-        Button(
-            onClick = { navController.navigate("live_caption") },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = isModelReady
+        FeatureButton("Live Caption & Translation", "live_caption", navController, isModelReady)
+        FeatureButton("Offline Quiz Generator",     "quiz_generator", navController, isModelReady)
+        FeatureButton("Voice CBT Coach",            "cbt_coach",      navController, isModelReady)
+        FeatureButton("Plant Disease Scanner",      "plant_scanner",  navController, isModelReady)
+        FeatureButton("Crisis Handbook",            "crisis_handbook",navController, isModelReady)
+
+        Spacer(Modifier.height(16.dp))
+
+        OutlinedButton(
+            onClick = { navController.navigate("api_settings") },
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Live Caption & Translation")
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Button(
-            onClick = { navController.navigate("quiz_generator") },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = isModelReady
-        ) {
-            Text("Offline Quiz Generator")
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Button(
-            onClick = { navController.navigate("cbt_coach") },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = isModelReady
-        ) {
-            Text("Voice CBT Coach")
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Button(
-            onClick = { navController.navigate("plant_scanner") },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = isModelReady
-        ) {
-            Text("Plant Disease Scanner")
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Button(
-            onClick = { navController.navigate("crisis_handbook") },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = isModelReady
-        ) {
-            Text("Crisis Handbook")
+            Icon(Icons.Default.Settings, null); Spacer(Modifier.width(8.dp)); Text("API Settings")
         }
 
         if (!isModelReady && !isPreparingModel) {
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                "Model needs to be available before using features",
-                style = MaterialTheme.typography.bodySmall
-            )
+            Spacer(Modifier.height(16.dp))
+            Text("Model needs to be available before using features",
+                style = MaterialTheme.typography.bodySmall)
         }
     }
 }
 
 @Composable
-fun CBTCoachScreen() {
-    Text("CBT Coach Screen")
+private fun FeatureButton(
+    label: String,
+    route: String,
+    nav: NavHostController,
+    enabled: Boolean
+) {
+    Spacer(Modifier.height(8.dp))
+    Button(
+        onClick = { nav.navigate(route) },
+        enabled = enabled,
+        modifier = Modifier.fillMaxWidth()
+    ) { Text(label) }
 }
+
+@Composable private fun StatusBar(text: String, progress: Float? = null) {
+    Column {
+        if (progress != null)
+            LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+        else
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        Text(text); Spacer(Modifier.height(16.dp))
+    }
+}
+
+@Composable private fun ErrorCard(msg: String) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(MaterialTheme.colorScheme.errorContainer)
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text("Error loading model:", fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onErrorContainer)
+            Text(msg, color = MaterialTheme.colorScheme.onErrorContainer)
+        }
+    }
+}
+
+@Composable private fun AvailableModelsCard(models: List<String>) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(MaterialTheme.colorScheme.secondaryContainer)
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text("Models available:", style = MaterialTheme.typography.labelMedium)
+            models.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+        }
+    }
+}
+
+// ───── Model‑availability helper  (TOP‑LEVEL, visible to HomeScreen) ────────
+fun checkModelAvailability(
+    ctx: Context,
+    onStatusUpdate: (Float, Boolean, Boolean, String?, List<String>) -> Unit
+) = CoroutineScope(Dispatchers.IO).launch {
+    try {
+        val assets = ctx.assets.list("models")?.toSet().orEmpty()
+
+        val required = listOf(
+            "gemma-3n-E2B-it-int4.task",
+            "universal_sentence_encoder.tflite"
+        )
+        val optional = listOf(
+            "gemma-3n-E4B-it-int4.task"
+        )
+
+        val missing = required.filterNot(assets::contains)
+        if (missing.isNotEmpty()) {
+            onStatusUpdate(0f, false, false,
+                "Missing required files:\n${missing.joinToString("\n")}", emptyList())
+            return@launch
+        }
+
+        val availableModels = (required + optional).filter(assets::contains)
+        onStatusUpdate(0f, false, true, null, availableModels)
+
+        // copy to cache
+        val copied = mutableListOf<String>()
+        val outDir = File(ctx.cacheDir, "models").apply { mkdirs() }
+
+        assets.filter { it.endsWith(".task") || it.endsWith(".tflite") }.forEach { name ->
+            kotlin.runCatching {
+                ctx.assets.open("models/$name").use { input ->
+                    File(outDir, name).outputStream().use { input.copyTo(it) }
+                }; copied += name
+            }.onFailure { Timber.e(it, "Copy failed: $name") }
+        }
+
+        if (copied.isEmpty())
+            onStatusUpdate(0f, false, false, "Failed to copy model files", availableModels)
+        else
+            onStatusUpdate(100f, true, false, null, availableModels)
+
+    } catch (e: Exception) {
+        onStatusUpdate(0f, false, false, "Error: ${e.localizedMessage}", emptyList())
+    }
+}
+
+
 
 @Composable
-fun CrisisHandbookScreen() {
-    Text("Crisis Handbook Screen")
-}
-
-// Updated model availability check with error handling
-/**
- * Checks that every required .tflite (and metadata) file exists under
- * C:\Users\genya\Downloads\MyGemma3N\app\src\main\ml.
- *
- * Runs on a background thread and reports progress / status to
- * [onStatusUpdate].
- */
-fun checkModelAvailability(
-    /* ctx kept for signature compatibility, not used here */
-    ctx: Context,
-    onStatusUpdate: (progress: Float, ready: Boolean, preparing: Boolean, error: String?) -> Unit
+fun ApiSettingsScreen(
+    geminiApiService: GeminiApiService,
+    speechService: SpeechRecognitionService // <-- Inject this!
 ) {
-    CoroutineScope(Dispatchers.IO).launch {
-        try {
-            /* absolute or project-relative root – adjust if you move the project */
-            val root = File("C:\\Users\\genya\\Downloads\\MyGemma3N")
+    var apiKey by remember { mutableStateOf("") }
+    var mapsApiKey by remember { mutableStateOf("") }
+    var speechApiKey by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+    var validationMessage by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
 
-            val requiredPaths = listOf(
-                "app/src/main/ml/TF_LITE_EMBEDDER.tflite",
-                "app/src/main/ml/TF_LITE_PER_LAYER_EMBEDDER.tflite",
-                "app/src/main/ml/TF_LITE_PREFILL_DECODE.tflite",
-                "app/src/main/ml/TF_LITE_VISION_ADAPTER.tflite",
-                "app/src/main/ml/TF_LITE_VISION_ENCODER.tflite",
-                "app/src/main/ml/TOKENIZER_MODEL.tflite"
-            )
+    // Load existing API keys
+    LaunchedEffect(Unit) {
+        context.dataStore.data.map { it[API_KEY] }.first()?.let {
+            apiKey = it
+        }
+        context.dataStore.data.map { it[MAPS_API_KEY] }.first()?.let {
+            mapsApiKey = it
+        }
+        context.dataStore.data.map { it[SPEECH_API_KEY] }.first()?.let {
+            speechApiKey = it
+        }
+    }
 
-            val missing = requiredPaths.filterNot { rel ->
-                File(root, rel).exists()
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        Text(
+            text = "API Configuration",
+            style = MaterialTheme.typography.headlineMedium
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "Enter your API keys to enable all features",
+            style = MaterialTheme.typography.bodyMedium
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Gemini API Key
+        OutlinedTextField(
+            value = apiKey,
+            onValueChange = { apiKey = it },
+            label = { Text("Gemini API Key") },
+            placeholder = { Text("AIza...") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            enabled = !isLoading,
+            supportingText = { Text("Required for AI features") }
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Google Cloud Speech API Key
+        OutlinedTextField(
+            value = speechApiKey,
+            onValueChange = { speechApiKey = it },
+            label = { Text("Google Cloud Speech API Key") },
+            placeholder = { Text("AIza...") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            enabled = !isLoading,
+            supportingText = { Text("Required for Live Caption audio transcription") }
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Google Maps API Key
+        OutlinedTextField(
+            value = mapsApiKey,
+            onValueChange = { mapsApiKey = it },
+            label = { Text("Google Maps API Key (Optional)") },
+            placeholder = { Text("AIza...") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            enabled = !isLoading,
+            supportingText = { Text("Required for Crisis Handbook map feature") }
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = {
+                    isLoading = true
+                    validationMessage = null
+                    CoroutineScope(Dispatchers.IO).launch {
+                        try {
+                            var allValid = true
+                            val messages = mutableListOf<String>()
+
+                            // Validate Gemini API key
+                            if (apiKey.isNotBlank()) {
+                                if (geminiApiService.validateKey(apiKey)) {   // ← rename here
+                                    context.dataStore.edit { it[API_KEY] = apiKey }
+                                    messages.add("✓ Gemini API key validated")
+                                } else {
+                                    messages.add("✗ Invalid Gemini API key")
+                                    allValid = false
+                                }
+                            }
+
+                            // Save Speech API key and initialize SpeechRecognitionService
+                            if (speechApiKey.isNotBlank()) {
+                                if (speechApiKey.startsWith("AIza") && speechApiKey.length > 20) {
+                                    context.dataStore.edit { settings ->
+                                        settings[SPEECH_API_KEY] = speechApiKey
+                                    }
+                                    // Initialize the speech service with this API key
+                                    try {
+                                        speechService.initializeWithApiKey(speechApiKey)
+                                        messages.add("✓ Speech API key saved & initialized")
+                                    } catch (e: Exception) {
+                                        messages.add("✗ Failed to initialize SpeechRecognitionService: ${e.message}")
+                                        allValid = false
+                                    }
+                                } else {
+                                    messages.add("✗ Invalid Speech API key format")
+                                    allValid = false
+                                }
+                            }
+
+                            // Save Maps API key (no validation for now)
+                            if (mapsApiKey.isNotBlank()) {
+                                context.dataStore.edit { settings ->
+                                    settings[MAPS_API_KEY] = mapsApiKey
+                                }
+                                messages.add("✓ Maps API key saved")
+                            }
+
+                            withContext(Dispatchers.Main) {
+                                validationMessage = messages.joinToString("\n")
+                            }
+                        } catch (e: Exception) {
+                            withContext(Dispatchers.Main) {
+                                validationMessage = "Error: ${e.message}"
+                            }
+                        } finally {
+                            withContext(Dispatchers.Main) {
+                                isLoading = false
+                            }
+                        }
+                    }
+                },
+                enabled = (apiKey.isNotBlank() || mapsApiKey.isNotBlank() || speechApiKey.isNotBlank()) && !isLoading,
+                modifier = Modifier.weight(1f)
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                } else {
+                    Text("Save & Validate")
+                }
             }
 
-            if (missing.isEmpty()) {
-                onStatusUpdate(100f, true, false, null)          // all files present
-            } else {
-                onStatusUpdate(
-                    0f, false, false,
-                    "Missing model files:\n${missing.joinToString("\n")}"
+            OutlinedButton(
+                onClick = {
+                    apiKey = ""
+                    mapsApiKey = ""
+                    speechApiKey = ""
+                    CoroutineScope(Dispatchers.IO).launch {
+                        context.dataStore.edit { settings ->
+                            settings.remove(API_KEY)
+                            settings.remove(MAPS_API_KEY)
+                            settings.remove(SPEECH_API_KEY)
+                        }
+                    }
+                    validationMessage = "API keys cleared"
+                },
+                enabled = !isLoading
+            ) {
+                Text("Clear All")
+            }
+        }
+
+        validationMessage?.let { message ->
+            Spacer(modifier = Modifier.height(16.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (message.contains("✓") && !message.contains("✗"))
+                        MaterialTheme.colorScheme.secondaryContainer
+                    else if (message.contains("✗"))
+                        MaterialTheme.colorScheme.errorContainer
+                    else
+                        MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Text(
+                    text = message,
+                    modifier = Modifier.padding(16.dp),
+                    color = if (message.contains("✓") && !message.contains("✗"))
+                        MaterialTheme.colorScheme.onSecondaryContainer
+                    else if (message.contains("✗"))
+                        MaterialTheme.colorScheme.onErrorContainer
+                    else
+                        MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-        } catch (e: Exception) {
-            onStatusUpdate(
-                0f, false, false,
-                "Error checking model files: ${e.localizedMessage}"
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text(
+            text = "Get your API keys from:",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Medium
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top
+            ) {
+                Text(
+                    text = "Gemini: ",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = "https://makersuite.google.com/app/apikey",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top
+            ) {
+                Text(
+                    text = "Speech: ",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = "https://console.cloud.google.com/apis/library/speech.googleapis.com",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top
+            ) {
+                Text(
+                    text = "Maps: ",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = "https://console.cloud.google.com/",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
             )
+        ) {
+            Column(
+                modifier = Modifier.padding(12.dp)
+            ) {
+                Text(
+                    text = "Note for Speech API:",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = "Enable the Cloud Speech-to-Text API in your Google Cloud Console and create an API key with Speech-to-Text permissions.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            }
         }
     }
-}
 
+    // Updated model availability check with better error handling
+    fun checkModelAvailability(
+        ctx: Context,
+        onStatusUpdate: (Float, Boolean, Boolean, String?, List<String>) -> Unit
+    ) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val assets = ctx.assets.list("models")?.toSet() ?: emptySet()
+                val required = listOf(
+                    "gemma-3n-E2B-it-int4.task",  // Currently available
+                    "universal_sentence_encoder.tflite"
+                )
 
+                // Optional models that might be added later
+                val optional = listOf(
+                    "gemma-3n-E4B-it-int4.task"  // Will be available in future
+                )
 
-
-// ---- checkAssetModel -------------------------------------------------
-private fun checkAssetModel(ctx: Context): Boolean = try {
-    val dir = "models"
-    ctx.assets.list(dir)?.any {
-        it == "gemma-3n-E2B-it-int4.task" || it == "gemma-3n-E4B-it-int4.task"
-    } ?: false
-} catch (e: Exception) {
-    Timber.e(e, "Error checking asset model")
-    false
-}
-
-// Copy model from assets to cache
-// ---- copyAssetModelToCache ------------------------------------------
-private suspend fun copyAssetModelToCache(ctx: Context): String? = withContext(Dispatchers.IO) {
-    val names = listOf("gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
-    for (name in names) {
-        try {
-            val cacheFile = File(ctx.cacheDir, name)
-            if (!cacheFile.exists()) {
-                ctx.assets.open("models/$name").use { input ->
-                    cacheFile.outputStream().use { output -> input.copyTo(output) }
+                val missing = required.filterNot { it in assets }
+                if (missing.isNotEmpty()) {
+                    onStatusUpdate(
+                        0f,
+                        false,
+                        false,
+                        "Missing required files in assets/models:\n${missing.joinToString("\n")}",
+                        emptyList()
+                    )
+                    return@launch
                 }
-            }
-            return@withContext cacheFile.absolutePath
-        } catch (_: Exception) { /* try next */ }
-    }
-    Timber.e("No model found in assets")
-    null
-}
 
-// Check if Google Play Services is available
-private fun isPlayStoreAvailable(context: Context): Boolean {
-    return try {
-        // Check if we can access Google Play services
-        val packageInfo = context.packageManager.getPackageInfo("com.android.vending", 0)
-        packageInfo != null
-    } catch (e: Exception) {
-        false
-    }
-}
+                // Check which models are actually available
+                val availableModels = mutableListOf<String>()
 
-// Original Google Play asset pack download (with error handling)
-fun checkAndDownloadFromPlay(
-    context: Context,
-    onProgressUpdate: (progress: Float, ready: Boolean) -> Unit
-) {
-    val assetPackManager = AssetPackManagerFactory.getInstance(context)
-    val packName = "gemma3n_assetpack"
-
-    CoroutineScope(Dispatchers.IO).launch {
-        try {
-            // Check if already installed
-            val packStates = assetPackManager.getPackStates(listOf(packName)).await()
-            val packState = packStates.packStates()[packName]
-
-            when (packState?.status()) {
-                AssetPackStatus.COMPLETED -> {
-                    onProgressUpdate(100f, true)
-                    Timber.d("Asset pack already installed")
-                }
-                AssetPackStatus.DOWNLOADING -> {
-                    // Monitor download progress
-                    monitorDownload(assetPackManager, packName) { progress, ready ->
-                        onProgressUpdate(progress, ready)
+                // Check required models
+                required.forEach { model ->
+                    if (model in assets) {
+                        availableModels.add(model)
                     }
                 }
-                else -> {
-                    // Start download
-                    startDownload(assetPackManager, packName) { progress, ready ->
-                        onProgressUpdate(progress, ready)
+
+                // Check optional models
+                optional.forEach { model ->
+                    if (model in assets) {
+                        availableModels.add(model)
+                        Timber.d("Optional model available: $model")
                     }
                 }
-            }
-        } catch (e: Exception) {
-            Timber.e(e, "Asset pack not available, falling back to bundled model")
-            // Don't fail, just use bundled model
-            onProgressUpdate(100f, checkAssetModel(context))
-        }
-    }
-}
 
-private fun startDownload(
-    assetPackManager: AssetPackManager,
-    packName: String,
-    onProgressUpdate: (progress: Float, ready: Boolean) -> Unit
-) {
-    // Create listener for updates
-    lateinit var listener: AssetPackStateUpdateListener
-    listener = AssetPackStateUpdateListener { state ->
-        when (state.status()) {
-            AssetPackStatus.DOWNLOADING -> {
-                val progress = if (state.totalBytesToDownload() > 0) {
-                    (state.bytesDownloaded() * 100f / state.totalBytesToDownload())
-                } else 0f
-                onProgressUpdate(progress, false)
-                Timber.d("Downloading: $progress%")
-            }
-            AssetPackStatus.COMPLETED -> {
-                onProgressUpdate(100f, true)
-                Timber.d("Download completed")
-                assetPackManager.unregisterListener(listener)
-            }
-            AssetPackStatus.FAILED -> {
-                onProgressUpdate(0f, false)
-                Timber.e("Download failed: ${state.errorCode()}")
-                assetPackManager.unregisterListener(listener)
-            }
-            else -> {
-                Timber.d("Status: ${state.status()}")
-            }
-        }
-    }
+                onStatusUpdate(0f, false, true, null, availableModels)
 
-    // Register listener and start download
-    assetPackManager.registerListener(listener)
-    assetPackManager.fetch(listOf(packName))
-}
+                // Copy available models to cache
+                val modelsCopied = mutableListOf<String>()
+                val modelsDir = File(ctx.cacheDir, "models")
+                modelsDir.mkdirs()
 
-private fun monitorDownload(
-    assetPackManager: AssetPackManager,
-    packName: String,
-    onProgressUpdate: (progress: Float, ready: Boolean) -> Unit
-) {
-    lateinit var listener: AssetPackStateUpdateListener
-    listener = AssetPackStateUpdateListener { state ->
-        if (state.name() == packName) {
-            when (state.status()) {
-                AssetPackStatus.DOWNLOADING -> {
-                    val progress = if (state.totalBytesToDownload() > 0) {
-                        (state.bytesDownloaded() * 100f / state.totalBytesToDownload())
-                    } else 0f
-                    onProgressUpdate(progress, false)
+                for (modelName in assets.filter { it.endsWith(".task") || it.endsWith(".tflite") }) {
+                    try {
+                        val cacheFile = File(modelsDir, modelName)
+                        if (!cacheFile.exists()) {
+                            ctx.assets.open("models/$modelName").use { input ->
+                                cacheFile.outputStream().use { output ->
+                                    input.copyTo(output)
+                                }
+                            }
+                            Timber.d("Copied $modelName to cache")
+                        }
+                        modelsCopied.add(modelName)
+                    } catch (e: Exception) {
+                        Timber.e(e, "Failed to copy $modelName")
+                    }
                 }
-                AssetPackStatus.COMPLETED -> {
-                    onProgressUpdate(100f, true)
-                    assetPackManager.unregisterListener(listener)
+
+                if (modelsCopied.isEmpty()) {
+                    onStatusUpdate(
+                        0f,
+                        false,
+                        false,
+                        "Failed to copy models to cache",
+                        availableModels
+                    )
+                    return@launch
                 }
-                AssetPackStatus.FAILED -> {
-                    onProgressUpdate(0f, false)
-                    assetPackManager.unregisterListener(listener)
-                }
+
+                onStatusUpdate(100f, true, false, null, availableModels)
+            } catch (e: Exception) {
+                onStatusUpdate(0f, false, false, "Error: ${e.localizedMessage}", emptyList())
             }
         }
     }
-
-    assetPackManager.registerListener(listener)
 }
 
-// ---- getModelFilePath -----------------------------------------------
-fun getModelFilePath(ctx: Context): String? {
-    val pack = AssetPackManagerFactory.getInstance(ctx)
-        .getPackLocation("gemma3n_assetpack")
-    pack?.assetsPath()?.let { base ->
-        File(base, "gemma-3n-E4B-it-int4.task").takeIf { it.exists() }?.let { return it.path }
-    }
-    listOf("gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task").forEach { name ->
-        File(ctx.cacheDir, name).takeIf { it.exists() }?.let { return it.path }
-    }
-    return null
-}
 
-// FIXED: Better error handling for large model extraction
-suspend fun ensureLargeModelOnDisk(ctx: Context): String = withContext(Dispatchers.IO) {
-    val target = File(ctx.cacheDir, "gemma-3n-E2B-it-int4.task")
-    if (target.exists()) return@withContext target.path          // already done
-
-    try {
-        val modelParts = ctx.assets.list("models")!!
-            .filter { it.startsWith("gemma-3n-E2B-it-int4.part") }
-            .sorted()                                               // part0, part1, …
-
-        if (modelParts.isEmpty()) {
-            throw IllegalStateException("No model parts found in assets/models/")
-        }
-
-        Timber.d("Found ${modelParts.size} model parts to concatenate")
-
-        // Use append mode to avoid keeping everything in memory
-        target.outputStream().use { output ->
-            modelParts.forEach { partName ->
-                Timber.d("Processing $partName...")
-                ctx.assets.open("models/$partName").use { input ->
-                    input.copyTo(output)
-                }
-            }
-        }
-
-        Timber.i("Model assembled successfully at ${target.absolutePath}")
-        target.path
-    } catch (e: Exception) {
-        Timber.e(e, "Failed to assemble model from parts")
-        throw e
-    }
-}
