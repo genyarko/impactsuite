@@ -85,31 +85,38 @@ fun PlantScannerScreen(
                 scanState.currentAnalysis != null -> {
                     val a = scanState.currentAnalysis!!
                     Column(
-                        Modifier
+                        modifier = Modifier
                             .fillMaxWidth()
                             .padding(16.dp)
                     ) {
                         // GENERAL LABEL (always)
                         Text(
-                            "Label: ${a.label} (${(a.confidence * 100).roundToInt()}%)",
-                            fontWeight = FontWeight.SemiBold
+                            text = "Label: ${a.label} (${(a.confidence * 100).roundToInt()}%)",
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.Red
                         )
 
                         // PLANT‑SPECIFIC DETAILS (optional)
                         a.plantSpecies?.let { species ->
                             Spacer(Modifier.height(4.dp))
-                            Text("Plant species: $species")
+                            Text("Plant species: $species", color = Color.Red)
+
                             a.disease?.let { dis ->
-                                Text("Disease: $dis (severity: ${a.severity ?: "N/A"})")
+                                Text("Disease: $dis (severity: ${a.severity ?: "N/A"})", color = Color.Red)
                             }
+
                             if (a.recommendations.isNotEmpty()) {
                                 Spacer(Modifier.height(4.dp))
-                                Text("Recommendations:", fontWeight = FontWeight.Bold)
-                                a.recommendations.forEach { Text("• $it") }
+                                Text("Recommendations:", fontWeight = FontWeight.Bold, color = Color.Red)
+                                a.recommendations.forEach { Text("• $it", color = Color.Red) }
                             }
+
                             a.additionalInfo?.let { info ->
                                 Spacer(Modifier.height(4.dp))
-                                Text("Extra care: ${info.wateringNeeds}, ${info.sunlightNeeds}")
+                                Text(
+                                    "Extra care: ${info.wateringNeeds}, ${info.sunlightNeeds}",
+                                    color = Color.Red
+                                )
                             }
                         }
                     }

@@ -17,9 +17,13 @@ android {
     compileSdk = 36
     assetPacks += listOf(":gemma3n_assetpack")
 
-    androidResources {        // AGP 8.0+
+    androidResources {            
         noCompress += "tflite"
+        noCompress += "task"
+        noCompress += "mbundle"
+
     }
+
 
 
     defaultConfig {
@@ -93,6 +97,7 @@ android {
             excludes.add("META-INF/ASL2.0")
             excludes.add("META-INF/io.netty.versions.properties")
             excludes.add("META-INF/*.kotlin_module")
+
             // Or use a wildcard to cover all META-INF files:
             // excludes.add("META-INF/*")
         }
