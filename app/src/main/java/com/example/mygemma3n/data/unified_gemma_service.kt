@@ -130,14 +130,26 @@ class UnifiedGemmaService @Inject constructor(
     }
 
     /* ---------- helper to run a prompt (text + optional image) ---------- */
-    suspend fun generateResponse(prompt: String, image: MPImage? = null): String =
+
+    private fun newSession(): LlmInferenceSession = LlmInferenceSession.createFromOptions(
+        llmInference!!,
+        LlmInferenceSession.LlmInferenceSessionOptions.builder()
+            .setTopK(40)
+            .setTemperature(0.8f)
+            .setGraphOptions(GraphOptions.builder().setEnableVisionModality(true).build())
+            .build()
+    )
+
+    suspend fun generateResponse(prompt: String, image: MPImage?): String =
         withContext(Dispatchers.IO) {
-            requireNotNull(session) { "Model not initialised" }
-            session!!.apply {
-                addQueryChunk(prompt)            // text first :contentReference[oaicite:2]{index=2}
-                image?.let { addImage(it) }
-            }.generateResponse()
+            requireNotNull(llmInference) { "Model not initialised" }
+            newSession().use { sess ->          // fresh 0‑token context
+                sess.addQueryChunk(prompt)
+                image?.let { sess.addImage(it) }
+                sess.generateResponse()
+            }
         }
+
 
 
 

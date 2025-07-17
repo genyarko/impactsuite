@@ -488,7 +488,7 @@ fun HomeScreen(
             enabled = isModelReady,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Plant Disease Scanner")
+            Text("Image Classification")
         }
 
         Spacer(modifier = Modifier.height(8.dp))
