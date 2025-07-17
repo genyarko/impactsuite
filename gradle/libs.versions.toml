@@ -37,6 +37,7 @@ roomCompiler = "2.7.2"
 roomKtx = "2.7.2"
 roomKtxVersion = "2.7.2"
 roomRuntime = "2.7.2"
+sttAndroid = "v1.4.0"
 supabaseKt = "0.11.0"
 hiltCommon = "1.2.0"
 playServicesMeasurementApi = "22.5.0"
@@ -52,6 +53,7 @@ tensorflowLiteGpuApi = "2.17.0"
 tensorflowLiteMetadata = "0.5.0"
 tensorflowLiteSelectTfOps = "2.16.1"
 tensorflowLiteSupport = "0.5.0"
+whisperCpp = "android-v1.5.4"
 workRuntimeKtx = "2.10.2"
 hiltWork = "1.2.0"
 navigationComposeJvmstubs = "2.9.0"
@@ -120,6 +122,7 @@ maps-compose = { module = "com.google.maps.android:maps-compose", version.ref = 
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 play-services-location = { module = "com.google.android.gms:play-services-location", version.ref = "playServicesLocation" }
 play-services-maps = { module = "com.google.android.gms:play-services-maps", version.ref = "playServicesMaps" }
+stt-android = { module = "com.github.coqui-ai:STT-Android", version.ref = "sttAndroid" }
 supabase-kt = { module = "io.supabase:supabase-kt", version.ref = "supabaseKt" }
 androidx-hilt-common = { group = "androidx.hilt", name = "hilt-common", version.ref = "hiltCommon" }
 play-services-measurement-api = { group = "com.google.android.gms", name = "play-services-measurement-api", version.ref = "playServicesMeasurementApi" }
@@ -143,6 +146,7 @@ litert = { group = "com.google.ai.edge.litert", name = "litert", version.ref = "
 litert-gpu = { group = "com.google.ai.edge.litert", name = "litert-gpu", version.ref = "litertGpu" }
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+whisper-cpp = { module = "com.github.ggerganov:whisper.cpp", version.ref = "whisperCpp" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

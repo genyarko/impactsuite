@@ -4,18 +4,23 @@ import android.app.Application
 import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.mygemma3n.gemma.GemmaEngine
+import com.example.mygemma3n.BuildConfig
+import com.example.mygemma3n.data.UnifiedGemmaService
 import com.example.mygemma3n.service.AudioCaptureService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import javax.inject.Inject
+import com.example.mygemma3n.dataStore            // ← ADD
+import com.example.mygemma3n.SPEECH_API_KEY
 
 @HiltViewModel
 class LiveCaptionViewModel @Inject constructor(
     application: Application,
-    private val gemmaEngine: GemmaEngine,
+    private val speechRecognitionService: SpeechRecognitionService,
+    private val unifiedGemmaService: UnifiedGemmaService,
     private val translationCache: TranslationCache
 ) : AndroidViewModel(application) {
 
@@ -23,6 +28,8 @@ class LiveCaptionViewModel @Inject constructor(
     val captionState: StateFlow<CaptionState> = _captionState.asStateFlow()
 
     private var audioProcessingJob: Job? = null
+    private var transcriptionBuffer = StringBuilder()
+    private var lastTranscriptionTime = 0L
 
     data class CaptionState(
         val isListening: Boolean = false,
@@ -31,10 +38,57 @@ class LiveCaptionViewModel @Inject constructor(
         val sourceLanguage: Language = Language.AUTO,
         val targetLanguage: Language = Language.ENGLISH,
         val latencyMs: Long = 0,
-        val error: String? = null
+        val error: String? = null,
+        val isModelReady: Boolean = false
     )
 
     init {
+        // Check if model is ready
+        viewModelScope.launch {
+            try {
+
+                // 1️⃣  get a Context
+                val context = getApplication<Application>()
+
+                // 2️⃣  read the key from DataStore
+                if (!speechRecognitionService.isInitialized) {
+                    val key = context.dataStore.data
+                        .map { it[SPEECH_API_KEY] ?: "" }
+                        .first()
+
+                    if (key.isNotBlank()) {
+                        speechRecognitionService.initializeWithApiKey(key)
+                    } else {
+                        _captionState.update {
+                            it.copy(error = "Please enter your Speech API key in Settings")
+                        }
+                        return@launch
+                    }
+                }
+
+
+                if (!unifiedGemmaService.isInitialized()) {
+                    _captionState.update { it.copy(error = "Initializing AI model...") }
+                    unifiedGemmaService.initializeBestAvailable()
+                }
+                _captionState.update {
+                    it.copy(
+                        isModelReady = true,
+                        error = null
+                    )
+                }
+                Timber.d("Gemma model ready for live caption")
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to initialize Gemma model")
+                _captionState.update {
+                    it.copy(
+                        error = "Failed to initialize AI model: ${e.message}",
+                        isModelReady = false
+                    )
+                }
+            }
+        }
+
         // Monitor service state
         viewModelScope.launch {
             AudioCaptureService.isRunning.collect { isRunning ->
@@ -51,6 +105,13 @@ class LiveCaptionViewModel @Inject constructor(
 
     fun startLiveCaption() {
         if (_captionState.value.isListening) return
+
+        if (!_captionState.value.isModelReady) {
+            _captionState.update {
+                it.copy(error = "AI model not ready. Please wait...")
+            }
+            return
+        }
 
         try {
             val context = getApplication<Application>()
@@ -73,46 +134,50 @@ class LiveCaptionViewModel @Inject constructor(
             action = AudioCaptureService.ACTION_STOP_CAPTURE
         }
         context.startService(intent)
+
+        // Clear transcript when stopping
+        transcriptionBuffer.clear()
+        _captionState.update {
+            it.copy(
+                currentTranscript = "",
+                translatedText = ""
+            )
+        }
     }
 
     private fun startProcessingAudio() {
+        audioProcessingJob?.cancel()          // avoid duplicates
         audioProcessingJob = viewModelScope.launch {
-            AudioCaptureService.audioDataFlow
-                .filterNotNull()
-                .chunked(1600) // Process in 100ms chunks (16kHz * 0.1s)
-                .transform { audioChunk ->
-                    val startTime = System.currentTimeMillis()
-
-                    // Process audio through Gemma for transcription
-                    val transcript = processAudioChunk(audioChunk)
-
-                    if (transcript.isNotEmpty()) {
-                        emit(transcript)
-
-                        val latency = System.currentTimeMillis() - startTime
-                        _captionState.update { it.copy(latencyMs = latency) }
+            speechRecognitionService
+                .transcribeLiveCaptions(
+                    AudioCaptureService.audioDataFlow.filterNotNull(),
+                    languageCode = when (val src = _captionState.value.sourceLanguage) {
+                        Language.AUTO   -> "en-US"            // fallback
+                        else            -> "${src.code}-US"   // quick 2‑letter → xx‑US map
                     }
-                }
-                .scan("") { acc, newText ->
-                    // Keep last 500 characters for context
-                    val combined = acc + " " + newText
-                    if (combined.length > 500) {
-                        combined.takeLast(500)
-                    } else {
-                        combined
-                    }.trim()
-                }
-                .collect { transcript ->
-                    _captionState.update { it.copy(currentTranscript = transcript) }
+                )
+                .collect { result ->
+                    if (result.transcript.isBlank()) return@collect
 
-                    // Translate if needed
-                    if (_captionState.value.targetLanguage != _captionState.value.sourceLanguage &&
-                        _captionState.value.sourceLanguage != Language.AUTO) {
-                        translateText(transcript)
+                    val now = System.currentTimeMillis()
+                    _captionState.update {
+                        val newBuf = (it.currentTranscript + " " + result.transcript)
+                            .takeLast(500).trim()
+                        it.copy(
+                            currentTranscript = newBuf,
+                            latencyMs = now - result.confidence.toLong() /* crude RTT */,
+                            error = null
+                        )
+                    }
+
+                    // translate if requested
+                    if (_captionState.value.targetLanguage != _captionState.value.sourceLanguage) {
+                        translateText(_captionState.value.currentTranscript)
                     }
                 }
         }
     }
+
 
     private fun stopProcessingAudio() {
         audioProcessingJob?.cancel()
@@ -147,30 +212,61 @@ class LiveCaptionViewModel @Inject constructor(
     }
 
     private suspend fun processAudioChunk(audioChunk: FloatArray): String {
-        // In production, this would use Gemma's audio processing capabilities
-        // For now, we'll use a simplified approach
-
-        val prompt = buildMultimodalPrompt(
-            instruction = """
-                Transcribe the audio to text. 
-                Language: ${_captionState.value.sourceLanguage.displayName}
-                Output only the transcribed text, nothing else.
-            """.trimIndent(),
-            audioData = audioChunk,
-            previousContext = _captionState.value.currentTranscript.takeLast(100)
-        )
-
+        // Use the offline Gemma model for transcription
         return try {
-            gemmaEngine.generateText(
+            // For better results, we'll use a more sophisticated prompt
+            val languageHint = when (_captionState.value.sourceLanguage) {
+                Language.AUTO -> ""
+                else -> "The speaker is speaking in ${_captionState.value.sourceLanguage.displayName}. "
+            }
+
+            // Get recent context for better accuracy
+            val recentContext = transcriptionBuffer.toString().takeLast(100)
+
+            // Since Gemma doesn't have direct audio transcription, we'll use audio features
+            // In a real implementation, you might want to use a separate audio feature extractor
+            val audioFeatures = analyzeAudioFeatures(audioChunk)
+
+            val prompt = """
+                Audio Analysis Task:
+                ${languageHint}Based on audio characteristics indicating ${audioFeatures}, 
+                ${if (recentContext.isNotEmpty()) "continuing from: '$recentContext'," else ""}
+                what is the most likely spoken text?
+                
+                Output only the transcribed words, nothing else:
+            """.trimIndent()
+
+            val result = unifiedGemmaService.generateTextAsync(
                 prompt = prompt,
-                config = GemmaEngine.GenerationConfig(
-                    maxNewTokens = 50,
-                    temperature = 0.1f,
-                    doSample = false // Greedy decoding for accuracy
+                config = UnifiedGemmaService.GenerationConfig(
+                    maxTokens = 30, // Keep it short for real-time
+                    temperature = 0.1f, // Low temperature for accuracy
+                    topK = 10
                 )
-            ).toList().joinToString("")
+            )
+
+            // Clean up the result
+            result.trim()
+                .replace("\"", "")
+                .replace(".", "")
+                .take(50) // Limit length for real-time display
+
         } catch (e: Exception) {
+            Timber.e(e, "Failed to process audio chunk")
             ""
+        }
+    }
+
+    private fun analyzeAudioFeatures(audioData: FloatArray): String {
+        // Simple audio feature analysis
+        val rms = AudioUtils.calculateRMS(audioData)
+        val isSilent = AudioUtils.detectSilence(audioData)
+
+        return when {
+            isSilent -> "silence"
+            rms < 0.1f -> "quiet speech"
+            rms < 0.3f -> "normal speech"
+            else -> "loud speech"
         }
     }
 
@@ -184,10 +280,10 @@ class LiveCaptionViewModel @Inject constructor(
             return
         }
 
-        // Generate translation
+        // Generate translation using offline model
         val translationPrompt = """
             Translate the following text from ${_captionState.value.sourceLanguage.displayName} to ${_captionState.value.targetLanguage.displayName}.
-            Maintain the original meaning and tone.
+            Keep the translation natural and conversational.
             
             Text: "$text"
             
@@ -195,19 +291,20 @@ class LiveCaptionViewModel @Inject constructor(
         """.trimIndent()
 
         try {
-            val translation = gemmaEngine.generateText(
+            val translation = unifiedGemmaService.generateTextAsync(
                 prompt = translationPrompt,
-                config = GemmaEngine.GenerationConfig(
-                    maxNewTokens = 100,
+                config = UnifiedGemmaService.GenerationConfig(
+                    maxTokens = 100,
                     temperature = 0.3f
                 )
-            ).toList().joinToString("").trim()
+            ).trim()
 
             if (translation.isNotEmpty()) {
                 translationCache.put(cacheKey, translation)
                 _captionState.update { it.copy(translatedText = translation) }
             }
         } catch (e: Exception) {
+            Timber.e(e, "Translation failed")
             _captionState.update {
                 it.copy(error = "Translation error: ${e.message}")
             }
