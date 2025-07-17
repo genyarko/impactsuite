@@ -4,17 +4,12 @@ import android.graphics.Bitmap
 import androidx.room.*
 import com.example.mygemma3n.shared_utilities.stripFences
 import com.google.gson.Gson
-import com.google.gson.JsonSyntaxException
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import timber.log.Timber
-import java.util.Date
 import java.util.UUID
-import javax.inject.Inject
-import javax.inject.Singleton
-import com.example.mygemma3n.feature.plant.parseAnalysisFromJson
 
 
 // Plant Scanner State

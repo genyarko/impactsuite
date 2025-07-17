@@ -5,7 +5,6 @@ import androidx.core.graphics.scale
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mygemma3n.data.UnifiedGemmaService
-import com.example.mygemma3n.data.UnifiedGemmaService.GenerationConfig
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.framework.image.MPImage
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -41,38 +40,17 @@ class PlantScannerViewModel @Inject constructor(
 
         try {
             /* 1 · Pre‑process --------------------------------------------------- */
-            val square = bitmap.resizeToGemma(512)                         // Gemma‑3n vision sizes: 256/512/768 :contentReference[oaicite:0]{index=0}
-            val mpImage: MPImage = BitmapImageBuilder(square).build()      // Convert → MPImage :contentReference[oaicite:1]{index=1}
+            val square = bitmap.resizeToGemma(512)                         // Gemma‑3n vision sizes: 256/512/768
+            val mpImage: MPImage = BitmapImageBuilder(square).build()      // Convert → MPImage
 
             /* 2 · Lazy‑load local model --------------------------------------- */
             gemma.initialize()                                             // calls the vision graph setup internally
 
-            /* 3 · Compose robust prompt -------------------------------------- */
-            val prompt = buildPromptWithImage(
-                """
-            You are an on‑device vision assistant.
-            1. Give the single best **general label** for the image’s main subject.
-            2. *If* that subject is a plant:
-               • Identify species
-               • Detect disease (or "None")
-               • Rate severity
-               • List care recommendations
-            Respond **only** in JSON:
-            {
-              "label":        string,
-              "confidence":   float 0‑1,
-              "plantSpecies": string | "N/A",
-              "disease":      string | "None" | "N/A",
-              "severity":     string,
-              "recommendations": string[]
-            }
-            ---
-            JSON Response:
-            """.trimIndent()
-            )
+            /* 3 · Compose compact prompt -------------------------------------- */
+            val prompt = buildPromptWithImage()
 
             /* 4 · Generate multimodal answer ---------------------------------- */
-            val raw = gemma.generateResponse(prompt, mpImage)              // `generateResponse()` is the session‑level API :contentReference[oaicite:2]{index=2}
+            val raw = gemma.generateResponse(prompt, mpImage)              // `generateResponse()` is the session‑level API
 
             /* 5 · Parse + enrich --------------------------------------------- */
             val analysis  = parseGeneralAnalysis(raw)
@@ -93,8 +71,8 @@ class PlantScannerViewModel @Inject constructor(
     }
 
     /** Insert the image token before the text – Gemma 3n best practice. */
-    private fun buildPromptWithImage(text: String): String =
-        "```img```<|image|>$text"                                   // image‑then‑text :contentReference[oaicite:8]{index=8}
+    private fun buildPromptWithImage(): String =
+        "```img```<|image|>$BASE_PROMPT\nJSON Response:"
 
     /** Resize to a model‑friendly square side. */
     private fun Bitmap.resizeToGemma(target: Int): Bitmap =
@@ -102,7 +80,11 @@ class PlantScannerViewModel @Inject constructor(
 
     /* ---------- Lightweight JSON parser ---------- */
     private fun parseGeneralAnalysis(raw: String): GeneralAnalysis {
-        val obj = JSONObject(raw.trim().removeSurrounding("```json", "```"))
+        val cleaned = raw.trim()
+            .removePrefix("```json")
+            .removeSuffix("```")
+            .trim()
+        val obj = JSONObject(cleaned)
         return GeneralAnalysis(
             id             = UUID.randomUUID().toString(),
             timestamp      = System.currentTimeMillis(),
@@ -116,6 +98,13 @@ class PlantScannerViewModel @Inject constructor(
             } ?: emptyList(),
             additionalInfo = null
         )
+    }
+
+    companion object {
+        /** Minimal schema to stay well below the 512‑token mobile context window. */
+        private const val BASE_PROMPT =
+            "Return JSON: label, confidence(0‑1), plantSpecies|N/A, disease|None, " +
+                    "severity, recommendations[]. If not a plant leave plantSpecies=\\\"N/A\\\"."
     }
 }
 
