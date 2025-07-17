@@ -1,7 +1,10 @@
 package com.example.mygemma3n.data
 
 import android.content.Context
+import com.google.mediapipe.framework.image.MPImage
+import com.google.mediapipe.tasks.genai.llminference.GraphOptions
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
+import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -25,6 +28,9 @@ class UnifiedGemmaService @Inject constructor(
     private var llmInference: LlmInference? = null
     private val mutex = Mutex()
     private var currentModel: ModelVariant? = null
+
+    private var session: LlmInferenceSession? = null          // ← add this
+
 
     enum class ModelVariant(val fileName: String, val displayName: String) {
         FAST_2B("gemma-3n-E2B-it-int4.task", "Gemma 2B Fast"),
@@ -82,47 +88,58 @@ class UnifiedGemmaService @Inject constructor(
     /**
      * Initialize or switch to a specific model variant.
      */
-    suspend fun initialize(variant: ModelVariant = ModelVariant.FAST_2B) = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            // Skip if already initialized with the same model
-            if (currentModel == variant && llmInference != null) {
-                Timber.d("Model ${variant.displayName} already initialized")
-                return@withLock
-            }
 
-            // Close any existing instance
+    /* ---------- fix for vision‑enabled initialisation ---------- */
+    suspend fun initialize(
+        variant: ModelVariant = ModelVariant.FAST_2B
+    ) = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            if (currentModel == variant && llmInference != null && session != null) return@withLock
+
+            session?.close()
             llmInference?.close()
+            session = null
             llmInference = null
 
-            try {
-                // First check if model exists in cache
-                val cachedModelPath = getCachedModelPath(variant)
-                val modelPath = if (File(cachedModelPath).exists()) {
-                    Timber.d("Using cached model: $cachedModelPath")
-                    cachedModelPath
-                } else {
-                    // Copy from assets to cache
-                    copyModelFromAssets(variant)
-                }
-
-                Timber.d("Initializing ${variant.displayName} from: $modelPath")
-
-                // Create LlmInference with the model
-                val options = LlmInference.LlmInferenceOptions.builder()
-                    .setModelPath(modelPath)
-                    .setMaxTokens(512) // Default max tokens
-                    .build()
-
-                llmInference = LlmInference.createFromOptions(context, options)
-                currentModel = variant
-
-                Timber.d("${variant.displayName} initialized successfully")
-            } catch (e: Exception) {
-                Timber.e(e, "Failed to initialize ${variant.displayName}")
-                throw IllegalStateException("Failed to initialize ${variant.displayName}: ${e.message}", e)
+            val modelPath = getCachedModelPath(variant).let { cached ->
+                if (File(cached).exists()) cached else copyModelFromAssets(variant)
             }
+
+            val engineOpts = LlmInference.LlmInferenceOptions.builder()
+                .setModelPath(modelPath)
+                .setMaxTokens(512)
+                .setMaxNumImages(1)               // Gemma‑3n supports one image :contentReference[oaicite:0]{index=0}
+                .build()
+
+            llmInference = LlmInference.createFromOptions(context, engineOpts)
+
+            val graphOpts = GraphOptions.builder()
+                .setEnableVisionModality(true)    // turn on multimodal :contentReference[oaicite:1]{index=1}
+                .build()
+
+            val sessOpts = LlmInferenceSession.LlmInferenceSessionOptions.builder()
+                .setGraphOptions(graphOpts)
+                .setTopK(40)
+                .setTemperature(0.8f)
+                .build()
+
+            session = LlmInferenceSession.createFromOptions(llmInference!!, sessOpts)
+            currentModel = variant
+            Timber.d("${variant.displayName} initialised with vision support")
         }
     }
+
+    /* ---------- helper to run a prompt (text + optional image) ---------- */
+    suspend fun generateResponse(prompt: String, image: MPImage? = null): String =
+        withContext(Dispatchers.IO) {
+            requireNotNull(session) { "Model not initialised" }
+            session!!.apply {
+                addQueryChunk(prompt)            // text first :contentReference[oaicite:2]{index=2}
+                image?.let { addImage(it) }
+            }.generateResponse()
+        }
+
+
 
     /**
      * Initialize with the best available model

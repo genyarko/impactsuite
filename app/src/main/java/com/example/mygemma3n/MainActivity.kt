@@ -5,9 +5,18 @@ import android.Manifest
 import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.material3.LinearProgressIndicator
@@ -16,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.datastore.preferences.core.edit
@@ -35,6 +45,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavHostController
 import com.example.mygemma3n.data.GeminiApiConfig
 import com.example.mygemma3n.data.GeminiApiService
+import com.example.mygemma3n.data.UnifiedGemmaService
 import com.example.mygemma3n.data.validateKey
 import com.example.mygemma3n.di.SpeechRecognitionServiceEntryPoint
 import com.example.mygemma3n.feature.caption.SpeechRecognitionService
@@ -56,6 +67,10 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import javax.inject.Inject
+import com.example.mygemma3n.di.GemmaServiceEntryPoint
+import com.example.mygemma3n.ui.components.InitializationScreen
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 
 
 // ───── Preference keys ──────────────────────────────────────────────────────
@@ -65,31 +80,224 @@ val MAPS_API_KEY   = stringPreferencesKey("google_maps_api_key")
 class MainActivity : ComponentActivity() {
 
     @Inject lateinit var geminiApiService: GeminiApiService
+    @Inject lateinit var unifiedGemmaService: UnifiedGemmaService  // Add this
+
+    // Initialization state that can be observed by Compose
+    companion object {
+        val initializationState = mutableStateOf(InitializationState())
+    }
+
+    data class InitializationState(
+        val isInitializing: Boolean = true,
+        val status: String = "Starting up...",
+        val progress: Float? = null,
+        val error: String? = null
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
 
+        // Start initialization process
         lifecycleScope.launch {
-            val key = dataStore.data.map { it[API_KEY].orEmpty() }.first()
-            if (key.isNotBlank()) {
-                runCatching {
-                    geminiApiService.initialize(GeminiApiConfig(apiKey = key))
-                }.onFailure { Timber.e(it) }
-            }
+            initializeApp()
         }
 
-        setContent { Gemma3nTheme { Gemma3nApp(geminiApiService) } }
+        setContent {
+            Gemma3nTheme {
+                Gemma3nAppWithLoading(
+                    geminiApiService = geminiApiService,
+                    unifiedGemmaService = unifiedGemmaService
+                )
+            }
+        }
+    }
+
+    private suspend fun initializeApp() {
+        try {
+            // Step 1: Check model files
+            updateInitState("Checking model files...", 0.1f)
+            delay(500) // Small delay for UI
+
+            // Step 2: Initialize Gemini API if key exists
+            updateInitState("Setting up online features...", 0.3f)
+            val apiKeyDeferred = lifecycleScope.async {
+                val key = dataStore.data.map { it[API_KEY].orEmpty() }.first()
+                if (key.isNotBlank()) {
+                    runCatching {
+                        geminiApiService.initialize(GeminiApiConfig(apiKey = key))
+                        Timber.d("Gemini API initialized")
+                    }.onFailure {
+                        Timber.e(it, "Gemini API initialization failed")
+                    }
+                }
+            }
+
+            // Step 3: Initialize Gemma model
+            updateInitState("Loading AI model...", 0.5f)
+            val gemmaDeferred = lifecycleScope.async {
+                initializeGemmaModel()
+            }
+
+            // Step 4: Wait for both to complete
+            updateInitState("Finalizing setup...", 0.8f)
+            apiKeyDeferred.await()
+            gemmaDeferred.await()
+
+            // Step 5: Complete
+            updateInitState("Ready!", 1.0f)
+            delay(500) // Show complete state briefly
+
+            // Mark as initialized
+            initializationState.value = InitializationState(
+                isInitializing = false,
+                status = "Initialized",
+                progress = 1.0f
+            )
+
+        } catch (e: Exception) {
+            Timber.e(e, "App initialization failed")
+            initializationState.value = InitializationState(
+                isInitializing = false,
+                error = "Initialization failed: ${e.message}",
+                status = "Error"
+            )
+        }
+    }
+
+    private suspend fun initializeGemmaModel() {
+        try {
+            if (!unifiedGemmaService.isInitialized()) {
+                Timber.d("Starting Gemma model initialization...")
+
+                // Check available models first
+                val availableModels = unifiedGemmaService.getAvailableModels()
+                if (availableModels.isEmpty()) {
+                    throw IllegalStateException("No Gemma models found in assets")
+                }
+
+                Timber.d("Available models: ${availableModels.map { it.displayName }}")
+
+                // Initialize the best available
+                unifiedGemmaService.initializeBestAvailable()
+
+                val currentModel = unifiedGemmaService.getCurrentModel()
+                Timber.d("Gemma model initialized: ${currentModel?.displayName}")
+            } else {
+                Timber.d("Gemma model already initialized")
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to initialize Gemma model")
+            throw e
+        }
+    }
+
+    private fun updateInitState(status: String, progress: Float? = null) {
+        initializationState.value = initializationState.value.copy(
+            status = status,
+            progress = progress
+        )
+    }
+}
+
+@OptIn(ExperimentalPermissionsApi::class)
+@Composable
+fun Gemma3nAppWithLoading(
+    geminiApiService: GeminiApiService,
+    unifiedGemmaService: UnifiedGemmaService
+) {
+    val activity = LocalActivity.current          // ← safe: inside a composable
+
+    val initState by MainActivity.initializationState
+    AnimatedContent(
+        targetState = initState.isInitializing,
+        /* … */
+    ) { isLoading ->
+        when {
+            isLoading -> InitializationScreen(/* … */)
+            initState.error != null -> ErrorScreen(
+                error = initState.error!!,
+                onRetry = { activity?.recreate() } // ← no composable call here
+            )
+            else -> Gemma3nApp(geminiApiService, unifiedGemmaService)
+        }
+    }
+}
+
+
+@Composable
+fun ErrorScreen(
+    error: String,
+    onRetry: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(32.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    Icons.Default.Error,
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp),
+                    tint = MaterialTheme.colorScheme.error
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "Initialization Failed",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = error,
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Button(
+                    onClick = onRetry,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("Retry")
+                }
+            }
+        }
     }
 }
 
 // ───── Root Composable ──────────────────────────────────────────────────────
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
-fun Gemma3nApp(geminiApiService: com.example.mygemma3n.data.GeminiApiService) {
+fun Gemma3nApp(
+    geminiApiService: GeminiApiService,
+    unifiedGemmaService: UnifiedGemmaService
+) {
     val navController = rememberNavController()
 
-    // ask for CAMERA / AUDIO / LOCATION once at start‑up
+    // Request permissions
     val perms = rememberMultiplePermissionsState(
         listOf(
             Manifest.permission.CAMERA,
@@ -103,6 +311,7 @@ fun Gemma3nApp(geminiApiService: com.example.mygemma3n.data.GeminiApiService) {
         Gemma3nNavigation(
             navController = navController,
             geminiApiService = geminiApiService,
+            unifiedGemmaService = unifiedGemmaService,
             modifier = Modifier.padding(inner)
         )
     }
@@ -113,6 +322,7 @@ fun Gemma3nApp(geminiApiService: com.example.mygemma3n.data.GeminiApiService) {
 fun Gemma3nNavigation(
     navController: NavHostController,
     geminiApiService: GeminiApiService,
+    unifiedGemmaService: UnifiedGemmaService,
     modifier: Modifier = Modifier
 ) {
     NavHost(
@@ -121,7 +331,9 @@ fun Gemma3nNavigation(
         modifier = modifier
     ) {
         composable("home") {
-            HomeScreen(navController)
+            HomeScreen(
+                navController,
+                unifiedGemmaService)
         }
         composable("live_caption") {
             LiveCaptionScreen()
@@ -157,62 +369,225 @@ fun Gemma3nNavigation(
 // Updated Home screen with Gemini API
 // ───── Home screen ──────────────────────────────────────────────────────────
 @Composable
-fun HomeScreen(navController: NavHostController) {
-    var downloadProgress  by remember { mutableStateOf(0f) }
-    var isModelReady      by remember { mutableStateOf(false) }
-    var isPreparingModel  by remember { mutableStateOf(false) }
-    var errorMessage      by remember { mutableStateOf<String?>(null) }
-    var availableModels   by remember { mutableStateOf<List<String>>(emptyList()) }
+fun HomeScreen(
+    navController: NavHostController,
+    unifiedGemmaService: UnifiedGemmaService
+) {
+    // These should be stable and not re-check on every recomposition
+    val isGemmaInitialized = remember { unifiedGemmaService.isInitialized() }
+    val gemmaModelName = remember { unifiedGemmaService.getCurrentModel()?.displayName }
+
+    // Only check model files once
+    var downloadProgress by remember { mutableStateOf(100f) }
+    var isModelReady by remember { mutableStateOf(true) }
+    var isPreparingModel by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var availableModels by remember { mutableStateOf<List<String>>(emptyList()) }
     val ctx = LocalContext.current
 
-    // run once
+    // Only check model availability if not already checked
     LaunchedEffect(Unit) {
-        checkModelAvailability(ctx) { prog, ready, prep, err, models ->
-            downloadProgress = prog
-            isModelReady     = ready
-            isPreparingModel = prep
-            errorMessage     = err
-            availableModels  = models
+        // Since we already initialized in MainActivity, just verify the state
+        if (isGemmaInitialized) {
+            // Model is already initialized, just update UI
+            isModelReady = true
+            downloadProgress = 100f
+
+            // Get list of available models for display
+            val assets = ctx.assets.list("models")?.toSet().orEmpty()
+            availableModels = assets.filter {
+                it.endsWith(".task") || it.endsWith(".tflite")
+            }.toList()
+        } else {
+            // Only check if not initialized (shouldn't happen if MainActivity did its job)
+            checkModelAvailability(ctx) { prog, ready, prep, err, models ->
+                downloadProgress = prog
+                isModelReady = ready
+                isPreparingModel = prep
+                errorMessage = err
+                availableModels = models
+            }
         }
     }
 
     Column(
-        Modifier
+        modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
         verticalArrangement = Arrangement.Center
     ) {
-        Text("Gemma 3n Impact Suite", style = MaterialTheme.typography.headlineLarge)
-        Spacer(Modifier.height(32.dp))
+        // App Title
+        Text(
+            text = "Gemma 3n Impact Suite",
+            style = MaterialTheme.typography.headlineLarge,
+            fontWeight = FontWeight.Bold
+        )
 
-        // status UI (download, errors, list of found models, …)
-        when {
-            errorMessage != null -> ErrorCard(errorMessage!!)
-            isPreparingModel     -> StatusBar("Preparing model…")
-            downloadProgress in 0f..99f && !isModelReady ->
-                StatusBar("Downloading model: ${downloadProgress.toInt()}%", downloadProgress / 100)
-            isModelReady && availableModels.isNotEmpty() -> AvailableModelsCard(availableModels)
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // Simplified status UI - since model is already initialized
+        if (isGemmaInitialized && gemmaModelName != null) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "AI Model Ready: $gemmaModelName",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
         }
 
-        FeatureButton("Live Caption & Translation", "live_caption", navController, isModelReady)
-        FeatureButton("Offline Quiz Generator",     "quiz_generator", navController, isModelReady)
-        FeatureButton("Voice CBT Coach",            "cbt_coach",      navController, isModelReady)
-        FeatureButton("Plant Disease Scanner",      "plant_scanner",  navController, isModelReady)
-        FeatureButton("Crisis Handbook",            "crisis_handbook",navController, isModelReady)
+        Spacer(modifier = Modifier.height(16.dp))
 
-        Spacer(Modifier.height(16.dp))
+        // Feature Buttons - all enabled since model is initialized
+        Button(
+            onClick = { navController.navigate("live_caption") },
+            enabled = isGemmaInitialized,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Live Caption & Translation")
+        }
 
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = { navController.navigate("quiz_generator") },
+            enabled = isGemmaInitialized,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Offline Quiz Generator")
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = { navController.navigate("cbt_coach") },
+            enabled = isGemmaInitialized,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Voice CBT Coach")
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = { navController.navigate("plant_scanner") },
+            enabled = isModelReady,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Plant Disease Scanner")
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = { navController.navigate("crisis_handbook") },
+            enabled = isGemmaInitialized,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Crisis Handbook")
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // API Settings Button
         OutlinedButton(
             onClick = { navController.navigate("api_settings") },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Icon(Icons.Default.Settings, null); Spacer(Modifier.width(8.dp)); Text("API Settings")
+            Icon(
+                Icons.Default.Settings,
+                contentDescription = null
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("API Settings")
+        }
+    }
+}
+
+// Helper function to check model availability (stays at top level, not inside HomeScreen)
+fun checkModelAvailability(
+    ctx: Context,
+    onStatusUpdate: (Float, Boolean, Boolean, String?, List<String>) -> Unit
+) = CoroutineScope(Dispatchers.IO).launch {
+    try {
+        val assets = ctx.assets.list("models")?.toSet().orEmpty()
+
+        val required = listOf(
+            "gemma-3n-E2B-it-int4.task",
+            "universal_sentence_encoder.tflite"
+        )
+        val optional = listOf(
+            "gemma-3n-E4B-it-int4.task"
+        )
+
+        val missing = required.filterNot(assets::contains)
+        if (missing.isNotEmpty()) {
+            onStatusUpdate(0f, false, false,
+                "Missing required files:\n${missing.joinToString("\n")}", emptyList())
+            return@launch
         }
 
-        if (!isModelReady && !isPreparingModel) {
-            Spacer(Modifier.height(16.dp))
-            Text("Model needs to be available before using features",
-                style = MaterialTheme.typography.bodySmall)
+        val availableModels = (required + optional).filter(assets::contains)
+        onStatusUpdate(0f, false, true, null, availableModels)
+
+        // Copy to cache
+        val copied = mutableListOf<String>()
+        val outDir = File(ctx.cacheDir, "models").apply { mkdirs() }
+
+        assets.filter { it.endsWith(".task") || it.endsWith(".tflite") }.forEach { name ->
+            runCatching {
+                ctx.assets.open("models/$name").use { input ->
+                    File(outDir, name).outputStream().use { input.copyTo(it) }
+                }
+                copied += name
+            }.onFailure { Timber.e(it, "Copy failed: $name") }
+        }
+
+        if (copied.isEmpty())
+            onStatusUpdate(0f, false, false, "Failed to copy model files", availableModels)
+        else
+            onStatusUpdate(100f, true, false, null, availableModels)
+
+    } catch (e: Exception) {
+        onStatusUpdate(0f, false, false, "Error: ${e.localizedMessage}", emptyList())
+    }
+}
+
+@Composable
+private fun GemmaStatusCard(modelName: String?) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(MaterialTheme.colorScheme.primaryContainer)
+    ) {
+        Row(
+            Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.CheckCircle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "Gemma initialized: ${modelName ?: "Unknown model"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
         }
     }
 }
@@ -266,56 +641,6 @@ private fun FeatureButton(
         }
     }
 }
-
-// ───── Model‑availability helper  (TOP‑LEVEL, visible to HomeScreen) ────────
-fun checkModelAvailability(
-    ctx: Context,
-    onStatusUpdate: (Float, Boolean, Boolean, String?, List<String>) -> Unit
-) = CoroutineScope(Dispatchers.IO).launch {
-    try {
-        val assets = ctx.assets.list("models")?.toSet().orEmpty()
-
-        val required = listOf(
-            "gemma-3n-E2B-it-int4.task",
-            "universal_sentence_encoder.tflite"
-        )
-        val optional = listOf(
-            "gemma-3n-E4B-it-int4.task"
-        )
-
-        val missing = required.filterNot(assets::contains)
-        if (missing.isNotEmpty()) {
-            onStatusUpdate(0f, false, false,
-                "Missing required files:\n${missing.joinToString("\n")}", emptyList())
-            return@launch
-        }
-
-        val availableModels = (required + optional).filter(assets::contains)
-        onStatusUpdate(0f, false, true, null, availableModels)
-
-        // copy to cache
-        val copied = mutableListOf<String>()
-        val outDir = File(ctx.cacheDir, "models").apply { mkdirs() }
-
-        assets.filter { it.endsWith(".task") || it.endsWith(".tflite") }.forEach { name ->
-            kotlin.runCatching {
-                ctx.assets.open("models/$name").use { input ->
-                    File(outDir, name).outputStream().use { input.copyTo(it) }
-                }; copied += name
-            }.onFailure { Timber.e(it, "Copy failed: $name") }
-        }
-
-        if (copied.isEmpty())
-            onStatusUpdate(0f, false, false, "Failed to copy model files", availableModels)
-        else
-            onStatusUpdate(100f, true, false, null, availableModels)
-
-    } catch (e: Exception) {
-        onStatusUpdate(0f, false, false, "Error: ${e.localizedMessage}", emptyList())
-    }
-}
-
-
 
 @Composable
 fun ApiSettingsScreen(
@@ -617,95 +942,7 @@ fun ApiSettingsScreen(
         }
     }
 
-    // Updated model availability check with better error handling
-    fun checkModelAvailability(
-        ctx: Context,
-        onStatusUpdate: (Float, Boolean, Boolean, String?, List<String>) -> Unit
-    ) {
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val assets = ctx.assets.list("models")?.toSet() ?: emptySet()
-                val required = listOf(
-                    "gemma-3n-E2B-it-int4.task",  // Currently available
-                    "universal_sentence_encoder.tflite"
-                )
 
-                // Optional models that might be added later
-                val optional = listOf(
-                    "gemma-3n-E4B-it-int4.task"  // Will be available in future
-                )
-
-                val missing = required.filterNot { it in assets }
-                if (missing.isNotEmpty()) {
-                    onStatusUpdate(
-                        0f,
-                        false,
-                        false,
-                        "Missing required files in assets/models:\n${missing.joinToString("\n")}",
-                        emptyList()
-                    )
-                    return@launch
-                }
-
-                // Check which models are actually available
-                val availableModels = mutableListOf<String>()
-
-                // Check required models
-                required.forEach { model ->
-                    if (model in assets) {
-                        availableModels.add(model)
-                    }
-                }
-
-                // Check optional models
-                optional.forEach { model ->
-                    if (model in assets) {
-                        availableModels.add(model)
-                        Timber.d("Optional model available: $model")
-                    }
-                }
-
-                onStatusUpdate(0f, false, true, null, availableModels)
-
-                // Copy available models to cache
-                val modelsCopied = mutableListOf<String>()
-                val modelsDir = File(ctx.cacheDir, "models")
-                modelsDir.mkdirs()
-
-                for (modelName in assets.filter { it.endsWith(".task") || it.endsWith(".tflite") }) {
-                    try {
-                        val cacheFile = File(modelsDir, modelName)
-                        if (!cacheFile.exists()) {
-                            ctx.assets.open("models/$modelName").use { input ->
-                                cacheFile.outputStream().use { output ->
-                                    input.copyTo(output)
-                                }
-                            }
-                            Timber.d("Copied $modelName to cache")
-                        }
-                        modelsCopied.add(modelName)
-                    } catch (e: Exception) {
-                        Timber.e(e, "Failed to copy $modelName")
-                    }
-                }
-
-                if (modelsCopied.isEmpty()) {
-                    onStatusUpdate(
-                        0f,
-                        false,
-                        false,
-                        "Failed to copy models to cache",
-                        availableModels
-                    )
-                    return@launch
-                }
-
-                onStatusUpdate(100f, true, false, null, availableModels)
-            } catch (e: Exception) {
-                onStatusUpdate(0f, false, false, "Error: ${e.localizedMessage}", emptyList())
-            }
-        }
-    }
 }
 
 

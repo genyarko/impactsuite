@@ -1,0 +1,16 @@
+⚠️ No hospitals found in the database near your location.
+
+📍 Your coordinates: $lat, $lon
+
+Emergency numbers (work nationwide):
+📞 General Emergency: 112
+👮 Police: 191
+🚑 Ambulance: 193
+🔥 Fire: 192
+
+What to do:
+1. Call 193 for medical emergencies
+2. Ask locals for the nearest hospital
+3. Try searching online for hospitals in your area
+
+The app’s hospital database covers major cities but may not include all areas yet.

@@ -1,0 +1,6 @@
+Location: $location
+Time: $time
+Emergency services: $emergencyNumbers
+Nearest hospitals: Korle Bu Teaching Hospital, Ridge Hospital, 37 Military Hospital
+Weather: Clear (assumed)
+Note: User may be in distress – provide calm, clear instructions

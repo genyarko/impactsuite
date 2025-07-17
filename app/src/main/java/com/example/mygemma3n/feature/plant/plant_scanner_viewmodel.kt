@@ -1,115 +1,141 @@
 package com.example.mygemma3n.feature.plant
 
 import android.graphics.Bitmap
+import androidx.core.graphics.scale
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.mygemma3n.data.GeminiApiService
-
+import com.example.mygemma3n.data.UnifiedGemmaService
+import com.example.mygemma3n.data.UnifiedGemmaService.GenerationConfig
+import com.google.mediapipe.framework.image.BitmapImageBuilder
+import com.google.mediapipe.framework.image.MPImage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.json.JSONObject
+import timber.log.Timber
+import java.util.UUID
 import javax.inject.Inject
 
 /**
- * ViewModel for the Plant Scanner feature using the Gemini API.
+ * General image‑scanner ViewModel powered by on‑device Gemma 3n.
+ * – Classifies *any* image (objects, scenes, etc.)
+ * – If the label is a plant, also returns species & disease info.
  */
 @HiltViewModel
 class PlantScannerViewModel @Inject constructor(
-    private val geminiApiService: GeminiApiService,
-    private val plantDatabase: PlantDatabase // This now correctly references the PlantDatabase from plant.kt
+    private val gemma: UnifiedGemmaService,
+    private val plantDatabase: PlantDatabase
 ) : ViewModel() {
 
-    private val _scanState = MutableStateFlow(PlantScanState())
-    val scanState: StateFlow<PlantScanState> = _scanState.asStateFlow()
+    /* ---------- UI state ---------- */
+    private val _scanState = MutableStateFlow(ImageScanState())
+    val scanState: StateFlow<ImageScanState> = _scanState.asStateFlow()
 
-    /**
-     * Analyze the bitmap using the online Gemini API and update state.
-     */
-    // In PlantScannerViewModel.kt, update the analyzeImage function
+    /* ---------- Public API ---------- */
+    fun analyzeImage(bitmap: Bitmap) = viewModelScope.launch {
+        // 0 · UI → “busy”
+        _scanState.update { it.copy(isAnalyzing = true, error = null) }
 
-    fun analyzeImage(bitmap: Bitmap) {
-        viewModelScope.launch {
-            _scanState.update { it.copy(isAnalyzing = true, error = null) }
-            try {
-                // Resize the bitmap for the multimodal model
-                val resizedBitmap = resizeBitmapForGemma3n(bitmap, 512)
+        try {
+            /* 1 · Pre‑process --------------------------------------------------- */
+            val square = bitmap.resizeToGemma(512)                         // Gemma‑3n vision sizes: 256/512/768 :contentReference[oaicite:0]{index=0}
+            val mpImage: MPImage = BitmapImageBuilder(square).build()      // Convert → MPImage :contentReference[oaicite:1]{index=1}
 
-                // The prompt for the Gemini model.
-                val prompt = """
-                    Analyze this plant image and return a JSON object with the following fields:
-                    - "species": The identified plant species.
-                    - "confidence": A confidence score (0.0 to 1.0) for the species identification.
-                    - "disease": Any identified disease, or "None" if healthy.
-                    - "severity": The severity of the disease (e.g., "Low", "Moderate", "High"), or "N/A" if no disease.
-                    - "recommendations": Brief recommendations for care or treatment, as a list of strings, or an empty list if healthy.
+            /* 2 · Lazy‑load local model --------------------------------------- */
+            gemma.initialize()                                             // calls the vision graph setup internally
 
-                    Ensure the response is a strictly valid JSON object.
-                    Example:
-                    {
-                      "species": "Rose",
-                      "confidence": 0.98,
-                      "disease": "Black Spot",
-                      "severity": "Moderate",
-                      "recommendations": ["Remove affected leaves.", "Apply a fungicide." ]
-                    }
-                    ---
-                    JSON Response:
-                """.trimIndent()
-
-                // THE FIX IS HERE: Call the new function with the specific model name
-                val jsonResponse = geminiApiService.generateContentWithImageAndModel(
-                    modelName = "gemini-1.5-flash", // Explicitly use the vision model
-                    prompt = prompt,
-                    image = resizedBitmap
-                )
-
-                // Log the raw JSON response for debugging
-                println("Raw JSON Response from API: $jsonResponse")
-
-                // Parse and enrich the analysis
-                val analysis = parseAnalysisFromJson(jsonResponse, null)
-
-                // Fetch additional info from the local database
-                val enrichedInfo = plantDatabase.getAdditionalInfo(analysis.species)
-
-                _scanState.update {
-                    it.copy(
-                        isAnalyzing = false,
-                        currentAnalysis = analysis.copy(additionalInfo = enrichedInfo),
-                        scanHistory = it.scanHistory + analysis
-                    )
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                _scanState.update {
-                    it.copy(
-                        isAnalyzing = false,
-                        error = e.localizedMessage ?: "An unknown error occurred during analysis."
-                    )
-                }
+            /* 3 · Compose robust prompt -------------------------------------- */
+            val prompt = buildPromptWithImage(
+                """
+            You are an on‑device vision assistant.
+            1. Give the single best **general label** for the image’s main subject.
+            2. *If* that subject is a plant:
+               • Identify species
+               • Detect disease (or "None")
+               • Rate severity
+               • List care recommendations
+            Respond **only** in JSON:
+            {
+              "label":        string,
+              "confidence":   float 0‑1,
+              "plantSpecies": string | "N/A",
+              "disease":      string | "None" | "N/A",
+              "severity":     string,
+              "recommendations": string[]
             }
+            ---
+            JSON Response:
+            """.trimIndent()
+            )
+
+            /* 4 · Generate multimodal answer ---------------------------------- */
+            val raw = gemma.generateResponse(prompt, mpImage)              // `generateResponse()` is the session‑level API :contentReference[oaicite:2]{index=2}
+
+            /* 5 · Parse + enrich --------------------------------------------- */
+            val analysis  = parseGeneralAnalysis(raw)
+            val enriched  = analysis.plantSpecies?.let { plantDatabase.getAdditionalInfo(it) }
+
+            _scanState.update {
+                it.copy(
+                    isAnalyzing     = false,
+                    currentAnalysis = analysis.copy(additionalInfo = enriched),
+                    scanHistory     = it.scanHistory + analysis
+                )
+            }
+
+        } catch (e: Exception) {
+            Timber.e(e)
+            _scanState.update { it.copy(isAnalyzing = false, error = e.localizedMessage) }
         }
     }
 
-    /**
-     * Resizes the input Bitmap to a specified target square dimension.
-     *
-     * Gemma 3n models are documented to natively support resolutions
-     * of 256x256, 512x512, or 768x768 pixels for multimodal input.
-     *
-     * @param originalBitmap The bitmap to resize.
-     * @param targetSize The desired square dimension (e.g., 256, 512, 768).
-     * @return The resized Bitmap.
-     */
-    private fun resizeBitmapForGemma3n(originalBitmap: Bitmap, targetSize: Int): Bitmap {
-        if (originalBitmap.width == targetSize && originalBitmap.height == targetSize) {
-            return originalBitmap // No resize needed if already at target size
-        }
-        // Bitmap.createScaledBitmap scales the bitmap to the new width and height.
-        // The `filter` parameter (true) enables bilinear filtering for smoother scaling.
-        return Bitmap.createScaledBitmap(originalBitmap, targetSize, targetSize, true)
+    /** Insert the image token before the text – Gemma 3n best practice. */
+    private fun buildPromptWithImage(text: String): String =
+        "```img```<|image|>$text"                                   // image‑then‑text :contentReference[oaicite:8]{index=8}
+
+    /** Resize to a model‑friendly square side. */
+    private fun Bitmap.resizeToGemma(target: Int): Bitmap =
+        if (width == target && height == target) this else scale(target, target)
+
+    /* ---------- Lightweight JSON parser ---------- */
+    private fun parseGeneralAnalysis(raw: String): GeneralAnalysis {
+        val obj = JSONObject(raw.trim().removeSurrounding("```json", "```"))
+        return GeneralAnalysis(
+            id             = UUID.randomUUID().toString(),
+            timestamp      = System.currentTimeMillis(),
+            label          = obj.optString("label"),
+            confidence     = obj.optDouble("confidence", 0.0).toFloat(),
+            plantSpecies   = obj.optString("plantSpecies").takeIf { it != "N/A" },
+            disease        = obj.optString("disease").takeIf { it != "None" && it != "N/A" },
+            severity       = obj.optString("severity"),
+            recommendations= obj.optJSONArray("recommendations")?.let { arr ->
+                List(arr.length()) { i -> arr.getString(i) }
+            } ?: emptyList(),
+            additionalInfo = null
+        )
     }
 }
+
+/* ---------- UI‑state & data classes ---------- */
+
+data class ImageScanState(
+    val isAnalyzing: Boolean            = false,
+    val currentAnalysis: GeneralAnalysis? = null,
+    val scanHistory: List<GeneralAnalysis> = emptyList(),
+    val error: String?                  = null
+)
+
+data class GeneralAnalysis(
+    val id: String,
+    val timestamp: Long,
+    val label: String,
+    val confidence: Float,
+    val plantSpecies: String?          = null,
+    val disease: String?               = null,
+    val severity: String?              = null,
+    val recommendations: List<String>  = emptyList(),
+    val additionalInfo: PlantInfo?     = null
+)
