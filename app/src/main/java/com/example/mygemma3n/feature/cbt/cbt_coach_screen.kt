@@ -285,9 +285,15 @@ fun CBTCoachScreen(
                 }
 
                 Button(
-                    onClick = { viewModel.startSession() },
-                    shape   = RoundedCornerShape(24.dp)
-                ) { Text("Start Session") }
+                    onClick = {
+                        coroutineScope.launch {
+                            viewModel.startSession()
+                        }
+                    },
+                    shape = RoundedCornerShape(24.dp)
+                ) {
+                    Text("Start Session")
+                }
             }
         }
 

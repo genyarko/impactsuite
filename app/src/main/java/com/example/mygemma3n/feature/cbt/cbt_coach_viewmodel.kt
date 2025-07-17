@@ -14,9 +14,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.util.UUID
 import javax.inject.Inject
+import kotlin.coroutines.cancellation.CancellationException
 
 @HiltViewModel
 class CBTCoachViewModel @Inject constructor(
@@ -57,26 +59,25 @@ class CBTCoachViewModel @Inject constructor(
     }
 
     private suspend fun initializeModel() {
-        try {
-            // Try QUALITY_4B first, fall back to FAST_2B if not available
-            try {
-                gemmaService.initialize(UnifiedGemmaService.ModelVariant.QUALITY_4B)
-                Timber.d("Initialized QUALITY_4B model for CBT")
-            } catch (e: Exception) {
-                Timber.w("QUALITY_4B not available, falling back to FAST_2B: ${e.message}")
-                gemmaService.initialize(UnifiedGemmaService.ModelVariant.FAST_2B)
-                Timber.d("Initialized FAST_2B model for CBT")
-            }
+        // 1. Re‑use the already‑loaded engine
+        if (gemmaService.isInitialized()) {
             isModelInitialized = true
-            Timber.d("Gemma model initialized for CBT")
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to initialize any Gemma model")
-            throw e
+            return
+        }
+
+        // 2. Ignore expected cancellation when user leaves the screen
+        try {
+            withContext(Dispatchers.IO) { gemmaService.initializeBestAvailable() }
+            isModelInitialized = true
+        } catch (ce: CancellationException) {        // expected when VM is cleared
+            Timber.i("Gemma init cancelled (screen closed)")
         }
     }
 
-    fun startSession() {
+
+    suspend fun startSession() {
         if (!isModelInitialized) {
+            initializeModel()
             _sessionState.update {
                 it.copy(error = "Model not initialized. Please wait...")
             }
