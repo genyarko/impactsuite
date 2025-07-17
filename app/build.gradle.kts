@@ -227,6 +227,14 @@ dependencies {
 
     implementation(libs.androidx.datastore.preferences.v110)
 
+//    // Coqui STT (formerly Mozilla DeepSpeech)
+//    implementation("ai.coqui.stt:libstt:1.4.0")
+//// Java facade
+//    implementation("ai.coqui.stt:libstt-android:1.4.0")
+//// Whisper cpp JNI binding (pre‑compiled for arm64, x86_64, etc.)
+//    implementation("com.github.ggerganov:whisper.cpp:android-v1.5.4")
+
+
     // Google Cloud Speech-to-Text with exclusions
     implementation(libs.google.cloud.speech) {
         exclude(group = "com.google.protobuf", module = "protobuf-java")
