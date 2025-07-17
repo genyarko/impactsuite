@@ -6,19 +6,13 @@ Google's **Gemma 3n** models via Google AI Edge LiteRT and MediaPipe.
 
 ## Features
 
-- **Live Caption & Translation** – streams microphone audio into a lightweight Gemma model to
-  produce captions with optional translation.
-- **Offline Quiz Generator** – generates multiple choice quizzes from a topic using Gemma and
-  stores results in Room.
-- **Voice CBT Coach** – records audio, detects emotion and suggests Cognitive Behavioural
-  Therapy techniques while maintaining a local conversation history.
-- **Plant Disease Scanner** – uses CameraX with a TensorFlow Lite classifier to recognise plant
-  diseases in real‑time.
-- **Crisis Handbook** – answers safety questions and links to local resources using function
-  calling.
+- **Live Caption & Translation** – streams microphone audio into a lightweight Gemma model to produce captions with optional translation.
+- **Offline Quiz Generator** – generates multiple choice quizzes from a topic using Gemma and stores results in Room.
+- **Voice CBT Coach** – records audio, detects emotion and suggests Cognitive Behavioural Therapy techniques while maintaining a local conversation history.
+- **Image Classification** – uses CameraX with a TensorFlow Lite classifier for on‑device image recognition.
+- **Crisis Handbook** – answers safety questions and links to local resources using function calling.
 
-The app is a single module project (`:app`) with an additional dynamic asset pack
-(`:gemma3n_assetpack`) used for delivering large AI models on demand.
+The app is a single module project (`:app`) with an additional dynamic asset pack (`:gemma3n_assetpack`) used for delivering large AI models on demand.
 
 ## Building
 
