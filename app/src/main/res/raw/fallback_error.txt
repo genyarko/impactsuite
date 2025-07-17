@@ -1,0 +1,9 @@
+Error generating response.
+
+📞 For emergencies, call:
+- General Emergency: 112
+- Medical Emergency: 193
+- Police: 191
+- Fire: 192
+
+Please try again or seek immediate help if needed.

@@ -1,0 +1,15 @@
+🏥 First Aid Assistant Ready
+
+Please describe the situation or injury:
+- Type of injury (cuts, burns, fractures, etc.)
+- Severity and symptoms
+- Any immediate concerns
+
+Or try these common scenarios:
+• "Someone is choking"
+• "Severe bleeding from a cut"
+• "Person fainted"
+• "Burn from hot water"
+• "Possible broken bone"
+
+Type your query below and press enter.

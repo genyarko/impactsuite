@@ -23,19 +23,43 @@ import com.example.mygemma3n.remote.EmergencyDatabase
 import com.example.mygemma3n.shared_utilities.isLocationEnabled
 import dagger.hilt.android.qualifiers.ApplicationContext
 import android.provider.Settings
+import androidx.annotation.RawRes
+import com.example.mygemma3n.R
+import com.example.mygemma3n.data.UnifiedGemmaService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 
 
 @HiltViewModel
 class CrisisHandbookViewModel @Inject constructor(
     @ApplicationContext private val appContext: Context,
-    private val geminiApiService: GeminiApiService,
+    private val unifiedGemmaService: UnifiedGemmaService,
     private val functionCalling: CrisisFunctionCalling,
     private val offlineMapService: OfflineMapService,
     private val emergencyContacts: EmergencyContactsRepository
 ) : ViewModel() {
 
-    // Remove the init block that was causing the crash
+    private val firstAidTemplate by lazy { loadPromptTemplate(R.raw.first_aid_prompt) }
+    private val kneeFallback  by lazy { loadPromptTemplate(R.raw.fallback_knee_injury) }
+    private val genericFallback by lazy { loadPromptTemplate(R.raw.fallback_generic) }
+    private val emergencyPrompt by lazy { loadPromptTemplate(R.raw.prompt_emergency_assistant) }
+    private val noResponseFallback by lazy { loadPromptTemplate(R.raw.fallback_no_response) }
+    private val errorFallback by lazy { loadPromptTemplate(R.raw.fallback_error) }
+    private val timeoutFallback by lazy { loadPromptTemplate(R.raw.timeout_fallback) }
+
+    private suspend fun ensureModelInitialized(): Boolean {
+        return try {
+            if (!unifiedGemmaService.isInitialized()) {
+                // Try to initialize if not already done
+                unifiedGemmaService.initializeBestAvailable()
+            }
+            true
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to ensure Gemma model initialization")
+            false
+        }
+    }
     // The lazy property will be initialized when first accessed
     private val emergencyDb: EmergencyDatabase by lazy {
         EmergencyDatabase.getInstance(appContext)
@@ -73,7 +97,7 @@ class CrisisHandbookViewModel @Inject constructor(
                 Timber.d("Processing emergency query: $query")
 
                 // Add timeout to prevent hanging
-                kotlinx.coroutines.withTimeout(30000) { // 30 second timeout
+                kotlinx.coroutines.withTimeout(120000) { // 2 minutes timeout
 
                     // Check if this is a first aid related query
                     val firstAidKeywords = listOf(
@@ -117,9 +141,7 @@ class CrisisHandbookViewModel @Inject constructor(
                                 displayStepByStepGuide(functionResult.steps)
                             }
                             is FunctionCallResult.GeneralResponse -> {
-                                val response = if (functionResult.response.isNotEmpty()) {
-                                    functionResult.response
-                                } else {
+                                val response = functionResult.response.ifEmpty {
                                     generateEmergencyResponse(query)
                                 }
 
@@ -150,17 +172,10 @@ class CrisisHandbookViewModel @Inject constructor(
                     it.copy(
                         isProcessing = false,
                         error = "Request timed out. Please try again.",
-                        response = """
-                        The request took too long to process.
-                        
-                        For immediate help:
-                        📞 Emergency: 112
-                        🚑 Medical: 193
-                        
-                        Please try again with a simpler query.
-                    """.trimIndent()
+                        response = timeoutFallback
                     )
                 }
+
             } catch (e: Exception) {
                 Timber.e(e, "Error processing emergency query")
                 _state.update {
@@ -182,89 +197,51 @@ class CrisisHandbookViewModel @Inject constructor(
         }
     }
 
+    private fun loadPromptTemplate(@RawRes resId: Int): String =
+        appContext.resources.openRawResource(resId)
+            .bufferedReader()
+            .use { it.readText().trimIndent() }
+
+
+
+    fun buildFirstAidPrompt(query: String, contextText: String): String =
+        firstAidTemplate
+            .replace("\$query", query)
+            .replace("\$context", contextText)
+
+
     private suspend fun generateFirstAidResponse(query: String): String {
+        ensureModelInitialized()
+
         val context = loadEmergencyContext()
 
-        val prompt = """
-        You are an emergency first aid assistant. The user has reported: "$query"
-        
-        Context: $context
-        
-        Provide immediate first aid guidance:
-        
-        1. IMMEDIATE ACTIONS (what to do right now)
-        2. ASSESS THE INJURY (what to check)
-        3. FIRST AID STEPS (numbered instructions)
-        4. WHEN TO SEEK MEDICAL HELP (warning signs)
-        5. DO NOT (common mistakes to avoid)
-        
-        Keep instructions clear, calm, and actionable.
-        Format with headers and bullet points for easy reading.
-    """.trimIndent()
+        val prompt =buildFirstAidPrompt(query, context)
 
         return try {
-            val response = geminiApiService.generateTextComplete(prompt)
+
+            if (!unifiedGemmaService.isInitialized()) {
+                unifiedGemmaService.initializeBestAvailable()
+            }
+            val response = withContext(Dispatchers.Default) {
+                unifiedGemmaService.generateTextAsync(
+                    prompt = prompt,
+                    config = UnifiedGemmaService.GenerationConfig(
+                        maxTokens = 512,
+                        temperature = 0.7f
+                    )
+                )
+            }
+
 
             if (response.isBlank() || response.length < 50) {
                 // Provide a fallback response for knee injury
-                """
-            🏥 First Aid for Knee Injury from Bike Fall
-            
-            IMMEDIATE ACTIONS:
-            • Stay calm and don't put weight on the injured knee
-            • Sit or lie down in a comfortable position
-            • If bleeding, apply gentle pressure with a clean cloth
-            
-            ASSESS THE INJURY:
-            • Check for obvious deformity or bone protruding
-            • Look for severe swelling or inability to move the knee
-            • Note if you heard a "pop" sound when you fell
-            
-            FIRST AID STEPS:
-            1. Clean any wounds with water if available
-            2. Apply ice wrapped in a cloth for 15-20 minutes
-            3. Elevate the leg above heart level if possible
-            4. Rest and avoid putting weight on the knee
-            5. Consider taking over-the-counter pain medication
-            
-            SEEK MEDICAL HELP IF:
-            ⚠️ Severe pain or unable to bear any weight
-            ⚠️ Knee appears deformed or unstable
-            ⚠️ Numbness or tingling below the knee
-            ⚠️ Deep cuts that won't stop bleeding
-            ⚠️ Signs of infection (increasing pain, redness, warmth)
-            
-            DO NOT:
-            ❌ Try to "walk it off" if severely painful
-            ❌ Apply ice directly to skin
-            ❌ Ignore severe pain or deformity
-            
-            📞 If severe, call emergency services: 112 or 193
-            """.trimIndent()
+               kneeFallback
             } else {
                 response
             }
         } catch (e: Exception) {
             Timber.e(e, "Error generating first aid response")
-            """
-        First Aid Guidance:
-        
-        For your injury, please follow R.I.C.E:
-        • Rest - Avoid using the injured area
-        • Ice - Apply for 15-20 minutes at a time
-        • Compression - Use a bandage if available
-        • Elevation - Raise the injured area
-        
-        Seek medical attention if:
-        • Severe pain or swelling
-        • Unable to move or bear weight
-        • Visible deformity
-        • Numbness or tingling
-        
-        Emergency numbers:
-        📞 112 (General Emergency)
-        🚑 193 (Medical Emergency)
-        """.trimIndent()
+            genericFallback
         }
     }
 
@@ -342,70 +319,64 @@ class CrisisHandbookViewModel @Inject constructor(
     private suspend fun generateEmergencyResponse(query: String): String {
         val context = loadEmergencyContext()
 
-        val prompt = """
-        EMERGENCY ASSISTANT - Respond quickly and clearly.
-        
-        Context: $context
-        User Query: $query
-        
-        Instructions:
-        - If this is about first aid, provide clear step-by-step instructions
-        - If this is a medical emergency query, provide immediate actions
-        - Always mention when to call emergency services
-        - Keep response concise and actionable
-        - Use bullet points or numbered lists for clarity
-        - Prioritize life-saving information first
-        
-        Response:
-    """.trimIndent()
+        // inject the placeholders before calling Gemma
+        val prompt = emergencyPrompt
+            .replace("\$context", context)
+            .replace("\$query", query)
 
         return try {
-            val response = geminiApiService.generateTextComplete(prompt)
-
-            // If response is empty or too short, provide a fallback
-            if (response.isBlank() || response.length < 20) {
-                """
-            I'm having trouble generating a response. 
-            
-            For any emergency:
-            📞 Call 112 or 193 immediately
-            
-            Please try rephrasing your query or select one of the quick actions above.
-            """.trimIndent()
-            } else {
-                response
+            if (!unifiedGemmaService.isInitialized()) {
+                unifiedGemmaService.initializeBestAvailable()
             }
+
+            val response = withContext(Dispatchers.Default) {
+                unifiedGemmaService.generateTextAsync(
+                    prompt = prompt,
+                    config = UnifiedGemmaService.GenerationConfig(
+                        maxTokens = 256,
+                        temperature = 0.7f
+                    )
+                )
+            }
+
+            if (response.isBlank() || response.length < 20) noResponseFallback else response
         } catch (e: Exception) {
             Timber.e(e, "Error generating emergency response")
-            """
-        Error generating response. 
-        
-        📞 For emergencies, call:
-        - General Emergency: 112
-        - Medical Emergency: 193
-        - Police: 191
-        - Fire: 192
-        
-        Please try again or seek immediate help if needed.
-        """.trimIndent()
+            errorFallback
         }
     }
 
     private suspend fun loadEmergencyContext(): String {
         val contacts = emergencyContacts.getLocalEmergencyContacts()
-        val emergencyNumbers = contacts.joinToString(", ") {
-            "${it.service}: ${it.primaryNumber}"
-        }
+        val emergencyNumbers = contacts.joinToString(", ") { "${it.service}: ${it.primaryNumber}" }
 
-        return """
-            Location: Accra, Ghana
-            Time: ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())}
-            Emergency services: $emergencyNumbers
-            Nearest hospitals: Korle Bu Teaching Hospital, Ridge Hospital, 37 Military Hospital
-            Weather: Clear (assumed)
-            Note: User may be in distress - provide calm, clear instructions
-        """.trimIndent()
+        val timeNow = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+
+        // location stays default ("Accra, Ghana") in buildContext()
+        return buildContext(
+            time = timeNow,
+            emergencyNumbers = emergencyNumbers
+        )
     }
+
+
+    private val contextTemplate by lazy { loadPromptTemplate(R.raw.context_template) }
+    private val firstAidIntro by lazy { loadPromptTemplate(R.raw.first_aid_intro) }
+    private val noHospitalsFound by lazy { loadPromptTemplate(R.raw.no_hospitals_found) }
+
+    private val accidentGuide by lazy { loadPromptTemplate(R.raw.accident_reporting_guide) }
+
+
+    fun buildContext(
+        location: String = "Accra, Ghana",
+        time: String,
+        emergencyNumbers: String
+    ): String =
+        contextTemplate
+            .replace("\$location", location)
+            .replace("\$time", time)
+            .replace("\$emergencyNumbers", emergencyNumbers)
+
 
     fun updateUserLocation(location: Location) {
         _state.update { currentState ->
@@ -503,29 +474,7 @@ class CrisisHandbookViewModel @Inject constructor(
                 icon = "medical",
                 action = {
                     clearStateForNewAction()
-                    // Show general first aid prompt
-                    _state.update {
-                        it.copy(
-                            response = """
-                        🏥 First Aid Assistant Ready
-                        
-                        Please describe the situation or injury:
-                        - Type of injury (cuts, burns, fractures, etc.)
-                        - Severity and symptoms
-                        - Any immediate concerns
-                        
-                        Or try these common scenarios:
-                        • "Someone is choking"
-                        • "Severe bleeding from a cut"
-                        • "Person fainted"
-                        • "Burn from hot water"
-                        • "Possible broken bone"
-                        
-                        Type your query below and press enter.
-                        """.trimIndent(),
-                            isProcessing = false
-                        )
-                    }
+                    _state.update { it.copy(response = firstAidIntro, isProcessing = false) }
                 }
             ),
             QuickAction(
@@ -557,48 +506,6 @@ class CrisisHandbookViewModel @Inject constructor(
                 ),
                 error = null
             )
-        }
-    }
-
-
-
-    fun checkDatabaseContents() {
-        viewModelScope.launch {
-            try {
-                val totalHospitals = emergencyDb.hospitalDao().countAll()
-                val allHospitals = emergencyDb.hospitalDao().getAllHospitals() // You'll need to add this query
-
-                val diagnosticInfo = buildString {
-                    appendLine("🔍 DATABASE DIAGNOSTIC")
-                    appendLine("Total hospitals: $totalHospitals")
-                    appendLine("\nHospitals by city:")
-
-                    val cities = allHospitals.groupBy { it.address.substringAfterLast(", ") }
-                    cities.forEach { (city, hospitals) ->
-                        appendLine("$city: ${hospitals.size} hospitals")
-                        hospitals.take(3).forEach { h ->
-                            appendLine("  - ${h.name}")
-                        }
-                    }
-                }
-
-                _state.update {
-                    it.copy(
-                        response = diagnosticInfo,
-                        isProcessing = false
-                    )
-                }
-
-                Timber.d(diagnosticInfo)
-            } catch (e: Exception) {
-                Timber.e(e, "Error checking database")
-                _state.update {
-                    it.copy(
-                        error = "Database check failed: ${e.message}",
-                        isProcessing = false
-                    )
-                }
-            }
         }
     }
 
@@ -661,30 +568,18 @@ class CrisisHandbookViewModel @Inject constructor(
 
                 else -> {
                     // No hospitals found even with expanded search
+                    val message = noHospitalsFound
+                        .replace("\$lat", String.format("%.4f", location.latitude))
+                        .replace("\$lon", String.format("%.4f", location.longitude))
+
                     _state.update {
                         it.copy(
                             isProcessing = false,
-                            response = """
-                            ⚠️ No hospitals found in the database near your location.
-                            
-                            📍 Your coordinates: ${String.format("%.4f", location.latitude)}, ${String.format("%.4f", location.longitude)}
-                            
-                            Emergency numbers (work nationwide):
-                            📞 General Emergency: 112
-                            👮 Police: 191
-                            🚑 Ambulance: 193
-                            🔥 Fire: 192
-                            
-                            What to do:
-                            1. Call 193 for medical emergencies
-                            2. Ask locals for the nearest hospital
-                            3. Try searching online for hospitals in your area
-                            
-                            The app's hospital database covers major cities but may not include all areas yet.
-                        """.trimIndent(),
+                            response = message,
                             emergencyContacts = emergencyContacts.getLocalEmergencyContacts()
                         )
                     }
+
 
                     // Log for debugging
                     Timber.w("No hospitals found near lat=${location.latitude}, lon=${location.longitude} even with ${searchRadii.last()}km radius")
@@ -705,83 +600,18 @@ class CrisisHandbookViewModel @Inject constructor(
             }
         }
     }
-
-    private fun calculateDistance(location: Location, hospital: Hospital): Double {
-        val earthRadius = 6371.0 // km
-        val dLat = Math.toRadians(hospital.latitude - location.latitude)
-        val dLon = Math.toRadians(hospital.longitude - location.longitude)
-
-        val a = kotlin.math.sin(dLat / 2) * kotlin.math.sin(dLat / 2) +
-                kotlin.math.cos(Math.toRadians(location.latitude)) *
-                kotlin.math.cos(Math.toRadians(hospital.latitude)) *
-                kotlin.math.sin(dLon / 2) * kotlin.math.sin(dLon / 2)
-
-        val c = 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
-
-        return earthRadius * c
-    }
-
     private fun showAccidentReportingGuide() {
         viewModelScope.launch {
             _state.update { it.copy(isProcessing = true, error = null) }
-
-            // Small delay to ensure UI updates
-            kotlinx.coroutines.delay(100)
-
-            val guideText = """
-            📋 ACCIDENT REPORTING GUIDE
-            
-            1. ENSURE SAFETY FIRST
-               • Move to a safe location if possible
-               • Turn on hazard lights if in a vehicle
-               • Check for injuries
-            
-            2. CALL EMERGENCY SERVICES
-               • Police: 191 or 18555
-               • Ambulance: 193 (if injuries)
-               • Fire Service: 192 (if fire risk)
-            
-            3. DOCUMENT THE SCENE
-               • Take photos of:
-                 - Vehicle positions
-                 - Damage to all vehicles
-                 - Road conditions
-                 - Traffic signs/signals
-                 - Injuries (if permitted)
-               • Note the exact time and location
-            
-            4. EXCHANGE INFORMATION
-               • Names and contact details
-               • Insurance information
-               • Vehicle registration numbers
-               • Driver's license numbers
-            
-            5. GET WITNESS DETAILS
-               • Names and phone numbers
-               • Brief statements if possible
-            
-            6. DO NOT:
-               • Admit fault or blame
-               • Sign any documents except police report
-               • Leave the scene without permission
-            
-            7. REPORT TO:
-               • Your insurance company (within 24 hours)
-               • MTTD (Motor Traffic and Transport Department)
-               • Get a police report for insurance claims
-            
-            ⚠️ If injuries are involved, do not move vehicles until police arrive!
-        """.trimIndent()
-
+            kotlinx.coroutines.delay(100)          // keep if you still need the UI pause
             _state.update {
                 it.copy(
-                    response = guideText,
+                    response = accidentGuide,      // file content
                     isProcessing = false
                 )
             }
         }
     }
-
     data class QuickAction(
         val id: String,
         val title: String,
