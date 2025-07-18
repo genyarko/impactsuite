@@ -20,6 +20,8 @@ import javax.inject.Singleton
 /**
  * Unified Gemma service built on MediaPipe LLM‑Inference.
  * Handles model discovery, packaging quirks, and one‑shot multimodal inference.
+ *
+ * FIXED: Added proper context management to prevent token overflow crashes.
  */
 @Singleton
 class UnifiedGemmaService @Inject constructor(
@@ -33,15 +35,19 @@ class UnifiedGemmaService @Inject constructor(
     private var currentModel: ModelVariant? = null
     private val mutex = Mutex()
 
+    // Track current context length to prevent overflow
+    private var currentContextLength = 0
+    private var maxContextLength = 450 // Conservative limit, leaving room for response
+
     /* --------------------------------------------------------------------- */
     /* Public model variants                                                 */
     /* --------------------------------------------------------------------- */
 
     enum class ModelVariant(val fileName: String, val displayName: String) {
-        /** Quant‑int4 2‑B bundle (≈1.5 GB). */
-        FAST_2B("gemma-3n-e2b-it-int4.task", "Gemma 2B Fast"),
-        /** Quant‑int4 4‑B bundle (≈2.5 GB). */
-        QUALITY_4B("gemma-3n-e4b-it-int4.task", "Gemma 4B Quality")
+        /** Quant‑int4 2‑B bundle (≈1.5 GB). */
+        FAST_2B("gemma-3n-e2b-it-int4.task", "Gemma 2B Fast"),
+        /** Quant‑int4 4‑B bundle (≈2.5 GB). */
+        QUALITY_4B("gemma-3n-e4b-it-int4.task", "Gemma 4B Quality")
     }
 
     data class GenerationConfig(
@@ -68,6 +74,7 @@ class UnifiedGemmaService @Inject constructor(
             llm?.close()
             llm = null
             currentModel = null
+            currentContextLength = 0
 
             val modelPath = resolveModelBundle(variant)
 
@@ -79,12 +86,103 @@ class UnifiedGemmaService @Inject constructor(
 
             llm = LlmInference.createFromOptions(context, engineOpts)
             currentModel = variant
-            Timber.i("Loaded ${variant.displayName} from $modelPath")
+
+            // Set conservative context limit based on max tokens
+            maxContextLength = maxTokens - 100 // Leave room for response
+
+            Timber.i("Loaded ${variant.displayName} from $modelPath (context limit: $maxContextLength)")
         }
     }
 
     /* --------------------------------------------------------------------- */
-    /* One‑shot multimodal inference                                         */
+    /* Enhanced text generation with context management                      */
+    /* --------------------------------------------------------------------- */
+
+    suspend fun generateTextAsync(
+        prompt: String,
+        config: GenerationConfig = GenerationConfig()
+    ): String = withContext(Dispatchers.IO) {
+        val inference = llm ?: throw IllegalStateException("Model not initialised")
+
+        // Estimate prompt tokens (rough approximation: 1 token ≈ 4 characters)
+        val estimatedPromptTokens = prompt.length / 4
+
+        // If prompt alone exceeds our limit, truncate it
+        val processedPrompt = if (estimatedPromptTokens > maxContextLength) {
+            val maxChars = maxContextLength * 4
+            Timber.w("Prompt too long ($estimatedPromptTokens tokens), truncating to $maxContextLength tokens")
+            prompt.take(maxChars)
+        } else {
+            prompt
+        }
+
+        try {
+            // Always use fresh inference for each call to avoid context accumulation
+            val response = inference.generateResponse(processedPrompt)
+
+            // Reset context tracking
+            currentContextLength = 0
+
+            return@withContext response
+        } catch (e: Exception) {
+            Timber.e(e, "Generation failed, attempting recovery")
+
+            // Try to recover by recreating the inference session
+            try {
+                currentModel?.let { variant ->
+                    initialize(variant)
+                    val recoveredInference = llm ?: throw IllegalStateException("Recovery failed")
+                    return@withContext recoveredInference.generateResponse(processedPrompt)
+                }
+            } catch (recoveryError: Exception) {
+                Timber.e(recoveryError, "Recovery attempt failed")
+            }
+
+            throw e
+        }
+    }
+
+    /* --------------------------------------------------------------------- */
+    /* Session-based generation with better context management               */
+    /* --------------------------------------------------------------------- */
+
+    suspend fun generateWithSession(
+        prompt: String,
+        image: MPImage? = null,
+        config: GenerationConfig = GenerationConfig()
+    ): String = withContext(Dispatchers.IO) {
+        val inference = llm ?: throw IllegalStateException("Model not initialised")
+
+        // Estimate tokens and check limits
+        val estimatedTokens = prompt.length / 4
+        if (estimatedTokens > maxContextLength) {
+            throw IllegalArgumentException("Prompt too long: $estimatedTokens tokens (max: $maxContextLength)")
+        }
+
+        val sessionOpts = LlmInferenceSession.LlmInferenceSessionOptions.builder()
+            .setGraphOptions(GraphOptions.builder().setEnableVisionModality(image != null).build())
+            .setTopK(config.topK)
+            .setTemperature(config.temperature)
+            .build()
+
+        try {
+            LlmInferenceSession.createFromOptions(inference, sessionOpts).use { session ->
+                session.addQueryChunk(prompt)
+                image?.let { session.addImage(it) }
+
+                val response = session.generateResponse()
+                currentContextLength = 0 // Reset after successful generation
+                return@withContext response
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Session generation failed")
+            currentContextLength = 0 // Reset on error
+            throw e
+        }
+    }
+
+    /* --------------------------------------------------------------------- */
+    /* One‑shot multimodal inference (FIXED)                                */
     /* --------------------------------------------------------------------- */
 
     suspend fun generateResponse(
@@ -93,40 +191,56 @@ class UnifiedGemmaService @Inject constructor(
         temperature: Float = 0.8f,
         topK: Int = 40
     ): String = withContext(Dispatchers.IO) {
-        val inference = llm ?: throw IllegalStateException("Model not initialised")
-
-        val sessionOpts = LlmInferenceSession.LlmInferenceSessionOptions.builder()
-            .setGraphOptions(GraphOptions.builder().setEnableVisionModality(true).build())
-            .setTopK(topK)
-            .setTemperature(temperature)
-            .build()
-
-        LlmInferenceSession.createFromOptions(inference, sessionOpts).use { sess ->
-            sess.addQueryChunk(prompt)
-            image?.let { sess.addImage(it) }
-            sess.generateResponse()
-        }
+        return@withContext generateWithSession(
+            prompt = prompt,
+            image = image,
+            config = GenerationConfig(temperature = temperature, topK = topK)
+        )
     }
 
     /* --------------------------------------------------------------------- */
-    /* Text‑only helpers (streaming + async)                                 */
+    /* Text‑only helpers (streaming + async) - FIXED                         */
     /* --------------------------------------------------------------------- */
 
     suspend fun generateText(
         prompt: String,
         config: GenerationConfig = GenerationConfig()
     ): Flow<String> = flow {
-        val inference = llm ?: throw IllegalStateException("Model not initialised")
-        val response = withContext(Dispatchers.Default) { inference.generateResponse(prompt) }
+        val response = generateTextAsync(prompt, config)
         emit(response)
     }.flowOn(Dispatchers.Default)
 
-    suspend fun generateTextAsync(
-        prompt: String,
-        config: GenerationConfig = GenerationConfig()
-    ): String {
-        val inference = llm ?: throw IllegalStateException("Model not initialised")
-        return withContext(Dispatchers.Default) { inference.generateResponse(prompt) }
+    /* --------------------------------------------------------------------- */
+    /* Utility methods for prompt optimization                               */
+    /* --------------------------------------------------------------------- */
+
+    /**
+     * Estimate token count for a given text (rough approximation)
+     */
+    fun estimateTokens(text: String): Int {
+        return text.length / 4 // Rough approximation
+    }
+
+    /**
+     * Truncate prompt to fit within context window
+     */
+    fun truncatePrompt(prompt: String, maxTokens: Int = maxContextLength): String {
+        val estimatedTokens = estimateTokens(prompt)
+        return if (estimatedTokens <= maxTokens) {
+            prompt
+        } else {
+            val maxChars = maxTokens * 4
+            val truncated = prompt.take(maxChars)
+            Timber.w("Truncated prompt from $estimatedTokens to $maxTokens tokens")
+            truncated
+        }
+    }
+
+    /**
+     * Check if a prompt would exceed context limits
+     */
+    fun wouldExceedLimit(prompt: String): Boolean {
+        return estimateTokens(prompt) > maxContextLength
     }
 
     /* --------------------------------------------------------------------- */
@@ -134,7 +248,7 @@ class UnifiedGemmaService @Inject constructor(
     /* --------------------------------------------------------------------- */
 
     suspend fun getAvailableModels(): List<ModelVariant> = withContext(Dispatchers.IO) {
-        ModelVariant.values().filter { variant ->
+        ModelVariant.entries.filter { variant ->
             resolveAssetName(variant) != null || File(getCachedModelPath(variant)).exists()
         }.also {
             Timber.d("Available models: ${it.map(ModelVariant::displayName)}")
@@ -172,10 +286,13 @@ class UnifiedGemmaService @Inject constructor(
         llm?.close()
         llm = null
         currentModel = null
+        currentContextLength = 0
     }
 
     fun isInitialized(): Boolean = llm != null
     fun getCurrentModel(): ModelVariant? = currentModel
+    fun getCurrentContextLength(): Int = currentContextLength
+    fun getMaxContextLength(): Int = maxContextLength
 
     /* --------------------------------------------------------------------- */
     /* Internal helpers                                                      */
