@@ -50,6 +50,7 @@ import com.example.mygemma3n.data.validateKey
 import com.example.mygemma3n.di.SpeechRecognitionServiceEntryPoint
 import com.example.mygemma3n.feature.caption.SpeechRecognitionService
 import com.example.mygemma3n.feature.cbt.CBTCoachScreen
+import com.example.mygemma3n.feature.chat.ChatScreen
 import com.example.mygemma3n.feature.crisis.CrisisHandbookScreen
 import com.google.android.play.core.assetpacks.AssetPackManagerFactory
 import com.google.android.play.core.assetpacks.AssetPackStateUpdateListener
@@ -344,6 +345,9 @@ fun Gemma3nNavigation(
         composable("cbt_coach") {
             CBTCoachScreen()
         }
+        composable("chat") {
+            ChatScreen()
+        }
         composable("plant_scanner") {
             PlantScannerScreen()
         }
@@ -480,6 +484,15 @@ fun HomeScreen(
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("Voice CBT Coach")
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = { navController.navigate("chat") },
+            enabled = isGemmaInitialized,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Chat")
         }
 
         Spacer(modifier = Modifier.height(8.dp))
