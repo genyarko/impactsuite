@@ -267,21 +267,6 @@ class MobileNetV5Encoder @Inject constructor(
     }
 
     /**
-     * Calculate cosine similarity between two embeddings
-     */
-    fun calculateSimilarity(embedding1: FloatArray, embedding2: FloatArray): Float {
-        require(embedding1.size == embedding2.size) { "Embeddings must have same size" }
-
-        var dotProduct = 0f
-        for (i in embedding1.indices) {
-            dotProduct += embedding1[i] * embedding2[i]
-        }
-
-        // Since embeddings are normalized, dot product equals cosine similarity
-        return dotProduct
-    }
-
-    /**
      * Get memory usage statistics
      */
     fun getMemoryStats(): MemoryStats {
