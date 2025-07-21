@@ -23,6 +23,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 
 /* top-level screen ------------------------------------------------------- */
@@ -32,7 +33,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 fun QuizScreen(
     viewModel: QuizGeneratorViewModel = hiltViewModel()
 ) {
-    val state by viewModel.state.collectAsState()
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    // Ensure subjects are loaded
+    LaunchedEffect(Unit) {
+        if (state.subjects.isEmpty()) {
+            viewModel.loadSubjects()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -71,27 +79,22 @@ fun QuizScreen(
         ) {
             when {
                 state.currentQuiz == null && !state.isGenerating -> {
-                    if (state.subjects.isEmpty()) {
-                        EmptyStateQuizSetup(
-                            mode = state.mode,
-                            onModeChange = viewModel::setQuizMode,
-                            onGenerateQuiz = { s, t, c ->
-                                viewModel.generateAdaptiveQuiz(s, t, c)
-                            }
-                        )
-                    } else {
-                        EnhancedQuizSetupScreen(
-                            subjects = state.subjects,
-                            userProgress = state.userProgress,
-                            learnerProfile = state.learnerProfile,
-                            mode = state.mode,
-                            reviewAvailable = state.reviewQuestionsAvailable,
-                            onModeChange = viewModel::setQuizMode,
-                            onGenerateQuiz = { s, t, c ->
-                                viewModel.generateAdaptiveQuiz(s, t, c)
-                            }
-                        )
+                    // Use subjects from state, fallback to all subjects if empty
+                    val availableSubjects = state.subjects.ifEmpty {
+                        Subject.entries
                     }
+
+                    EnhancedQuizSetupScreen(
+                        subjects = availableSubjects,
+                        userProgress = state.userProgress,
+                        learnerProfile = state.learnerProfile,
+                        mode = state.mode,
+                        reviewAvailable = state.reviewQuestionsAvailable,
+                        onModeChange = viewModel::setQuizMode,
+                        onGenerateQuiz = { s, t, c ->
+                            viewModel.generateAdaptiveQuiz(s, t, c)
+                        }
+                    )
                 }
 
                 state.isGenerating -> GenerationProgress(
@@ -109,13 +112,29 @@ fun QuizScreen(
                 }
             }
 
-            // Error snackbar
+            // Error snackbar with proper dismissal
             state.error?.let { error ->
                 Snackbar(
                     modifier = Modifier.align(Alignment.BottomCenter),
                     action = {
-                        TextButton(onClick = { /* Clear error */ }) {
+                        TextButton(
+                            onClick = {
+                                viewModel.clearError()
+                            }
+                        ) {
                             Text("Dismiss")
+                        }
+                    },
+                    dismissAction = {
+                        IconButton(
+                            onClick = {
+                                viewModel.clearError()
+                            }
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Dismiss"
+                            )
                         }
                     }
                 ) {
@@ -141,7 +160,7 @@ fun EnhancedQuizSetupScreen(
 ) {
     var subject by remember { mutableStateOf<Subject?>(null) }
     var topicText by remember { mutableStateOf("") }
-    var questionCnt by remember { mutableStateOf(10f) }
+    var questionCnt by remember { mutableFloatStateOf(10f) }
     var showDropdown by remember { mutableStateOf(false) }
 
     Column(
@@ -214,7 +233,7 @@ fun EnhancedQuizSetupScreen(
             }
         }
 
-        // Subject selector with progress
+        // Subject selector with progress - FIXED
         Card(
             modifier = Modifier.fillMaxWidth(),
             elevation = CardDefaults.cardElevation(4.dp)
@@ -224,7 +243,7 @@ fun EnhancedQuizSetupScreen(
                 Spacer(Modifier.height(8.dp))
 
                 OutlinedButton(
-                    onClick = { showDropdown = !showDropdown },
+                    onClick = { showDropdown = true },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
@@ -252,7 +271,8 @@ fun EnhancedQuizSetupScreen(
 
                 DropdownMenu(
                     expanded = showDropdown,
-                    onDismissRequest = { showDropdown = false }
+                    onDismissRequest = { showDropdown = false },
+                    modifier = Modifier.fillMaxWidth(0.9f)
                 ) {
                     subjects.forEach { s ->
                         DropdownMenuItem(
@@ -295,6 +315,7 @@ fun EnhancedQuizSetupScreen(
             }
         }
 
+        // Topic input
         OutlinedTextField(
             value = topicText,
             onValueChange = { topicText = it },
@@ -303,6 +324,7 @@ fun EnhancedQuizSetupScreen(
             modifier = Modifier.fillMaxWidth()
         )
 
+        // Question count slider
         Column(Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -326,6 +348,7 @@ fun EnhancedQuizSetupScreen(
             )
         }
 
+        // Generate button
         Button(
             onClick = {
                 subject?.let { s -> onGenerateQuiz(s, topicText.trim(), questionCnt.toInt()) }
@@ -400,7 +423,7 @@ fun EmptyStateQuizSetup(
 ) {
     var subject by remember { mutableStateOf<Subject?>(null) }
     var topicText by remember { mutableStateOf("") }
-    var questionCnt by remember { mutableStateOf(10f) }
+    var questionCnt by remember { mutableFloatStateOf(10f) }
 
     val subjects = remember { Subject.entries }
 
@@ -908,7 +931,7 @@ fun EnhancedAnswerSection(
             }
 
             QuestionType.TRUE_FALSE -> {
-                // Always show True/False regardless of what's in options
+                // For True/False, ensure we show only True/False buttons
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -931,13 +954,12 @@ fun EnhancedAnswerSection(
                             )
                         ) {
                             Icon(icon, null)
-                            Spacer(Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(opt)
                         }
                     }
                 }
             }
-
             QuestionType.FILL_IN_BLANK -> {
                 var txt by remember(question.id) { mutableStateOf(chosenAnswer ?: "") }
 

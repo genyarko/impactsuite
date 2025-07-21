@@ -3,13 +3,16 @@ package com.example.mygemma3n.feature.quiz
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.mygemma3n.data.TextEmbeddingServiceExtensions
 import com.example.mygemma3n.data.UnifiedGemmaService
-import com.example.mygemma3n.repository.SettingsRepository
-import com.example.mygemma3n.shared_utilities.stripFences
+import com.example.mygemma3n.domain.repository.SettingsRepository
 import com.google.gson.Gson
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,6 +22,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import javax.inject.Inject
+import kotlin.random.Random
 
 @HiltViewModel
 class QuizGeneratorViewModel @Inject constructor(
@@ -27,7 +31,10 @@ class QuizGeneratorViewModel @Inject constructor(
     private val educationalContent: EducationalContentRepository,
     private val quizRepo: QuizRepository,
     private val settingsRepo: SettingsRepository,
-    private val gson: Gson
+    private val gson: Gson,
+    private val optimizedGenerator: PerformanceOptimizedQuizGenerator,
+    private val embeddingExtensions: TextEmbeddingServiceExtensions,
+    private val enhancedPromptManager: EnhancedPromptManager
 ) : ViewModel() {
 
     /* ───────── UI state ───────── */
@@ -57,13 +64,13 @@ class QuizGeneratorViewModel @Inject constructor(
             try {
                 // Initialize the offline model first
                 initializeModel()
+                optimizedGenerator.prewarmModel()
 
-                // Then load educational content
+                // Load educational content
                 educationalContent.prepopulateContent()
-                val subj = educationalContent.getAllContent()
-                    .map { it.subject }
-                    .distinct()
-                _state.update { it.copy(subjects = subj) }
+
+                // Always use all available subjects instead of loading from content
+                _state.update { it.copy(subjects = Subject.entries) }
 
                 // Load initial progress data
                 loadUserProgress()
@@ -146,17 +153,37 @@ class QuizGeneratorViewModel @Inject constructor(
             )
             quizRepo.saveQuiz(completedQuiz)
         }
+
+        // Clear current quiz state
         _state.update { it.copy(currentQuiz = null, questionsGenerated = 0, error = null) }
-        loadUserProgress() // Reload progress after quiz completion
+
+        // Reload progress
+        loadUserProgress()
+
+        // Always ensure all subjects are available
+        _state.update { it.copy(subjects = Subject.entries) }
+    }
+
+    fun clearError() {
+        _state.update { it.copy(error = null) }
+    }
+
+    // Also update loadSubjects method
+    fun loadSubjects() = viewModelScope.launch {
+        // Always use all available subjects
+        _state.update { it.copy(subjects = Subject.entries) }
+
+        // Load progress for all subjects
+        loadUserProgress()
     }
 
     /** Generate adaptive quiz with enhanced features */
+
     fun generateAdaptiveQuiz(
         subject: Subject,
         topic: String,
         questionCount: Int = 10
     ) = viewModelScope.launch {
-
         if (!_state.value.isModelInitialized) {
             _state.update { it.copy(error = "Model not initialized. Please wait...") }
             return@launch
@@ -186,7 +213,11 @@ class QuizGeneratorViewModel @Inject constructor(
             when (_state.value.mode) {
                 QuizMode.REVIEW -> {
                     // Include some review questions from spaced repetition
-                    val reviewQuestions = quizRepo.getQuestionsForSpacedReview(subject, limit = questionCount / 2)
+                    val reviewQuestions = quizRepo.getQuestionsForSpacedReview(
+                        subject,
+                        limit = minOf(questionCount / 2, questionCount)
+                    )
+
                     reviewQuestions.forEach { history ->
                         val q = recreateQuestionFromHistory(history)
                         questions.add(q)
@@ -195,67 +226,122 @@ class QuizGeneratorViewModel @Inject constructor(
 
                     // Generate remaining new questions
                     val remaining = questionCount - questions.size
-                    repeat(remaining) { idx ->
-                        val questionType = selectQuestionType(idx + 1)
-                        val q = generateQuestionWithRetry(
+                    if (remaining > 0) {
+                        val newQuestions = generateQuestionsSequentially(
                             subject = subject,
                             topic = topic,
                             difficulty = adaptedDifficulty,
-                            questionType = questionType,
+                            count = remaining,
                             previousQuestions = historyTexts + questions.map { it.questionText },
                             learnerProfile = profile
                         )
-                        val validatedQuestion = validateQuestion(q)
-                        questions += validatedQuestion
-                        updateConceptCoverage(conceptsCovered, validatedQuestion.conceptsCovered)
-                        _state.update { it.copy(questionsGenerated = questions.size) }
+                        questions.addAll(newQuestions)
+                        newQuestions.forEach { q ->
+                            updateConceptCoverage(conceptsCovered, q.conceptsCovered)
+                        }
                     }
                 }
 
                 else -> {
-                    // Normal or adaptive mode
-                    repeat(questionCount) { idx ->
-                        val questionType = selectQuestionType(idx + 1)
-                        val q = generateQuestionWithRetry(
-                            subject = subject,
-                            topic = topic,
-                            difficulty = adaptedDifficulty,
-                            questionType = questionType,
-                            previousQuestions = historyTexts + questions.map { it.questionText },
-                            learnerProfile = profile
-                        )
-                        val validatedQuestion = validateQuestion(q)
-                        questions += validatedQuestion
-                        updateConceptCoverage(conceptsCovered, validatedQuestion.conceptsCovered)
-                        _state.update { it.copy(questionsGenerated = questions.size) }
+                    // Normal or adaptive mode - generate all questions
+                    val newQuestions = generateQuestionsSequentially(
+                        subject = subject,
+                        topic = topic,
+                        difficulty = adaptedDifficulty,
+                        count = questionCount,
+                        previousQuestions = historyTexts,
+                        learnerProfile = profile
+                    )
+                    questions.addAll(newQuestions)
+                    newQuestions.forEach { q ->
+                        updateConceptCoverage(conceptsCovered, q.conceptsCovered)
                     }
                 }
             }
 
+            // Ensure we don't exceed the requested count
+            val finalQuestions = questions.take(questionCount)
+
             val quiz = Quiz(
-                id         = java.util.UUID.randomUUID().toString(),
-                subject    = subject,
-                topic      = topic,
-                questions  = questions,
+                id = java.util.UUID.randomUUID().toString(),
+                subject = subject,
+                topic = topic,
+                questions = finalQuestions,
                 difficulty = adaptedDifficulty,
-                mode       = _state.value.mode,
-                createdAt  = System.currentTimeMillis()
+                mode = _state.value.mode,
+                createdAt = System.currentTimeMillis()
             )
+
             quizRepo.saveQuiz(quiz)
 
             _state.update {
                 it.copy(
                     isGenerating = false,
                     currentQuiz = quiz,
-                    conceptCoverage = conceptsCovered
+                    conceptCoverage = conceptsCovered,
+                    questionsGenerated = finalQuestions.size
                 )
             }
-            Timber.d("🎉 Quiz ready: ${quiz.questions.size} questions covering ${conceptsCovered.size} concepts")
+
+            Timber.d("🎉 Quiz ready: ${finalQuestions.size} questions covering ${conceptsCovered.size} concepts")
 
         } catch (e: Exception) {
             Timber.e(e, "Quiz generation failed")
             _state.update { it.copy(isGenerating = false, error = e.message) }
         }
+    }
+
+    // Add this new sequential generation function:
+    private suspend fun generateQuestionsSequentially(
+        subject: Subject,
+        topic: String,
+        difficulty: Difficulty,
+        count: Int,
+        previousQuestions: List<String>,
+        learnerProfile: LearnerProfile
+    ): List<Question> = withContext(Dispatchers.IO) {
+        val questions = mutableListOf<Question>()
+        val allPreviousQuestions = previousQuestions.toMutableList()
+
+        repeat(count) { idx ->
+            try {
+                val questionType = selectQuestionType(idx + 1)
+                Timber.d("Generating question ${idx + 1}/$count of type: $questionType")
+
+                val q = generateQuestionWithRetry(
+                    subject = subject,
+                    topic = topic,
+                    difficulty = difficulty,
+                    questionType = questionType,
+                    previousQuestions = allPreviousQuestions,
+                    learnerProfile = learnerProfile
+                )
+
+                val validatedQuestion = validateQuestion(q)
+
+                // Log the validated question details
+                Timber.d("Generated ${validatedQuestion.questionType} question with ${validatedQuestion.options.size} options")
+
+                questions.add(validatedQuestion)
+                allPreviousQuestions.add(validatedQuestion.questionText)
+
+                // Update UI state
+                withContext(Dispatchers.Main) {
+                    _state.update { it.copy(questionsGenerated = questions.size) }
+                }
+
+                // Small delay between questions
+                if (idx < count - 1) {
+                    delay(200)
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to generate question ${idx + 1}")
+            }
+        }
+
+        // Log final question types
+        Timber.d("Generated questions summary: ${questions.map { it.questionType }}")
+        questions
     }
 
     fun submitAnswer(qId: String, answer: String) {
@@ -307,40 +393,169 @@ class QuizGeneratorViewModel @Inject constructor(
         maxRetries: Int = 3
     ): Question = withContext(Dispatchers.IO) {
         var lastError: Exception? = null
+        val attemptedPromptHashes = mutableSetOf<Int>()
 
         repeat(maxRetries) { attempt ->
             try {
-                val prompt = createStructuredPrompt(
+                // Create prompt with increasing variety on each attempt
+                var prompt = createStructuredPrompt(
                     questionType = questionType,
                     subject = subject,
                     topic = topic,
                     difficulty = difficulty,
                     learnerProfile = learnerProfile,
-                    previousQuestions = previousQuestions
+                    previousQuestions = previousQuestions,
+                    attemptNumber = attempt + (System.currentTimeMillis() % 10).toInt()
                 )
+
+                // Check if we've used this exact prompt before
+                val promptHash = prompt.hashCode()
+                if (promptHash in attemptedPromptHashes) {
+                    Timber.w("Duplicate prompt detected, adding more randomness")
+                    prompt += "\nUnique seed: ${System.currentTimeMillis()}"
+                }
+                attemptedPromptHashes.add(promptHash)
+
+                // Increase temperature and randomness with each retry
+                val temperature = 0.7f + (attempt * 0.15f) + (Random.nextFloat() * 0.1f)
+                val topK = 40 + (attempt * 10) + Random.nextInt(20)
 
                 val response = gemmaService.generateTextAsync(
                     prompt,
                     UnifiedGemmaService.GenerationConfig(
-                        maxTokens = 300,
-                        temperature = 0.6f + (attempt * 0.1f), // Increase temperature on retries
-                        topK = 30
+                        maxTokens = 512,
+                        temperature = temperature.coerceIn(0.7f, 1.0f),
+                        topK = topK,
+                        randomSeed = (System.currentTimeMillis() + attempt * 1000).toInt()
                     )
                 )
 
-                return@withContext parseAndValidateQuestion(response, questionType, difficulty)
+                val question = parseAndValidateQuestion(response, questionType, difficulty)
+
+                // More aggressive similarity check
+                val questionLower = question.questionText.lowercase()
+                val isTooSimilar = previousQuestions.any { prev ->
+                    val prevLower = prev.lowercase()
+                    // Check for substring matches
+                    (questionLower.contains(prevLower.take(20)) ||
+                            prevLower.contains(questionLower.take(20))) ||
+                            // Check word overlap
+                            calculateEnhancedSimilarity(questionLower, prevLower) > 0.6f
+                }
+
+                if (!isTooSimilar) {
+                    // Add to recent questions tracking
+                    val questionHash = question.questionText.hashCode()
+                    if (questionHash !in recentQuestionHashes) {
+                        recentQuestionHashes.add(questionHash)
+                        if (recentQuestionHashes.size > 100) {
+                            // Remove oldest entries
+                            recentQuestionHashes.clear()
+                        }
+                        return@withContext question
+                    }
+                }
+
+                Timber.w("Question too similar or duplicate, retrying with more variety...")
+                delay(200L * (attempt + 1))
+
             } catch (e: Exception) {
                 lastError = e
                 Timber.w("Question generation attempt ${attempt + 1} failed: ${e.message}")
-                delay(100L * (attempt + 1)) // Brief delay between retries
+                delay(100L * (attempt + 1))
             }
         }
 
         Timber.e(lastError, "All generation attempts failed, using fallback")
-        return@withContext generateFallbackQuestionForType(questionType, difficulty)
+        // Generate a more varied fallback
+        return@withContext generateVariedFallback(questionType, difficulty, subject, previousQuestions)
+    }
+
+
+
+    private fun generateVariedFallback(
+        questionType: QuestionType,
+        difficulty: Difficulty,
+        subject: Subject,
+        previousQuestions: List<String>
+    ): Question {
+        val timestamp = System.currentTimeMillis()
+        val randomElement = (timestamp % 100).toInt()
+
+        return when (questionType) {
+            QuestionType.MULTIPLE_CHOICE -> {
+                val templates = listOf(
+                    "In the context of $subject, what happens when condition $randomElement occurs?",
+                    "Considering concept ${randomElement + 10}, which statement is most accurate?",
+                    "When analyzing element $randomElement in $subject, what is the primary characteristic?"
+                )
+                Question(
+                    questionText = templates[randomElement % templates.size],
+                    questionType = questionType,
+                    options = listOf("Option A", "Option B", "Option C", "Option D"),
+                    correctAnswer = "Option A",
+                    explanation = "This is a fallback question.",
+                    difficulty = difficulty
+                )
+            }
+            else -> enhancedPromptManager.getFallbackQuestion(questionType, subject, difficulty)
+        }
+    }
+    /* ─────────────────────── Improved similarity detection ─────────────────────── */
+
+    private fun calculateEnhancedSimilarity(text1: String, text2: String): Float {
+        val clean1 = text1.lowercase().replace(Regex("[^a-z0-9\\s]"), "")
+        val clean2 = text2.lowercase().replace(Regex("[^a-z0-9\\s]"), "")
+
+        // Check exact substring match (very similar)
+        if (clean1.contains(clean2) || clean2.contains(clean1)) {
+            return 0.9f
+        }
+
+        // Word-based similarity
+        val words1 = clean1.split("\\s+".toRegex()).filter { it.length > 2 }.toSet()
+        val words2 = clean2.split("\\s+".toRegex()).filter { it.length > 2 }.toSet()
+
+        if (words1.isEmpty() || words2.isEmpty()) return 0f
+
+        // Jaccard similarity
+        val intersection = words1.intersect(words2).size
+        val union = words1.union(words2).size
+        val jaccard = intersection.toFloat() / union
+
+        // Also check for n-gram similarity (bigrams)
+        val bigrams1 = getBigrams(clean1)
+        val bigrams2 = getBigrams(clean2)
+
+        val bigramIntersection = bigrams1.intersect(bigrams2).size
+        val bigramUnion = bigrams1.union(bigrams2).size
+        val bigramSimilarity = if (bigramUnion > 0) {
+            bigramIntersection.toFloat() / bigramUnion
+        } else 0f
+
+        // Weighted combination
+        return (jaccard * 0.6f + bigramSimilarity * 0.4f)
+    }
+
+    private fun getBigrams(text: String): Set<String> {
+        return text.windowed(2, 1).toSet()
     }
 
     /* ─────────────────────── Structured prompting for Gemma ─────────────────────── */
+    private val questionVariationSeeds = listOf(
+        "Imagine a scenario where",
+        "Consider the case when",
+        "In a practical situation",
+        "From a different perspective",
+        "Thinking critically about",
+        "Analyzing the concept of",
+        "Exploring the relationship between",
+        "In the context of",
+        "When applying",
+        "Understanding how"
+    )
+
+    private val recentQuestionHashes = mutableSetOf<Int>()
 
     private fun createStructuredPrompt(
         questionType: QuestionType,
@@ -348,41 +563,306 @@ class QuizGeneratorViewModel @Inject constructor(
         topic: String,
         difficulty: Difficulty,
         learnerProfile: LearnerProfile,
-        previousQuestions: List<String>
+        previousQuestions: List<String>,
+        attemptNumber: Int = 0
     ): String {
-        // Get type-specific instructions and example
-        val (instructions, exampleJson) = getQuestionTypeInstructions(questionType)
+        val (baseInstructions, exampleJson) = getQuestionTypeInstructions(questionType)
+
+        return """
+        Create ONE $questionType question about $topic.
+        Subject: $subject
+        Difficulty: $difficulty
+        
+        IMPORTANT CONSTRAINTS:
+        - Keep question text under 100 characters
+        - Keep options under 50 characters each
+        - Keep explanation under 100 characters
+        - Return ONLY the JSON, no other text
+        
+        $baseInstructions
+        
+        Example format:
+        $exampleJson
+        
+        Make it unique from these previous questions:
+        ${previousQuestions.takeLast(3).joinToString("\n") { "- ${it.take(40)}..." }}
+        
+        JSON:
+    """.trimIndent()
+    }
+
+    /* ─────────────────────── Enhanced Structured prompting ─────────────────────── */
+
+    private fun createEnhancedStructuredPrompt(
+        questionType: QuestionType,
+        subject: Subject,
+        topic: String,
+        difficulty: Difficulty,
+        learnerProfile: LearnerProfile,
+        previousQuestions: List<String>,
+        attemptNumber: Int
+    ): String {
+        // Use the enhanced prompt manager for varied instructions
+        val (instructions, exampleJson) = enhancedPromptManager.getVariedQuestionPrompt(
+            questionType = questionType,
+            subject = subject,
+            topic = topic,
+            difficulty = difficulty,
+            attemptNumber = attemptNumber
+        )
 
         val weakConcepts = learnerProfile.weaknessesByConcept.keys.take(3)
         val masteredConcepts = learnerProfile.masteredConcepts.take(5)
 
-        return """
-        You are a quiz generator. Create exactly ONE ${questionType.name} question.
-        
-        Subject: $subject
-        Topic: $topic
-        Difficulty: $difficulty
-        
-        ${if (weakConcepts.isNotEmpty()) "Focus on weak areas: ${weakConcepts.joinToString()}" else ""}
-        ${if (masteredConcepts.isNotEmpty()) "Student has mastered: ${masteredConcepts.joinToString()}" else ""}
-        
-        INSTRUCTIONS:
-        $instructions
-        
-        EXAMPLE of correct format:
-        $exampleJson
-        
-        RULES:
-        1. Return ONLY valid JSON, no other text
-        2. Question must be about $topic in $subject
-        3. Difficulty should match $difficulty level
-        4. Follow the EXACT format of the example
-        5. Do NOT duplicate these previous questions:
-        ${previousQuestions.takeLast(10).joinToString("\n") { "- $it" }}
-        
-        Generate your question now:
-    """.trimIndent()
+        // Add more variety with different prompt structures
+        val promptStructures = listOf(
+            // Structure 1: Story-based
+            """
+            Create a $questionType question for $subject about $topic.
+            
+            Frame it as: ${getScenarioContext(subject, topic, attemptNumber)}
+            
+            Requirements:
+            - Difficulty: $difficulty
+            - Make it practical and engaging
+            - Test understanding, not memorization
+            
+            $instructions
+            
+            Example format (DO NOT copy content):
+            $exampleJson
+            
+            Previous questions to avoid:
+            ${previousQuestions.takeLast(5).joinToString("\n") { "- ${it.take(50)}..." }}
+            
+            Generate a unique question now:
+            """.trimIndent(),
+
+            // Structure 2: Problem-solving
+            """
+            Design a $difficulty $questionType problem for $subject.
+            Topic: $topic
+            
+            Focus: ${getProblemFocus(subject, topic, attemptNumber)}
+            
+            Student profile:
+            - Weak areas: ${if (weakConcepts.isNotEmpty()) weakConcepts.joinToString() else "none identified"}
+            - Strong areas: ${if (masteredConcepts.isNotEmpty()) masteredConcepts.take(3).joinToString() else "developing"}
+            
+            $instructions
+            
+            Format example:
+            $exampleJson
+            
+            Create an original question that's different from these:
+            ${previousQuestions.takeLast(3).joinToString("\n") { "- ${it.take(40)}..." }}
+            """.trimIndent(),
+
+            // Structure 3: Conceptual
+            """
+            Generate ONE $questionType question.
+            
+            Subject: $subject - $topic
+            Level: $difficulty
+            Angle: ${getConceptualAngle(questionType, attemptNumber)}
+            
+            Guidelines:
+            $instructions
+            
+            ${if (weakConcepts.isNotEmpty()) "Reinforce: ${weakConcepts.first()}" else ""}
+            
+            JSON format required:
+            $exampleJson
+            
+            Make it unique - avoid similarity to:
+            ${previousQuestions.takeLast(5).joinToString("\n") { "- \"${it.take(30)}...\"" }}
+            """.trimIndent()
+        )
+
+        // Select a structure based on attempt number for variety
+        return promptStructures[attemptNumber % promptStructures.size]
     }
+
+    private fun getScenarioContext(subject: Subject, topic: String, attempt: Int): String {
+        val scenarios = when (subject) {
+            Subject.MATHEMATICS -> listOf(
+                "A student solving a real-world problem",
+                "A scientist analyzing data",
+                "A game designer creating mechanics",
+                "An architect planning a structure",
+                "A chef adjusting a recipe",
+                "A sports analyst reviewing statistics"
+            )
+            Subject.SCIENCE -> listOf(
+                "A researcher conducting an experiment",
+                "A doctor diagnosing a patient",
+                "An engineer solving a problem",
+                "A naturalist observing wildlife",
+                "A weather forecaster analyzing patterns",
+                "An inventor creating something new"
+            )
+            Subject.HISTORY -> listOf(
+                "A historian analyzing primary sources",
+                "A museum curator explaining an artifact",
+                "A journalist reporting on past events",
+                "An archaeologist making a discovery",
+                "A diplomat learning from history",
+                "A filmmaker researching a period"
+            )
+            else -> listOf(
+                "Someone applying this knowledge",
+                "A professional using this concept",
+                "A student discovering something new",
+                "A teacher explaining to others"
+            )
+        }
+
+        return scenarios[attempt % scenarios.size] + " involving $topic"
+    }
+
+    private fun getProblemFocus(subject: Subject, topic: String, attempt: Int): String {
+        val focuses = listOf(
+            "practical application",
+            "conceptual understanding",
+            "problem-solving skills",
+            "critical analysis",
+            "creative thinking",
+            "connecting ideas",
+            "real-world relevance"
+        )
+        return focuses[attempt % focuses.size]
+    }
+
+    private fun getConceptualAngle(questionType: QuestionType, attempt: Int): String {
+        val angles = when (questionType) {
+            QuestionType.MULTIPLE_CHOICE -> listOf(
+                "best answer among similar options",
+                "identifying the exception",
+                "analyzing cause and effect",
+                "comparing and contrasting",
+                "applying knowledge to new situation"
+            )
+            QuestionType.TRUE_FALSE -> listOf(
+                "common misconception",
+                "subtle distinction",
+                "general principle",
+                "specific exception",
+                "relationship between concepts"
+            )
+            else -> listOf(
+                "explanation of concept",
+                "application of knowledge",
+                "analysis of situation",
+                "synthesis of ideas"
+            )
+        }
+        return angles[attempt % angles.size]
+    }
+
+    // Helper methods for variety
+    private fun getRandomAngle(attempt: Int): String {
+        val angles = listOf(
+            "identifying the key difference",
+            "finding the best solution",
+            "analyzing the outcome",
+            "determining the cause",
+            "evaluating the method",
+            "comparing alternatives"
+        )
+        return angles[attempt % angles.size]
+    }
+
+    private fun getRandomStyle(attempt: Int): String {
+        val styles = listOf(
+            "analytical",
+            "practical problem",
+            "conceptual understanding",
+            "application-based",
+            "scenario-driven",
+            "comparative"
+        )
+        return styles[attempt % styles.size]
+    }
+
+    private fun getRandomContext(subject: Subject, attempt: Int): String {
+        val contexts = when (subject) {
+            Subject.MATHEMATICS -> listOf("real-world calculation", "pattern analysis", "problem-solving", "measurement")
+            Subject.SCIENCE -> listOf("experimental", "observational", "hypothesis-testing", "analytical")
+            else -> listOf("practical", "theoretical", "analytical", "contextual")
+        }
+        return contexts[attempt % contexts.size]
+    }
+
+    private fun getAvoidancePatterns(previousQuestions: List<String>): String {
+        val patterns = previousQuestions
+            .takeLast(3)
+            .mapNotNull { q ->
+                when {
+                    q.contains("What is") -> "\"What is...\""
+                    q.contains("Which") -> "\"Which...\""
+                    q.contains("How many") -> "\"How many...\""
+                    else -> null
+                }
+            }
+            .distinct()
+            .joinToString(", ")
+
+        return patterns.ifEmpty { "common phrasings" }
+    }
+
+    private fun getTrueFalseFocus(attempt: Int): String {
+        val focuses = listOf(
+            "a specific property or characteristic",
+            "a cause-and-effect relationship",
+            "a general principle with exceptions",
+            "a comparison between concepts",
+            "a definition or classification"
+        )
+        return focuses[attempt % focuses.size]
+    }
+
+    private fun getFillBlankContext(attempt: Int): String {
+        val contexts = listOf(
+            "definition completion",
+            "process description",
+            "concept application",
+            "relationship identification",
+            "characteristic naming"
+        )
+        return contexts[attempt % contexts.size]
+    }
+
+    private fun getTestingFocus(attempt: Int): String {
+        val focuses = listOf(
+            "key terminology",
+            "critical concept",
+            "important relationship",
+            "specific value or quantity",
+            "process or method name"
+        )
+        return focuses[attempt % focuses.size]
+    }
+
+    private fun getRandomApproach(attempt: Int): String {
+        val approaches = listOf(
+            "explanation-focused",
+            "comparison-based",
+            "application-oriented",
+            "analysis-driven",
+            "synthesis-focused"
+        )
+        return approaches[attempt % approaches.size]
+    }
+
+    private fun getComplexityDescriptor(difficulty: Difficulty): String {
+        return when (difficulty) {
+            Difficulty.EASY -> "straightforward and clear"
+            Difficulty.MEDIUM -> "moderately challenging with some nuance"
+            Difficulty.HARD -> "complex with subtle distinctions"
+            Difficulty.ADAPTIVE -> "appropriately challenging"
+        }
+    }
+
 
     private fun getQuestionTypeInstructions(questionType: QuestionType): Pair<String, String> {
         return when (questionType) {
@@ -494,119 +974,213 @@ class QuizGeneratorViewModel @Inject constructor(
 
     /* ─────────────────────── Parse and validate questions ─────────────────────── */
 
+
+    private fun sanitizeJson(raw: String): String {
+        var cleaned = raw
+            .replace(Regex("^```(?:json)?\\s*"), "")   // remove starting ```
+            .replace(Regex("\\s*```$"), "")            // remove ending ```
+            .trim()
+
+        // Unwrap outer quotes
+        if (cleaned.startsWith("\"") && cleaned.endsWith("\"")) {
+            cleaned = cleaned.substring(1, cleaned.length - 1)
+                .replace("\\n", "")
+                .replace("\\\"", "\"")
+        }
+
+        // Escape unescaped quotes inside JSON string values (only inside question/answer fields)
+        // Safe way: use regex to find "question": "...", and replace unescaped " inside values
+        val quoteFixRegex = Regex("\"(question|correctAnswer)\"\\s*:\\s*\"([^\"]*?)\"")
+        cleaned = quoteFixRegex.replace(cleaned) { match ->
+            val field = match.groupValues[1]
+            val value = match.groupValues[2].replace("\"", "\\\"")
+            "\"$field\":\"$value\""
+        }
+
+        val openBraces = cleaned.count { it == '{' }
+        val closeBraces = cleaned.count { it == '}' }
+        if (openBraces > closeBraces) {
+            cleaned += "}".repeat(openBraces - closeBraces)
+        }
+
+        return cleaned
+    }
     private fun parseAndValidateQuestion(
         raw: String,
         expectedType: QuestionType,
         difficulty: Difficulty
     ): Question {
         return try {
-            val obj = org.json.JSONObject(stripFences(raw))
+            Timber.d("Raw response length: ${raw.length} characters")
 
-            val questionText = obj.getString("question")
-            val correctAnswer = obj.getString("correctAnswer")
+            val preprocessed = preprocessModelResponse(raw)
+            val cleaned = sanitizeJson(preprocessed)
 
-            // Validate and fix common issues
-            val (validatedQuestion, validatedOptions) = when (expectedType) {
-                QuestionType.MULTIPLE_CHOICE -> {
-                    val opts = obj.optJSONArray("options")?.let { arr ->
-                        List(arr.length()) { arr.getString(it) }
-                    } ?: listOf("Option A", "Option B", "Option C", "Option D")
-
-                    // Ensure we have exactly 4 options and the correct answer is among them
-                    val finalOptions = if (opts.size != 4 || !opts.contains(correctAnswer)) {
-                        // Create new options including the correct answer
-                        val newOpts = mutableListOf(correctAnswer)
-                        // Add other options, avoiding duplicates
-                        opts.filter { it != correctAnswer }.take(3).forEach { newOpts.add(it) }
-                        // Fill remaining slots with generic options if needed
-                        while (newOpts.size < 4) {
-                            newOpts.add("Option ${('A'..'D').toList()[newOpts.size]}")
-                        }
-                        newOpts.shuffled()
-                    } else {
-                        opts
-                    }
-
-                    // Fix question phrasing if needed
-                    val fixedQuestion = if (questionText.contains("True or False") ||
-                        questionText.contains("true/false")) {
-                        questionText.replace("True or False:", "").trim()
-                    } else {
-                        questionText
-                    }
-
-                    Pair(fixedQuestion, finalOptions)
-                }
-
-                QuestionType.TRUE_FALSE -> {
-                    // Force True/False options
-                    val fixedQuestion = questionText
-                        .replace("Which of the following", "")
-                        .replace("?", ".")
-                        .trim()
-                        .let { q ->
-                            if (q.endsWith(".")) q else "$q."
-                        }
-
-                    Pair(fixedQuestion, listOf("True", "False"))
-                }
-
-                QuestionType.FILL_IN_BLANK -> {
-                    // Ensure question has a blank
-                    val fixedQuestion = if (!questionText.contains("_____")) {
-                        "$questionText _____."
-                    } else {
-                        questionText
-                    }
-
-                    Pair(fixedQuestion, emptyList())
-                }
-
-                else -> {
-                    Pair(questionText, emptyList())
-                }
+            // Check if JSON was truncated
+            if (cleaned.contains("...") || !isCompleteJson(cleaned)) {
+                Timber.w("JSON appears truncated, using fallback")
+                return generateFallbackQuestionForType(expectedType, difficulty)
             }
 
-            val concepts = obj.optJSONArray("conceptsCovered")?.let { arr ->
-                List(arr.length()) { arr.getString(it) }
-            } ?: listOf("general")
+            // Additional validation
+            if (!cleaned.trim().startsWith("{") || !cleaned.trim().endsWith("}")) {
+                Timber.e("Invalid JSON structure")
+                return generateFallbackQuestionForType(expectedType, difficulty)
+            }
 
+            val obj = org.json.JSONObject(cleaned)
+
+            // Extract fields with proper validation
+            val questionText = obj.optString("question", "").takeIf { it.isNotBlank() }
+                ?: return generateFallbackQuestionForType(expectedType, difficulty)
+
+            val correctAnswer = obj.optString("correctAnswer", "").takeIf { it.isNotBlank() }
+                ?: return generateFallbackQuestionForType(expectedType, difficulty)
+
+            // For multiple choice, ensure we have valid options
+            val options = when (expectedType) {
+                QuestionType.MULTIPLE_CHOICE -> {
+                    val opts = obj.optJSONArray("options")?.let { arr ->
+                        List(arr.length()) { arr.getString(it) }.filter { it.isNotBlank() }
+                    } ?: emptyList()
+
+                    if (opts.size < 4) {
+                        Timber.w("Insufficient options for multiple choice, using fallback")
+                        return generateFallbackQuestionForType(expectedType, difficulty)
+                    }
+                    opts.take(4)
+                }
+                QuestionType.TRUE_FALSE -> listOf("True", "False")
+                else -> emptyList()
+            }
+
+            // Build the question
             Question(
-                questionText = validatedQuestion,
+                questionText = questionText.trim(),
                 questionType = expectedType,
-                options = validatedOptions,
-                correctAnswer = correctAnswer,
-                explanation = obj.optString("explanation", ""),
-                hint = obj.optString("hint", null),
-                conceptsCovered = concepts,
+                options = options,
+                correctAnswer = correctAnswer.trim(),
+                explanation = obj.optString("explanation", "No explanation provided."),
+                hint = obj.optString("hint"),
+                conceptsCovered = try {
+                    obj.optJSONArray("conceptsCovered")?.let { arr ->
+                        List(arr.length()) { arr.getString(it) }
+                    } ?: listOf("general")
+                } catch (e: Exception) {
+                    listOf("general")
+                },
                 difficulty = difficulty
             )
 
         } catch (e: Exception) {
-            Timber.e(e, "JSON parse error – generating fallback")
+            Timber.e(e, "Failed to parse question, using fallback")
             generateFallbackQuestionForType(expectedType, difficulty)
         }
     }
+
+    // Add helper to check if JSON is complete
+    private fun isCompleteJson(json: String): Boolean {
+        return try {
+            val trimmed = json.trim()
+            val openBraces = trimmed.count { it == '{' }
+            val closeBraces = trimmed.count { it == '}' }
+            val openBrackets = trimmed.count { it == '[' }
+            val closeBrackets = trimmed.count { it == ']' }
+
+            openBraces == closeBraces && openBrackets == closeBrackets
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun tryExtractFromRawText(
+        raw: String,
+        expectedType: QuestionType,
+        difficulty: Difficulty
+    ): Question? {
+        // Try to find question and answer patterns in the raw text
+        val questionPattern = Regex("\"question\":\"(.*?)\"")
+        val answerPattern = Regex("\"correctAnswer\":\"(.*?)\"")
+
+        val questionMatch = questionPattern.find(raw)
+        val answerMatch = answerPattern.find(raw)
+
+        if (questionMatch != null && answerMatch != null) {
+            val questionText = questionMatch.groupValues[1]
+                .replace("\\\"", "\"")
+                .replace("\\n", " ")
+                .trim()
+
+            val correctAnswer = answerMatch.groupValues[1]
+                .replace("\\\"", "\"")
+                .replace("\\n", " ")
+                .trim()
+
+            // Create a minimal valid question
+            return Question(
+                questionText = questionText,
+                questionType = expectedType,
+                options = when (expectedType) {
+                    QuestionType.MULTIPLE_CHOICE -> listOf("A", "B", "C", "D")
+                    QuestionType.TRUE_FALSE -> listOf("True", "False")
+                    else -> emptyList()
+                },
+                correctAnswer = correctAnswer,
+                explanation = "Generated from raw text due to JSON parsing error",
+                hint = null,
+                conceptsCovered = listOf("general"),
+                difficulty = difficulty
+            )
+        }
+        return null
+    }
+
 
     /* ─────────────────────── Validate questions before adding ─────────────────────── */
 
     private fun validateQuestion(question: Question): Question {
         return when (question.questionType) {
             QuestionType.MULTIPLE_CHOICE -> {
-                // Ensure we have exactly 4 options
-                val validOptions = if (question.options.size == 4) {
-                    question.options
-                } else {
-                    val opts = question.options.toMutableList()
-                    // Ensure correct answer is in options
-                    if (!opts.contains(question.correctAnswer)) {
-                        opts.add(0, question.correctAnswer)
+                // For multiple choice, we MUST have 4 valid options
+                val validOptions = when {
+                    question.options.isEmpty() -> {
+                        // Generate default options if none provided
+                        Timber.w("Multiple choice question has no options, generating defaults")
+                        listOf(
+                            question.correctAnswer,
+                            "Incorrect Option 1",
+                            "Incorrect Option 2",
+                            "Incorrect Option 3"
+                        ).shuffled()
                     }
-                    // Pad or trim to 4 options
-                    while (opts.size < 4) {
-                        opts.add("Option ${opts.size + 1}")
+                    question.options.size < 4 -> {
+                        // Pad options to 4
+                        val opts = question.options.toMutableList()
+                        if (!opts.contains(question.correctAnswer)) {
+                            opts.add(0, question.correctAnswer)
+                        }
+                        while (opts.size < 4) {
+                            opts.add("Option ${('A' + opts.size)}")
+                        }
+                        opts.shuffled()
                     }
-                    opts.take(4).shuffled()
+                    question.options.size > 4 -> {
+                        // Trim to 4 options, ensuring correct answer is included
+                        val opts = if (question.options.contains(question.correctAnswer)) {
+                            question.options.take(4)
+                        } else {
+                            listOf(question.correctAnswer) + question.options.take(3)
+                        }.shuffled()
+                        opts
+                    }
+                    else -> {
+                        // Ensure correct answer is in options
+                        if (!question.options.contains(question.correctAnswer)) {
+                            (listOf(question.correctAnswer) + question.options.take(3)).shuffled()
+                        } else {
+                            question.options
+                        }
+                    }
                 }
 
                 question.copy(options = validOptions)
@@ -614,7 +1188,10 @@ class QuizGeneratorViewModel @Inject constructor(
 
             QuestionType.TRUE_FALSE -> {
                 // Ensure only True/False options
-                question.copy(options = listOf("True", "False"))
+                question.copy(
+                    options = listOf("True", "False"),
+                    correctAnswer = if (question.correctAnswer.equals("true", ignoreCase = true)) "True" else "False"
+                )
             }
 
             QuestionType.FILL_IN_BLANK,
@@ -682,6 +1259,170 @@ class QuizGeneratorViewModel @Inject constructor(
                         }
             }
         }
+    }
+
+    /* ─────────────────────── Better question type selection ─────────────────────── */
+
+    private fun selectQuestionTypeWithVariety(index: Int, previousTypes: List<QuestionType>): QuestionType {
+        // Avoid repeating the same type too often
+        val recentTypes = previousTypes.takeLast(3)
+
+        // Weighted distribution
+        val baseWeights = mapOf(
+            QuestionType.MULTIPLE_CHOICE to 35,
+            QuestionType.TRUE_FALSE to 25,
+            QuestionType.FILL_IN_BLANK to 25,
+            QuestionType.SHORT_ANSWER to 15
+        )
+
+        // Adjust weights based on recent usage
+        val adjustedWeights = baseWeights.mapValues { (type, weight) ->
+            val recentCount = recentTypes.count { it == type }
+            when (recentCount) {
+                0 -> weight + 10  // Boost if not used recently
+                1 -> weight       // Normal weight
+                2 -> weight / 2   // Reduce if used twice
+                else -> weight / 4 // Strongly reduce if used 3 times
+            }
+        }
+
+        // Add some randomness
+        val totalWeight = adjustedWeights.values.sum()
+        var random = Random.nextInt(totalWeight)
+
+        for ((type, weight) in adjustedWeights) {
+            random -= weight
+            if (random < 0) {
+                return type
+            }
+        }
+
+        // Fallback with forced variety
+        return QuestionType.entries.first { it !in recentTypes }
+    }
+
+    /* ─────────────────────── Parallel generation with diversity ─────────────────────── */
+
+    suspend fun generateDiverseQuestionsParallel(
+        subject: Subject,
+        topic: String,
+        difficulty: Difficulty,
+        count: Int,
+        previousQuestions: List<String>,
+        learnerProfile: LearnerProfile
+    ): List<Question> = withContext(Dispatchers.Default) {
+        val questions = mutableListOf<Question>()
+        val usedTypes = mutableListOf<QuestionType>()
+
+        // Generate in smaller batches for better variety
+        val batchSize = 3
+        val batches = (count + batchSize - 1) / batchSize
+
+        for (batch in 0 until batches) {
+            val batchQuestions = coroutineScope {
+                (0 until minOf(batchSize, count - batch * batchSize)).map { indexInBatch ->
+                    val globalIndex = batch * batchSize + indexInBatch
+                    async {
+                        val questionType = selectQuestionTypeWithVariety(globalIndex, usedTypes)
+                        usedTypes.add(questionType)
+
+                        // Add delay between questions in same batch for variety
+                        delay(indexInBatch * 100L)
+
+                        generateSingleQuestionWithDiversity(
+                            subject = subject,
+                            topic = topic,
+                            difficulty = difficulty,
+                            questionType = questionType,
+                            previousQuestions = previousQuestions + questions.map { it.questionText },
+                            learnerProfile = learnerProfile,
+                            attemptNumber = globalIndex,
+                            diversitySeed = System.currentTimeMillis() + globalIndex * 1000
+                        )
+                    }
+                }.awaitAll().filterNotNull()
+            }
+
+            questions.addAll(batchQuestions)
+
+            // Update state after each batch
+            _state.update { it.copy(questionsGenerated = questions.size) }
+
+            // Small delay between batches
+            if (batch < batches - 1) {
+                delay(200)
+            }
+        }
+
+        return@withContext questions
+    }
+
+    private suspend fun generateSingleQuestionWithDiversity(
+        subject: Subject,
+        topic: String,
+        difficulty: Difficulty,
+        questionType: QuestionType,
+        previousQuestions: List<String>,
+        learnerProfile: LearnerProfile,
+        attemptNumber: Int,
+        diversitySeed: Long
+    ): Question? {
+        var lastError: Exception? = null
+
+        repeat(3) { retryCount ->
+            try {
+                // Use enhanced prompt with more variety
+                val prompt = createEnhancedStructuredPrompt(
+                    questionType = questionType,
+                    subject = subject,
+                    topic = topic,
+                    difficulty = difficulty,
+                    learnerProfile = learnerProfile,
+                    previousQuestions = previousQuestions,
+                    attemptNumber = attemptNumber + retryCount // Vary prompt on retry
+                )
+
+                // Vary generation parameters more
+                val temperature = when (retryCount) {
+                    0 -> 0.7f + (attemptNumber % 3) * 0.1f  // 0.7-0.9
+                    1 -> 0.8f + (attemptNumber % 4) * 0.05f // 0.8-0.95
+                    else -> 0.9f + Random.nextFloat() * 0.1f // 0.9-1.0
+                }
+
+                val response = gemmaService.generateTextAsync(
+                    prompt,
+                    UnifiedGemmaService.GenerationConfig(
+                        maxTokens = 350,
+                        temperature = temperature,
+                        topK = 40 + (attemptNumber % 20), // Vary topK
+                        randomSeed = (diversitySeed + retryCount * 1000).toInt()
+                    )
+                )
+
+                val question = parseAndValidateQuestion(response, questionType, difficulty)
+
+                // Enhanced similarity check
+                val isTooSimilar = previousQuestions.any { prev ->
+                    calculateEnhancedSimilarity(question.questionText, prev) > 0.7f
+                }
+
+                if (!isTooSimilar) {
+                    return question
+                }
+
+                Timber.w("Question too similar (attempt ${retryCount + 1}), regenerating...")
+
+            } catch (e: Exception) {
+                lastError = e
+                Timber.w("Generation attempt ${retryCount + 1} failed: ${e.message}")
+            }
+
+            // Exponential backoff
+            delay(100L * (retryCount + 1))
+        }
+
+        Timber.e(lastError, "All generation attempts failed")
+        return null
     }
 
     /* ───── Helper functions ───── */
@@ -804,6 +1545,61 @@ class QuizGeneratorViewModel @Inject constructor(
             difficulty = difficulty
         )
     }
+
+    private fun isBalancedJson(json: String): Boolean {
+        var depth = 0
+        var inString = false
+        var escapeNext = false
+
+        for (char in json) {
+            when {
+                escapeNext -> escapeNext = false
+                char == '\\' -> escapeNext = true
+                char == '"' -> inString = !inString
+                !inString && char == '{' -> depth++
+                !inString && char == '}' -> depth--
+            }
+        }
+        return depth == 0
+    }
+
+    private fun preprocessModelResponse(rawResponse: String): String {
+        var processed = rawResponse
+
+        // 1. Remove any markdown code block markers
+        processed = processed.replace(Regex("^```(?:json)?\\s*"), "")
+        processed = processed.replace(Regex("\\s*```$"), "")
+
+        // 2. Try to remove any text before or after the JSON
+        val jsonStart = processed.indexOf('{')
+        val jsonEnd = processed.lastIndexOf('}')
+
+        if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
+            processed = processed.substring(jsonStart, jsonEnd + 1)
+        }
+
+        // 3. Try to fix unbalanced quotes
+        var quoteCount = processed.count { it == '"' }
+        if (quoteCount % 2 != 0) {
+            // If odd number of quotes, try adding a closing quote at the end
+            processed += '"'
+            quoteCount++
+        }
+
+        // 4. Try to balance braces if needed
+        val openBraces = processed.count { it == '{' }
+        val closeBraces = processed.count { it == '}' }
+
+        if (openBraces > closeBraces) {
+            processed += "}".repeat(openBraces - closeBraces)
+        } else if (closeBraces > openBraces) {
+            // If more closing braces, try removing extras from the end
+            processed = processed.dropLast(closeBraces - openBraces)
+        }
+
+        return processed.trim()
+    }
+
 
     override fun onCleared() {
         super.onCleared()

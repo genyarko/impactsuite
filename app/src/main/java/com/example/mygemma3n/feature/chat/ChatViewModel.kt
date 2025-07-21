@@ -2,8 +2,10 @@ package com.example.mygemma3n.feature.chat
 
 import android.content.Context
 import android.content.Intent
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.mygemma3n.data.ChatRepository
 import com.example.mygemma3n.data.UnifiedGemmaService
 import com.example.mygemma3n.feature.caption.SpeechRecognitionService
 import com.example.mygemma3n.service.AudioCaptureService
@@ -14,6 +16,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
@@ -22,13 +25,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import javax.inject.Inject
 
-/** Chat view model handling basic conversation. */
+/** Chat view‑model backed by Room for permanent history. */
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val gemmaService: UnifiedGemmaService,
-    private val speechService: SpeechRecognitionService
+    private val speechService: SpeechRecognitionService,
+    private val repo: ChatRepository,
+    savedStateHandle: SavedStateHandle
 ) : ViewModel() {
+
+    /** navArgument passed from ChatListScreen → "chat/{sessionId}" */
+    private val sessionId: String = checkNotNull(
+        savedStateHandle["sessionId"]
+    ) { "ChatViewModel requires a sessionId NavArg." }
 
     private val _uiState = MutableStateFlow(ChatState())
     val uiState: StateFlow<ChatState> = _uiState.asStateFlow()
@@ -36,13 +46,23 @@ class ChatViewModel @Inject constructor(
     private var recordingJob: Job? = null
     private val audioBuffer = mutableListOf<FloatArray>()
 
-    fun updateUserTypedInput(text: String) {
-        _uiState.update { it.copy(userTypedInput = text) }
+    init {
+        // Stream messages from the DB straight into UI state
+        viewModelScope.launch {
+            repo.getMessagesForSession(sessionId)   // Flow<List<ChatMessage>>
+                .collectLatest { msgs ->
+                    _uiState.update { it.copy(conversation = msgs) }
+                }
+        }
     }
 
+    // ───── User‑input helpers ────────────────────────────────────────────────
+    fun updateUserTypedInput(text: String) =
+        _uiState.update { it.copy(userTypedInput = text) }
+
+    // ───── Audio recording & STT ─────────────────────────────────────────────
     fun startRecording() {
         if (_uiState.value.isRecording) return
-
         Intent(context, AudioCaptureService::class.java).apply {
             action = AudioCaptureService.ACTION_START_CAPTURE
             context.startService(this)
@@ -58,7 +78,6 @@ class ChatViewModel @Inject constructor(
 
     fun stopRecording() {
         if (!_uiState.value.isRecording) return
-
         Intent(context, AudioCaptureService::class.java).apply {
             action = AudioCaptureService.ACTION_STOP_CAPTURE
             context.startService(this)
@@ -77,7 +96,7 @@ class ChatViewModel @Inject constructor(
 
     private suspend fun transcribeAudio(): String {
         if (!speechService.isInitialized) return ""
-        val data = audioBuffer.flatten().toFloatArray()
+        val data = audioBuffer.flatMap { it.asList() }.toFloatArray()
         val pcm = ByteArray(data.size * 2)
         data.forEachIndexed { i, f ->
             val v = (f.coerceIn(-1f, 1f) * 32767).toInt()
@@ -87,18 +106,19 @@ class ChatViewModel @Inject constructor(
         return speechService.transcribeAudioData(pcm, "en-US")
     }
 
+    // ───── Core send‑message flow ────────────────────────────────────────────
     fun sendMessage() {
         val text = _uiState.value.userTypedInput.trim()
         if (text.isBlank()) return
+
         viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    isLoading = true,
-                    conversation = it.conversation + ChatMessage.User(text),
-                    userTypedInput = ""
-                )
-            }
+            // 1. Persist & update UI with user turn
+            val userMsg = ChatMessage.User(text)
+            repo.addMessage(sessionId, userMsg)        // saves + updates lastMessage
+            _uiState.update { it.copy(userTypedInput = "", isLoading = true) }
+
             try {
+                // 2. Call LLM
                 val reply = gemmaService.generateTextAsync(
                     text,
                     UnifiedGemmaService.GenerationConfig(
@@ -106,11 +126,10 @@ class ChatViewModel @Inject constructor(
                         temperature = 0.7f
                     )
                 )
-                _uiState.update {
-                    it.copy(
-                        conversation = it.conversation + ChatMessage.AI(reply)
-                    )
-                }
+                val aiMsg = ChatMessage.AI(reply)
+
+                // 3. Persist AI reply
+                repo.addMessage(sessionId, aiMsg)      // same helper updates session preview
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = e.message) }
             } finally {
@@ -120,6 +139,7 @@ class ChatViewModel @Inject constructor(
     }
 }
 
+/** Immutable UI snapshot for Compose. */
 data class ChatState(
     val conversation: List<ChatMessage> = emptyList(),
     val userTypedInput: String = "",

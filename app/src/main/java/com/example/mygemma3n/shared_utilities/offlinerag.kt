@@ -1,14 +1,13 @@
 package com.example.mygemma3n.shared_utilities
 
 import com.example.mygemma3n.data.TextEmbeddingService
+import com.example.mygemma3n.data.TextEmbeddingServiceExtensions
 import com.example.mygemma3n.data.UnifiedGemmaService
+import com.example.mygemma3n.data.local.OptimizedVectorDatabase
 import com.example.mygemma3n.data.local.SubjectRepository
-import com.example.mygemma3n.data.local.VectorDatabase
+import com.example.mygemma3n.data.VectorDatabase
 import com.example.mygemma3n.data.local.entities.SubjectEntity
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import javax.inject.Inject
@@ -16,27 +15,21 @@ import javax.inject.Singleton
 
 @Singleton
 class OfflineRAG @Inject constructor(
-    private val vectorDB: VectorDatabase,
+    private val vectorDB: OptimizedVectorDatabase,
     private val subjectRepo: SubjectRepository,
     private val gemma: UnifiedGemmaService,
-    private val embedderService: TextEmbeddingService
+    private val embedderService: TextEmbeddingService,
+    private val embedderServiceExtensions: TextEmbeddingServiceExtensions
 ) {
 
     companion object {
         private const val CHUNK_SIZE = 512
         private const val CHUNK_OVERLAP = 128
-        private const val MAX_CONTEXT_LENGTH = 2048
+        const val MAX_CONTEXT_LENGTH = 2048
         private const val TOP_K = 5
     }
 
-    enum class Subject {
-        MATHEMATICS,
-        SCIENCE,
-        HISTORY,
-        LANGUAGE_ARTS,
-        GEOGRAPHY,
-        GENERAL
-    }
+    enum class Subject { MATHEMATICS, SCIENCE, HISTORY, LANGUAGE_ARTS, GEOGRAPHY, ENGLISH, GENERAL }
 
     data class Document(
         val id: String,
@@ -59,22 +52,33 @@ class OfflineRAG @Inject constructor(
         subjectRepo.getSubjectsWithAccuracy()
 
     suspend fun setup(documents: List<Document>) = withContext(Dispatchers.IO) {
-        // Ensure model is initialized for embeddings (if needed)
         ensureModelInitialized()
 
-        documents.forEach { doc ->
+        // Use the optimized batch insert
+        val vectorDocuments = documents.flatMap { doc ->
             val chunks = chunkText(doc.content, CHUNK_SIZE, CHUNK_OVERLAP)
-            chunks.forEachIndexed { idx, chunk ->
-                val emb = embedderService.embed(chunk.text)
-                vectorDB.insert(VectorDatabase.VectorDocument(
+            chunks.mapIndexed { idx, chunk ->
+                VectorDatabase.VectorDocument(
                     id = "${doc.id}_$idx",
                     content = chunk.text,
-                    embedding = emb,
+                    embedding = FloatArray(768), // Placeholder
                     metadata = mapOf("subject" to doc.metadata.subject.name)
-                ))
+                )
             }
         }
-        vectorDB.optimizeIndex()
+
+        // Batch embed
+        val embeddings = embedderServiceExtensions.embedBatch(
+            vectorDocuments.map { it.content }
+        )
+
+        // Update with actual embeddings
+        val documentsWithEmbeddings = vectorDocuments.zip(embeddings) { doc, emb ->
+            doc.copy(embedding = emb)
+        }
+
+        // Use optimized batch insert
+        vectorDB.insertBatchOptimized(documentsWithEmbeddings)
     }
 
     data class TextChunk(
@@ -103,7 +107,13 @@ class OfflineRAG @Inject constructor(
         ensureModelInitialized()
 
         val qEmb = embedderService.embed(query)
-        var results = vectorDB.search(qEmb, k = TOP_K, filter = subject?.let { mapOf("subject" to it.name) } ?: emptyMap())
+        val results = vectorDB.searchOptimized(
+            queryEmbedding = qEmb,
+            k = TOP_K,
+            filter = subject?.let { mapOf("subject" to it.name) },
+            threshold = 0.0f
+        )
+
         val context = buildContext(results)
         val prompt = """
             You are an educational assistant.

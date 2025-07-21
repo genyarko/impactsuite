@@ -138,6 +138,7 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     implementation(libs.litert.gpu)
+    implementation(libs.play.services.mlkit.subject.segmentation)
     ksp(libs.androidx.room.compiler)
 
 // WorkManager

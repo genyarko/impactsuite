@@ -1,0 +1,394 @@
+{
+  "questionTypes": {
+    "MULTIPLE_CHOICE": {
+      "instructions": "Create a multiple choice question with:\n- A clear question stem\n- EXACTLY 4 answer options\n- Only ONE correct answer\n- 3 plausible distractors (wrong answers)\n\nFormat: The question should naturally lead to choosing from options.\nExample: \"Which organ is responsible for...?\" or \"What is the primary function of...?\"",
+      "examples": {
+        "SCIENCE": {
+          "question": "What is the powerhouse of the cell?",
+          "options": ["Nucleus", "Mitochondria", "Ribosome", "Cell membrane"],
+          "correctAnswer": "Mitochondria",
+          "explanation": "Mitochondria produce ATP through cellular respiration.",
+          "hint": "This organelle is involved in energy production.",
+          "conceptsCovered": ["cell-biology", "organelles"]
+        },
+        "MATHEMATICS": {
+          "question": "What is the value of π (pi) rounded to two decimal places?",
+          "options": ["3.12", "3.14", "3.16", "3.18"],
+          "correctAnswer": "3.14",
+          "explanation": "Pi (π) is approximately 3.14159..., which rounds to 3.14.",
+          "hint": "This mathematical constant relates a circle's circumference to its diameter.",
+          "conceptsCovered": ["geometry", "constants"]
+        },
+        "ENGLISH": {
+          "question": "Which literary device involves giving human qualities to non-human things?",
+          "options": ["Metaphor", "Simile", "Personification", "Alliteration"],
+          "correctAnswer": "Personification",
+          "explanation": "Personification attributes human characteristics to non-human entities.",
+          "hint": "Think about when we say 'the wind whispered' or 'the sun smiled'.",
+          "conceptsCovered": ["literary-devices", "figurative-language"]
+        },
+        "HISTORY": {
+          "question": "Which event started World War I?",
+          "options": ["Assassination of Archduke Franz Ferdinand", "Bombing of Pearl Harbor", "Invasion of Poland", "Russian Revolution"],
+          "correctAnswer": "Assassination of Archduke Franz Ferdinand",
+          "explanation": "The assassination of Archduke Franz Ferdinand of Austria in Sarajevo on June 28, 1914, triggered a chain of events leading to WWI.",
+          "hint": "This event happened in Sarajevo in 1914.",
+          "conceptsCovered": ["world-war-1", "european-history"]
+        },
+        "GEOGRAPHY": {
+          "question": "Which is the longest river in the world?",
+          "options": ["Amazon River", "Nile River", "Yangtze River", "Mississippi River"],
+          "correctAnswer": "Nile River",
+          "explanation": "The Nile River in Africa is approximately 6,650 kilometers (4,130 miles) long.",
+          "hint": "This river flows through northeastern Africa.",
+          "conceptsCovered": ["rivers", "physical-geography"]
+        },
+        "LANGUAGE_ARTS": {
+          "question": "What is the main purpose of a persuasive essay?",
+          "options": ["To entertain readers", "To convince readers of a viewpoint", "To provide instructions", "To describe a scene"],
+          "correctAnswer": "To convince readers of a viewpoint",
+          "explanation": "Persuasive essays aim to convince readers to accept a particular opinion or take a specific action.",
+          "hint": "Think about what 'persuade' means.",
+          "conceptsCovered": ["essay-types", "writing-purposes"]
+        }
+      }
+    },
+    "TRUE_FALSE": {
+      "instructions": "Create a TRUE/FALSE question with:\n- A simple, clear declarative statement\n- The statement must be definitively true or false\n- NO \"which of the following\" phrasing\n- options array should be [\"True\", \"False\"]\n\nExample: \"The heart pumps blood throughout the body.\" (Answer: True)",
+      "examples": {
+        "SCIENCE": {
+          "question": "All mammals lay eggs.",
+          "options": ["True", "False"],
+          "correctAnswer": "False",
+          "explanation": "Most mammals give birth to live young. Only monotremes like platypuses lay eggs.",
+          "hint": "Think about how most mammals reproduce.",
+          "conceptsCovered": ["mammal-reproduction", "animal-classification"]
+        },
+        "MATHEMATICS": {
+          "question": "A square has four equal sides.",
+          "options": ["True", "False"],
+          "correctAnswer": "True",
+          "explanation": "By definition, a square is a quadrilateral with four equal sides and four right angles.",
+          "hint": "Think about the properties that define a square.",
+          "conceptsCovered": ["geometry", "shapes"]
+        },
+        "ENGLISH": {
+          "question": "A haiku always has exactly 17 syllables.",
+          "options": ["True", "False"],
+          "correctAnswer": "True",
+          "explanation": "Traditional haiku follows a 5-7-5 syllable pattern, totaling 17 syllables.",
+          "hint": "Remember the traditional Japanese poetry form structure.",
+          "conceptsCovered": ["poetry", "haiku"]
+        },
+        "HISTORY": {
+          "question": "The American Revolution ended before the French Revolution began.",
+          "options": ["True", "False"],
+          "correctAnswer": "True",
+          "explanation": "The American Revolution ended in 1783, while the French Revolution began in 1789.",
+          "hint": "Compare the years: American (1776-1783) vs French (1789-1799).",
+          "conceptsCovered": ["revolutions", "chronology"]
+        },
+        "GEOGRAPHY": {
+          "question": "Antarctica is the largest continent by area.",
+          "options": ["True", "False"],
+          "correctAnswer": "False",
+          "explanation": "Asia is the largest continent by area. Antarctica is the fifth-largest.",
+          "hint": "Think about which continent contains China, India, and Russia.",
+          "conceptsCovered": ["continents", "world-geography"]
+        },
+        "LANGUAGE_ARTS": {
+          "question": "A protagonist is always the hero of a story.",
+          "options": ["True", "False"],
+          "correctAnswer": "False",
+          "explanation": "A protagonist is the main character, but they can be an anti-hero or even villainous.",
+          "hint": "Think about stories where the main character isn't necessarily good.",
+          "conceptsCovered": ["character-types", "narrative-elements"]
+        }
+      }
+    },
+    "FILL_IN_BLANK": {
+      "instructions": "Create a fill-in-the-blank question with:\n- A sentence with ONE blank indicated by _____\n- The blank should be a key term or concept\n- The answer should be 1-3 words maximum\n- NO multiple choice phrasing\n- options array should be empty []\n\nExample: \"The process by which plants make food using sunlight is called _____.\" (Answer: photosynthesis)",
+      "examples": {
+        "SCIENCE": {
+          "question": "The process of water changing from liquid to gas is called _____.",
+          "options": [],
+          "correctAnswer": "evaporation",
+          "explanation": "Evaporation occurs when water molecules gain enough energy to escape as vapor.",
+          "hint": "This happens when water is heated or exposed to air.",
+          "conceptsCovered": ["states-of-matter", "water-cycle"]
+        },
+        "MATHEMATICS": {
+          "question": "The result of multiplying a number by itself is called a _____.",
+          "options": [],
+          "correctAnswer": "square",
+          "explanation": "When we multiply a number by itself (like 4 × 4 = 16), we get its square.",
+          "hint": "This operation is the opposite of finding a square root.",
+          "conceptsCovered": ["operations", "exponents"]
+        },
+        "ENGLISH": {
+          "question": "A word that describes a noun is called an _____.",
+          "options": [],
+          "correctAnswer": "adjective",
+          "explanation": "Adjectives modify or describe nouns, telling us more about them.",
+          "hint": "Words like 'beautiful', 'tall', or 'blue' fall into this category.",
+          "conceptsCovered": ["parts-of-speech", "grammar"]
+        },
+        "HISTORY": {
+          "question": "The document that declared American independence was signed in _____.",
+          "options": [],
+          "correctAnswer": "1776",
+          "explanation": "The Declaration of Independence was signed on July 4, 1776.",
+          "hint": "This year is celebrated every July 4th in the United States.",
+          "conceptsCovered": ["american-revolution", "important-dates"]
+        },
+        "GEOGRAPHY": {
+          "question": "The imaginary line that divides Earth into Northern and Southern hemispheres is called the _____.",
+          "options": [],
+          "correctAnswer": "equator",
+          "explanation": "The equator is at 0 degrees latitude and circles the Earth at its widest point.",
+          "hint": "This line passes through Ecuador, which is named after it.",
+          "conceptsCovered": ["latitude", "earth-features"]
+        },
+        "LANGUAGE_ARTS": {
+          "question": "The repetition of initial consonant sounds in words is called _____.",
+          "options": [],
+          "correctAnswer": "alliteration",
+          "explanation": "Alliteration creates rhythm and emphasis, like 'Peter Piper picked...'",
+          "hint": "Think of tongue twisters that repeat the same starting sound.",
+          "conceptsCovered": ["sound-devices", "poetry-techniques"]
+        }
+      }
+    },
+    "SHORT_ANSWER": {
+      "instructions": "Create a short answer question with:\n- An open-ended question requiring a brief explanation\n- Answer should be 1-2 sentences\n- NO \"which of the following\" phrasing\n- options array should be empty []\n\nExample: \"Explain the main function of red blood cells.\"",
+      "examples": {
+        "SCIENCE": {
+          "question": "Describe the water cycle.",
+          "options": [],
+          "correctAnswer": "The water cycle is the continuous movement of water through evaporation, condensation, and precipitation",
+          "explanation": "Water evaporates from bodies of water, forms clouds, and returns as rain or snow.",
+          "hint": "Think about how water moves between earth and atmosphere.",
+          "conceptsCovered": ["water-cycle", "earth-science"]
+        },
+        "MATHEMATICS": {
+          "question": "Explain what a prime number is.",
+          "options": [],
+          "correctAnswer": "A prime number is a natural number greater than 1 that has no positive divisors other than 1 and itself",
+          "explanation": "Examples include 2, 3, 5, 7, 11, etc. The number 2 is the only even prime.",
+          "hint": "Think about numbers that can only be divided evenly by 1 and themselves.",
+          "conceptsCovered": ["number-theory", "prime-numbers"]
+        },
+        "ENGLISH": {
+          "question": "What is the purpose of a thesis statement?",
+          "options": [],
+          "correctAnswer": "A thesis statement presents the main argument or central idea of an essay in one or two sentences",
+          "explanation": "It typically appears at the end of the introduction and guides the entire essay.",
+          "hint": "This sentence tells readers what your essay will argue or explain.",
+          "conceptsCovered": ["essay-writing", "thesis-statements"]
+        },
+        "HISTORY": {
+          "question": "What was the main cause of the American Civil War?",
+          "options": [],
+          "correctAnswer": "The main cause was the conflict over slavery and states' rights, particularly regarding the expansion of slavery into new territories",
+          "explanation": "While there were multiple factors, slavery was the central issue dividing North and South.",
+          "hint": "Consider the economic and moral differences between Northern and Southern states.",
+          "conceptsCovered": ["civil-war", "american-history"]
+        },
+        "GEOGRAPHY": {
+          "question": "What causes earthquakes?",
+          "options": [],
+          "correctAnswer": "Earthquakes are caused by the movement of tectonic plates, which releases energy as seismic waves",
+          "explanation": "Most earthquakes occur along plate boundaries where plates collide, separate, or slide past each other.",
+          "hint": "Think about the Earth's crust and what happens when large pieces move.",
+          "conceptsCovered": ["plate-tectonics", "natural-disasters"]
+        },
+        "LANGUAGE_ARTS": {
+          "question": "What is the difference between theme and plot?",
+          "options": [],
+          "correctAnswer": "Plot is what happens in a story, while theme is the underlying message or meaning the author conveys",
+          "explanation": "Plot is the sequence of events, but theme is the deeper insight about life or human nature.",
+          "hint": "One is about events, the other is about meaning.",
+          "conceptsCovered": ["literary-elements", "story-analysis"]
+        }
+      }
+    }
+  },
+  "fallbackQuestions": {
+    "MULTIPLE_CHOICE": {
+      "SCIENCE": {
+        "question": "Which planet is closest to the Sun?",
+        "options": ["Venus", "Mercury", "Earth", "Mars"],
+        "correctAnswer": "Mercury",
+        "conceptsCovered": ["solar-system"]
+      },
+      "MATHEMATICS": {
+        "question": "What is 15 + 27?",
+        "options": ["40", "41", "42", "43"],
+        "correctAnswer": "42",
+        "conceptsCovered": ["addition"]
+      },
+      "ENGLISH": {
+        "question": "Which punctuation mark ends a question?",
+        "options": ["Period", "Comma", "Question mark", "Exclamation point"],
+        "correctAnswer": "Question mark",
+        "conceptsCovered": ["punctuation"]
+      },
+      "HISTORY": {
+        "question": "Who was the first President of the United States?",
+        "options": ["Thomas Jefferson", "George Washington", "John Adams", "Benjamin Franklin"],
+        "correctAnswer": "George Washington",
+        "conceptsCovered": ["us-presidents"]
+      },
+      "GEOGRAPHY": {
+        "question": "What is the capital of France?",
+        "options": ["London", "Berlin", "Paris", "Madrid"],
+        "correctAnswer": "Paris",
+        "conceptsCovered": ["world-capitals"]
+      },
+      "LANGUAGE_ARTS": {
+        "question": "What type of sentence asks a question?",
+        "options": ["Declarative", "Interrogative", "Imperative", "Exclamatory"],
+        "correctAnswer": "Interrogative",
+        "conceptsCovered": ["sentence-types"]
+      },
+      "GENERAL": {
+        "question": "How many days are in a week?",
+        "options": ["5", "6", "7", "8"],
+        "correctAnswer": "7",
+        "conceptsCovered": ["time"]
+      }
+    },
+    "TRUE_FALSE": {
+      "SCIENCE": {
+        "question": "The Earth revolves around the Sun.",
+        "options": ["True", "False"],
+        "correctAnswer": "True",
+        "conceptsCovered": ["solar-system"]
+      },
+      "MATHEMATICS": {
+        "question": "Zero is a positive number.",
+        "options": ["True", "False"],
+        "correctAnswer": "False",
+        "conceptsCovered": ["number-types"]
+      },
+      "ENGLISH": {
+        "question": "Every sentence must have a subject and a predicate.",
+        "options": ["True", "False"],
+        "correctAnswer": "True",
+        "conceptsCovered": ["sentence-structure"]
+      },
+      "HISTORY": {
+        "question": "World War II ended in 1945.",
+        "options": ["True", "False"],
+        "correctAnswer": "True",
+        "conceptsCovered": ["world-war-2"]
+      },
+      "GEOGRAPHY": {
+        "question": "There are seven continents on Earth.",
+        "options": ["True", "False"],
+        "correctAnswer": "True",
+        "conceptsCovered": ["continents"]
+      },
+      "LANGUAGE_ARTS": {
+        "question": "Fiction means a story that is not real.",
+        "options": ["True", "False"],
+        "correctAnswer": "True",
+        "conceptsCovered": ["genres"]
+      },
+      "GENERAL": {
+        "question": "Water freezes at 0 degrees Celsius.",
+        "options": ["True", "False"],
+        "correctAnswer": "True",
+        "conceptsCovered": ["temperature"]
+      }
+    },
+    "FILL_IN_BLANK": {
+      "SCIENCE": {
+        "question": "The study of living organisms is called _____.",
+        "options": [],
+        "correctAnswer": "biology",
+        "conceptsCovered": ["life-sciences"]
+      },
+      "MATHEMATICS": {
+        "question": "The bottom number in a fraction is called the _____.",
+        "options": [],
+        "correctAnswer": "denominator",
+        "conceptsCovered": ["fractions"]
+      },
+      "ENGLISH": {
+        "question": "The main character in a story is called the _____.",
+        "options": [],
+        "correctAnswer": "protagonist",
+        "conceptsCovered": ["character-types"]
+      },
+      "HISTORY": {
+        "question": "The ship that brought the Pilgrims to America was called the _____.",
+        "options": [],
+        "correctAnswer": "Mayflower",
+        "conceptsCovered": ["colonial-america"]
+      },
+      "GEOGRAPHY": {
+        "question": "The largest ocean on Earth is the _____ Ocean.",
+        "options": [],
+        "correctAnswer": "Pacific",
+        "conceptsCovered": ["oceans"]
+      },
+      "LANGUAGE_ARTS": {
+        "question": "A comparison using 'like' or 'as' is called a _____.",
+        "options": [],
+        "correctAnswer": "simile",
+        "conceptsCovered": ["figurative-language"]
+      },
+      "GENERAL": {
+        "question": "There are _____ months in a year.",
+        "options": [],
+        "correctAnswer": "twelve",
+        "conceptsCovered": ["calendar"]
+      }
+    },
+    "SHORT_ANSWER": {
+      "SCIENCE": {
+        "question": "What is photosynthesis?",
+        "options": [],
+        "correctAnswer": "The process by which plants use sunlight to make food from carbon dioxide and water",
+        "conceptsCovered": ["plant-biology"]
+      },
+      "MATHEMATICS": {
+        "question": "What is the Pythagorean theorem?",
+        "options": [],
+        "correctAnswer": "In a right triangle, the square of the hypotenuse equals the sum of squares of the other two sides",
+        "conceptsCovered": ["geometry"]
+      },
+      "ENGLISH": {
+        "question": "What is a metaphor?",
+        "options": [],
+        "correctAnswer": "A figure of speech that directly compares two unlike things without using like or as",
+        "conceptsCovered": ["figurative-language"]
+      },
+      "HISTORY": {
+        "question": "What was the Renaissance?",
+        "options": [],
+        "correctAnswer": "A period of cultural rebirth in Europe from the 14th to 17th centuries marked by renewed interest in art, science, and learning",
+        "conceptsCovered": ["european-history"]
+      },
+      "GEOGRAPHY": {
+        "question": "What is climate change?",
+        "options": [],
+        "correctAnswer": "Long-term shifts in global temperatures and weather patterns, primarily caused by human activities since the 1800s",
+        "conceptsCovered": ["environmental-geography"]
+      },
+      "LANGUAGE_ARTS": {
+        "question": "What is foreshadowing?",
+        "options": [],
+        "correctAnswer": "A literary device where the author gives hints or clues about events that will happen later in the story",
+        "conceptsCovered": ["literary-devices"]
+      },
+      "GENERAL": {
+        "question": "What is gravity?",
+        "options": [],
+        "correctAnswer": "The force that attracts objects with mass toward each other, keeping us on Earth's surface",
+        "conceptsCovered": ["physics"]
+      }
+    }
+  }
+}

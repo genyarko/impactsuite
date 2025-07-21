@@ -2,9 +2,6 @@
 package com.example.mygemma3n.shared_utilities
 
 /** Strip ```json``` fences from an LLM response. */
-fun stripFences(s: String): String =
-    s.trim()
-        .removePrefix("```json")
-        .removePrefix("```")
-        .removeSuffix("```")
-        .trim()
+fun stripFences(s: String): String {
+    return s.replace(Regex("^```(?:json)?\\s*|\\s*```$"), "").trim()
+}

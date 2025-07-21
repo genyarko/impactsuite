@@ -43,6 +43,8 @@ import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import com.example.mygemma3n.data.GeminiApiConfig
 import com.example.mygemma3n.data.GeminiApiService
 import com.example.mygemma3n.data.UnifiedGemmaService
@@ -69,7 +71,9 @@ import kotlinx.coroutines.withContext
 import timber.log.Timber
 import javax.inject.Inject
 import com.example.mygemma3n.di.GemmaServiceEntryPoint
+import com.example.mygemma3n.feature.chat.ChatListScreen
 import com.example.mygemma3n.ui.components.InitializationScreen
+import com.example.mygemma3n.ui.settings.QuizSettingsScreen
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 
@@ -331,28 +335,34 @@ fun Gemma3nNavigation(
         startDestination = "home",
         modifier = modifier
     ) {
-        composable("home") {
-            HomeScreen(
-                navController,
-                unifiedGemmaService)
+        // ───── Home & tools ───────────────────────────────────────────────
+        composable("home") { HomeScreen(navController, unifiedGemmaService) }
+        composable("live_caption")   { LiveCaptionScreen() }
+        composable("quiz_generator") { QuizScreen() }
+        composable("cbt_coach")      { CBTCoachScreen() }
+
+        // ───── Chat list first ───────────────────────────────────────────
+        composable("chat_list") {
+            ChatListScreen(                          // expects lambda first:contentReference[oaicite:0]{index=0}
+                onNavigateToChat = { id ->
+                    navController.navigate("chat/$id")
+                }
+            )
         }
-        composable("live_caption") {
-            LiveCaptionScreen()
-        }
-        composable("quiz_generator") {
-            QuizScreen()
-        }
-        composable("cbt_coach") {
-            CBTCoachScreen()
-        }
-        composable("chat") {
+
+        // ───── Individual session ───────────────────────────────────────
+        composable(
+            route = "chat/{sessionId}",
+            arguments = listOf(navArgument("sessionId") { type = NavType.StringType })
+        ) {
             ChatScreen()
         }
-        composable("plant_scanner") {
-            PlantScannerScreen()
-        }
-        composable("crisis_handbook") {
-            CrisisHandbookScreen()
+
+        // ───── Other screens ────────────────────────────────────────────
+        composable("plant_scanner")   { PlantScannerScreen() }
+        composable("crisis_handbook") { CrisisHandbookScreen() }
+        composable("settings") {
+            QuizSettingsScreen(onNavigateBack = { navController.popBackStack() })
         }
         composable("api_settings") {
             val context = LocalContext.current
@@ -369,6 +379,7 @@ fun Gemma3nNavigation(
         }
     }
 }
+
 
 // Updated Home screen with Gemini API
 // ───── Home screen ──────────────────────────────────────────────────────────
@@ -488,7 +499,7 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
         Button(
-            onClick = { navController.navigate("chat") },
+            onClick = { navController.navigate("chat_list") },
             enabled = isGemmaInitialized,
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -514,6 +525,7 @@ fun HomeScreen(
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+
 
         // API Settings Button
         OutlinedButton(

@@ -12,8 +12,7 @@ import com.example.mygemma3n.data.QuizDao   // add this
 
 /* ─────────────────────── Core enums ─────────────────────── */
 
-enum class Subject { MATHEMATICS, SCIENCE, HISTORY, LANGUAGE_ARTS, GEOGRAPHY, GENERAL }
-
+enum class Subject { MATHEMATICS, SCIENCE, HISTORY, LANGUAGE_ARTS, GEOGRAPHY, ENGLISH, GENERAL }
 enum class Difficulty { EASY, MEDIUM, HARD, ADAPTIVE }
 
 enum class QuestionType { MULTIPLE_CHOICE, TRUE_FALSE, FILL_IN_BLANK, SHORT_ANSWER, MATCHING }
@@ -152,9 +151,17 @@ class QuizConverters {
 
 @Dao
 interface EducationalContentDao {
-    @Query("SELECT * FROM educational_content") suspend fun getAll(): List<EducationalContent>
-    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertAll(list: List<EducationalContent>)
+    @Query("SELECT * FROM educational_content")
+    suspend fun getAll(): List<EducationalContent>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(list: List<EducationalContent>)
+
+    // ➕ Add this line
+    @Query("DELETE FROM educational_content")
+    suspend fun deleteAll()
 }
+
 
 @Dao
 interface UserProgressDao {
@@ -253,7 +260,7 @@ interface WrongAnswerDao {
         QuestionHistory::class,
         WrongAnswer::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(QuizConverters::class)
@@ -271,6 +278,10 @@ abstract class QuizDatabase : RoomDatabase() {
 class EducationalContentRepository @Inject constructor(
     private val db: QuizDatabase
 ) {
+    suspend fun clearAndRepopulate() {
+        db.contentDao().deleteAll()
+        prepopulateContent()
+    }
     suspend fun prepopulateContent() {
         val sample = listOf(
             EducationalContent(
@@ -291,6 +302,16 @@ class EducationalContentRepository @Inject constructor(
             )
         )
         db.contentDao().insertAll(sample)
+    }
+
+    suspend fun ensureSubjectsAvailable(): List<Subject> {
+        val content = getAllContent()
+        return if (content.isNotEmpty()) {
+            content.map { it.subject }.distinct()
+        } else {
+            // Return all available subjects as fallback
+            Subject.entries
+        }
     }
 
     suspend fun getAllContent(): List<EducationalContent> = db.contentDao().getAll()

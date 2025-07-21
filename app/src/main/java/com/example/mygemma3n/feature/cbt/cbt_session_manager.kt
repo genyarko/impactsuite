@@ -2,9 +2,8 @@ package com.example.mygemma3n.feature.cbt
 
 import com.example.mygemma3n.data.UnifiedGemmaService
 import com.example.mygemma3n.data.TextEmbeddingService
-import com.example.mygemma3n.data.local.VectorDatabase
+import com.example.mygemma3n.data.VectorDatabase
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import javax.inject.Inject
