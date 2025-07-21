@@ -1,20 +1,28 @@
 package com.example.mygemma3n.di
 
 import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import androidx.room.Room
 import androidx.work.WorkManager
+import com.example.mygemma3n.data.AppDatabase
 import com.example.mygemma3n.data.GeminiApiService
 import com.example.mygemma3n.data.ModelDownloadManager
 import com.example.mygemma3n.data.ModelRepository
 import com.example.mygemma3n.data.TextEmbeddingService
+import com.example.mygemma3n.data.TextEmbeddingServiceExtensions
 import com.example.mygemma3n.data.UnifiedGemmaService
+import com.example.mygemma3n.data.VectorDatabase
 import com.example.mygemma3n.data.local.*
 import com.example.mygemma3n.data.local.dao.SubjectDao
+import com.example.mygemma3n.dataStore
 import com.example.mygemma3n.feature.cbt.*
 import com.example.mygemma3n.feature.crisis.EmergencyContactsRepository
 import com.example.mygemma3n.feature.crisis.OfflineMapService
 import com.example.mygemma3n.feature.plant.PlantDatabase
 import com.example.mygemma3n.feature.quiz.EducationalContentRepository
+import com.example.mygemma3n.feature.quiz.EnhancedPromptManager
+import com.example.mygemma3n.feature.quiz.PerformanceOptimizedQuizGenerator
 import com.example.mygemma3n.feature.quiz.QuizDatabase
 import com.example.mygemma3n.feature.quiz.QuizRepository
 import com.example.mygemma3n.remote.EmergencyDatabase
@@ -58,10 +66,10 @@ object AppModule {
         @ApplicationContext context: Context
     ): AppDatabase {
         return Room.databaseBuilder(
-                context,
-                AppDatabase::class.java,
-                "vector_database"
-            ).fallbackToDestructiveMigration(false)
+            context,
+            AppDatabase::class.java,
+            "vector_database"
+        ).fallbackToDestructiveMigration(false)
             .build()
     }
 
@@ -190,18 +198,29 @@ object AppModule {
     fun provideSubjectRepository(dao: SubjectDao): SubjectRepository =
         SubjectRepository(dao)
 
-    @Provides @Singleton
+
+
+    @Provides
+    @Singleton
     fun provideOfflineRAG(
-        vectorDatabase: VectorDatabase,
+        vectorDatabase: OptimizedVectorDatabase,
         subjectRepository: SubjectRepository,
         gemma: UnifiedGemmaService,
-        embedderService: TextEmbeddingService   // ← add this
+        embedderService: TextEmbeddingService,
+        embedderServiceExtensions: TextEmbeddingServiceExtensions // ✅ Add this
     ): OfflineRAG = OfflineRAG(
         vectorDatabase,
         subjectRepository,
         gemma,
-        embedderService
+        embedderService,
+        embedderServiceExtensions // ✅ Pass it in
     )
+
+    @Provides
+    @Singleton
+    fun provideOptimizedVectorDatabase(
+        appDatabase: AppDatabase
+    ): OptimizedVectorDatabase = OptimizedVectorDatabase(appDatabase)
 
 
 
@@ -251,5 +270,42 @@ object AppModule {
     fun provideGeminiApiService(
         @ApplicationContext context: Context
     ): GeminiApiService = GeminiApiService(context)
+
+    @Provides
+    @Singleton
+    fun provideTextEmbeddingServiceExtensions(
+        textEmbeddingService: TextEmbeddingService
+    ): TextEmbeddingServiceExtensions {
+        return TextEmbeddingServiceExtensions(textEmbeddingService)
+    }
+
+
+    @Provides
+    @Singleton
+    fun providePerformanceOptimizedQuizGenerator(
+        gemmaService: UnifiedGemmaService,
+        performanceMonitor: PerformanceMonitor,
+        promptManager: EnhancedPromptManager
+    ): PerformanceOptimizedQuizGenerator = PerformanceOptimizedQuizGenerator(
+        gemmaService,
+        performanceMonitor,
+        promptManager
+    )
+
+    @Module
+    @InstallIn(SingletonComponent::class)
+    object DataStoreModule {
+
+        @Provides
+        @Singleton
+        fun provideDataStore(@ApplicationContext context: Context): DataStore<Preferences> {
+            return context.dataStore
+        }
+    }
+
+    @Provides
+    @Singleton
+    fun provideChatDao(db: AppDatabase): ChatDao = db.chatDao()
+
 
 }

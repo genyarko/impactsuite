@@ -21,7 +21,7 @@ import javax.inject.Singleton
  * Unified Gemma service built on MediaPipe LLM‑Inference.
  * Handles model discovery, packaging quirks, and one‑shot multimodal inference.
  *
- * FIXED: Added proper context management to prevent token overflow crashes.
+ * FIXED: Proper session lifecycle management to prevent JNI crashes.
  */
 @Singleton
 class UnifiedGemmaService @Inject constructor(
@@ -70,8 +70,12 @@ class UnifiedGemmaService @Inject constructor(
         mutex.withLock {
             if (variant == currentModel && llm != null) return@withLock
 
-            // Close any previous engine
-            llm?.close()
+            // Close any previous engine safely
+            try {
+                llm?.close()
+            } catch (e: Exception) {
+                Timber.w(e, "Error closing previous LLM instance")
+            }
             llm = null
             currentModel = null
             currentContextLength = 0
@@ -95,89 +99,123 @@ class UnifiedGemmaService @Inject constructor(
     }
 
     /* --------------------------------------------------------------------- */
-    /* Enhanced text generation with context management                      */
+    /* Enhanced text generation with proper session management              */
     /* --------------------------------------------------------------------- */
 
     suspend fun generateTextAsync(
         prompt: String,
         config: GenerationConfig = GenerationConfig()
     ): String = withContext(Dispatchers.IO) {
-        val inference = llm ?: throw IllegalStateException("Model not initialised")
+        mutex.withLock {
+            val inference = llm ?: throw IllegalStateException("Model not initialised")
 
-        // Estimate prompt tokens (rough approximation: 1 token ≈ 4 characters)
-        val estimatedPromptTokens = prompt.length / 4
+            // Estimate prompt tokens (rough approximation: 1 token ≈ 4 characters)
+            val estimatedPromptTokens = prompt.length / 4
 
-        // If prompt alone exceeds our limit, truncate it
-        val processedPrompt = if (estimatedPromptTokens > maxContextLength) {
-            val maxChars = maxContextLength * 4
-            Timber.w("Prompt too long ($estimatedPromptTokens tokens), truncating to $maxContextLength tokens")
-            prompt.take(maxChars)
-        } else {
-            prompt
-        }
-
-        try {
-            // Always use fresh inference for each call to avoid context accumulation
-            val response = inference.generateResponse(processedPrompt)
-
-            // Reset context tracking
-            currentContextLength = 0
-
-            return@withContext response
-        } catch (e: Exception) {
-            Timber.e(e, "Generation failed, attempting recovery")
-
-            // Try to recover by recreating the inference session
-            try {
-                currentModel?.let { variant ->
-                    initialize(variant)
-                    val recoveredInference = llm ?: throw IllegalStateException("Recovery failed")
-                    return@withContext recoveredInference.generateResponse(processedPrompt)
-                }
-            } catch (recoveryError: Exception) {
-                Timber.e(recoveryError, "Recovery attempt failed")
+            // If prompt alone exceeds our limit, truncate it
+            val processedPrompt = if (estimatedPromptTokens > maxContextLength) {
+                val maxChars = maxContextLength * 4
+                Timber.w("Prompt too long ($estimatedPromptTokens tokens), truncating to $maxContextLength tokens")
+                prompt.take(maxChars)
+            } else {
+                prompt
             }
 
-            throw e
+            try {
+                // Use session-based approach instead of direct generateResponse
+                return@withLock generateWithSessionInternal(
+                    inference,
+                    processedPrompt,
+                    null,
+                    config
+                )
+            } catch (e: Exception) {
+                Timber.e(e, "Generation failed, attempting recovery")
+
+                // Try to recover by recreating the inference session
+                try {
+                    currentModel?.let { variant ->
+                        // Close current instance safely
+                        try {
+                            llm?.close()
+                        } catch (closeError: Exception) {
+                            Timber.w(closeError, "Error during cleanup in recovery")
+                        }
+                        llm = null
+                        currentModel = null
+
+                        initialize(variant)
+                        val recoveredInference = llm ?: throw IllegalStateException("Recovery failed")
+                        return@withLock generateWithSessionInternal(
+                            recoveredInference,
+                            processedPrompt,
+                            null,
+                            config
+                        )
+                    }
+                } catch (recoveryError: Exception) {
+                    Timber.e(recoveryError, "Recovery attempt failed")
+                }
+
+                throw e
+            }
         }
     }
 
     /* --------------------------------------------------------------------- */
-    /* Session-based generation with better context management               */
+    /* Session-based generation with proper lifecycle management            */
     /* --------------------------------------------------------------------- */
 
-    suspend fun generateWithSession(
+    private suspend fun generateWithSessionInternal(
+        inference: LlmInference,
         prompt: String,
-        image: MPImage? = null,
-        config: GenerationConfig = GenerationConfig()
+        image: MPImage?,
+        config: GenerationConfig
     ): String = withContext(Dispatchers.IO) {
-        val inference = llm ?: throw IllegalStateException("Model not initialised")
-
-        // Estimate tokens and check limits
-        val estimatedTokens = prompt.length / 4
-        if (estimatedTokens > maxContextLength) {
-            throw IllegalArgumentException("Prompt too long: $estimatedTokens tokens (max: $maxContextLength)")
-        }
-
         val sessionOpts = LlmInferenceSession.LlmInferenceSessionOptions.builder()
             .setGraphOptions(GraphOptions.builder().setEnableVisionModality(image != null).build())
             .setTopK(config.topK)
             .setTemperature(config.temperature)
             .build()
 
+        var session: LlmInferenceSession? = null
         try {
-            LlmInferenceSession.createFromOptions(inference, sessionOpts).use { session ->
-                session.addQueryChunk(prompt)
-                image?.let { session.addImage(it) }
+            session = LlmInferenceSession.createFromOptions(inference, sessionOpts)
+            session.addQueryChunk(prompt)
+            image?.let { session.addImage(it) }
 
-                val response = session.generateResponse()
-                currentContextLength = 0 // Reset after successful generation
-                return@withContext response
-            }
+            val response = session.generateResponse()
+            currentContextLength = 0 // Reset after successful generation
+            return@withContext response
         } catch (e: Exception) {
             Timber.e(e, "Session generation failed")
             currentContextLength = 0 // Reset on error
             throw e
+        } finally {
+            // Ensure session is properly closed
+            try {
+                session?.close()
+            } catch (e: Exception) {
+                Timber.w(e, "Error closing session")
+            }
+        }
+    }
+
+    suspend fun generateWithSession(
+        prompt: String,
+        image: MPImage? = null,
+        config: GenerationConfig = GenerationConfig()
+    ): String = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val inference = llm ?: throw IllegalStateException("Model not initialised")
+
+            // Estimate tokens and check limits
+            val estimatedTokens = prompt.length / 4
+            if (estimatedTokens > maxContextLength) {
+                throw IllegalArgumentException("Prompt too long: $estimatedTokens tokens (max: $maxContextLength)")
+            }
+
+            return@withLock generateWithSessionInternal(inference, prompt, image, config)
         }
     }
 
@@ -283,7 +321,11 @@ class UnifiedGemmaService @Inject constructor(
     /* --------------------------------------------------------------------- */
 
     suspend fun cleanup() = mutex.withLock {
-        llm?.close()
+        try {
+            llm?.close()
+        } catch (e: Exception) {
+            Timber.w(e, "Error during cleanup")
+        }
         llm = null
         currentModel = null
         currentContextLength = 0

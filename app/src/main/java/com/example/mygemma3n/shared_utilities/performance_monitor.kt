@@ -151,6 +151,15 @@ class PerformanceMonitor @Inject constructor(
         }
     }
 
+    fun trackEvent(name: String, params: Map<String, String>) {
+        analytics.logEvent(name) {
+            params.forEach { (key, value) ->
+                param(key, value)
+            }
+        }
+    }
+
+
     private fun checkCompetitionTargets(metric: InferenceMetric) {
         val warnings = mutableListOf<PerformanceWarning>()
 

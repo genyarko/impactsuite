@@ -1,4 +1,4 @@
-package com.example.mygemma3n.repository
+package com.example.mygemma3n.domain.repository
 
 import android.content.Context
 import androidx.datastore.core.DataStore

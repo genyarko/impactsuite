@@ -1,6 +1,8 @@
-package com.example.mygemma3n.data.local
+package com.example.mygemma3n.data
 
+import android.content.Context
 import androidx.room.*
+import com.example.mygemma3n.data.local.ChatDao
 import com.example.mygemma3n.data.local.dao.SubjectDao
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -9,6 +11,8 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.sqrt
 import com.example.mygemma3n.data.local.entities.SubjectEntity
+import com.example.mygemma3n.data.local.entities.ChatSessionEntity
+import com.example.mygemma3n.data.local.entities.ChatMessageEntity
 
 
 // Room Entity for vector storage
@@ -83,17 +87,23 @@ interface VectorDao {
     suspend fun getCount(): Int
 }
 
-// Room Database
 @Database(
-    entities = [VectorEntity::class, SubjectEntity::class],
-    version = 1,
+    entities = [
+        VectorEntity::class,
+        SubjectEntity::class,
+        ChatSessionEntity::class,   // ✅ Add this
+        ChatMessageEntity::class    // ✅ Add this
+    ],
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
+    abstract fun chatDao(): ChatDao
     abstract fun vectorDao(): VectorDao
-    abstract fun subjectDao(): SubjectDao  // 🔍 Add this line
+    abstract fun subjectDao(): SubjectDao
 }
+
 
 // Vector Database implementation
 @Singleton
@@ -267,7 +277,7 @@ class VectorDatabase @Inject constructor(
         }
     }
 
-    // Update document (preserving embedding)
+
     suspend fun updateContent(
         id: String,
         newContent: String,
@@ -286,7 +296,7 @@ class VectorDatabase @Inject constructor(
         const val DEFAULT_EMBEDDING_DIM = 768 // Gemma 3n embedding dimension
 
         // Database configuration
-        fun create(context: android.content.Context): AppDatabase {
+        fun create(context: Context): AppDatabase {
             return Room.databaseBuilder(
                 context.applicationContext,
                 AppDatabase::class.java,
