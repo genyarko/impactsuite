@@ -54,7 +54,8 @@ class QuizGeneratorViewModel @Inject constructor(
         val conceptCoverage: Map<String, Int> = emptyMap(),
         val reviewQuestionsAvailable: Int = 0,
         val error: String? = null,
-        val isModelInitialized: Boolean = false
+        val isModelInitialized: Boolean = false,
+        val generationPhase: String = "Starting..." // For animation variety
     )
 
     /* ───────── Init ───────── */
@@ -189,18 +190,28 @@ class QuizGeneratorViewModel @Inject constructor(
             return@launch
         }
 
-        _state.update { it.copy(isGenerating = true, questionsGenerated = 0, error = null) }
+        _state.update { it.copy(
+            isGenerating = true,
+            questionsGenerated = 0,
+            error = null,
+            generationPhase = "Preparing..."
+        )}
 
         try {
             // 1. Adaptive difficulty based on performance
+            _state.update { it.copy(generationPhase = "Analyzing your performance...") }
+            delay(500) // Small delay for UI feedback
             val adaptedDifficulty = quizRepo.getAdaptiveDifficulty(subject, _state.value.difficulty)
             _state.update { it.copy(difficulty = adaptedDifficulty) }
 
             // 2. Get learner profile for better question generation
+            _state.update { it.copy(generationPhase = "Loading your profile...") }
+            delay(300)
             val profile = quizRepo.getLearnerProfile(subject)
             _state.update { it.copy(learnerProfile = profile) }
 
             // 3. Get previous questions for deduplication
+            _state.update { it.copy(generationPhase = "Checking question history...") }
             val historyTexts = quizRepo
                 .getQuizzesFor(subject, topic)
                 .flatMap { it.questions }
@@ -212,6 +223,9 @@ class QuizGeneratorViewModel @Inject constructor(
             // 4. Generate questions based on mode
             when (_state.value.mode) {
                 QuizMode.REVIEW -> {
+                    _state.update { it.copy(generationPhase = "Gathering review questions...") }
+                    delay(400)
+
                     // Include some review questions from spaced repetition
                     val reviewQuestions = quizRepo.getQuestionsForSpacedReview(
                         subject,
@@ -227,6 +241,7 @@ class QuizGeneratorViewModel @Inject constructor(
                     // Generate remaining new questions
                     val remaining = questionCount - questions.size
                     if (remaining > 0) {
+                        _state.update { it.copy(generationPhase = "Creating new questions...") }
                         val newQuestions = generateQuestionsSequentially(
                             subject = subject,
                             topic = topic,
@@ -244,6 +259,7 @@ class QuizGeneratorViewModel @Inject constructor(
 
                 else -> {
                     // Normal or adaptive mode - generate all questions
+                    _state.update { it.copy(generationPhase = "Crafting questions...") }
                     val newQuestions = generateQuestionsSequentially(
                         subject = subject,
                         topic = topic,
@@ -262,6 +278,9 @@ class QuizGeneratorViewModel @Inject constructor(
             // Ensure we don't exceed the requested count
             val finalQuestions = questions.take(questionCount)
 
+            _state.update { it.copy(generationPhase = "Finalizing quiz...") }
+            delay(300)
+
             val quiz = Quiz(
                 id = java.util.UUID.randomUUID().toString(),
                 subject = subject,
@@ -279,7 +298,8 @@ class QuizGeneratorViewModel @Inject constructor(
                     isGenerating = false,
                     currentQuiz = quiz,
                     conceptCoverage = conceptsCovered,
-                    questionsGenerated = finalQuestions.size
+                    questionsGenerated = finalQuestions.size,
+                    generationPhase = "Complete!"
                 )
             }
 
@@ -303,10 +323,24 @@ class QuizGeneratorViewModel @Inject constructor(
         val questions = mutableListOf<Question>()
         val allPreviousQuestions = previousQuestions.toMutableList()
 
+        // Update generation phases dynamically
+        val phases = listOf(
+            "Thinking of creative questions...",
+            "Making it challenging...",
+            "Adding variety...",
+            "Ensuring uniqueness...",
+            "Almost there..."
+        )
+
         repeat(count) { idx ->
             try {
                 val questionType = selectQuestionType(idx + 1)
                 Timber.d("Generating question ${idx + 1}/$count of type: $questionType")
+
+                // Update phase
+                _state.update { it.copy(
+                    generationPhase = phases[idx % phases.size]
+                )}
 
                 val q = generateQuestionWithRetry(
                     subject = subject,
@@ -348,7 +382,24 @@ class QuizGeneratorViewModel @Inject constructor(
         viewModelScope.launch {
             val quiz = _state.value.currentQuiz ?: return@launch
             val q = quiz.questions.find { it.id == qId } ?: return@launch
-            val correct = answer.trim().equals(q.correctAnswer.trim(), ignoreCase = true)
+
+            // Enhanced answer checking to handle common variations
+            val normalizedUserAnswer = normalizeAnswer(answer.trim())
+            val normalizedCorrectAnswer = normalizeAnswer(q.correctAnswer.trim())
+
+            // Check for exact match first
+            var correct = normalizedUserAnswer.equals(normalizedCorrectAnswer, ignoreCase = true)
+
+            // For fill-in-blank and short answer, check for acceptable variations
+            if (!correct && (q.questionType == QuestionType.FILL_IN_BLANK ||
+                        q.questionType == QuestionType.SHORT_ANSWER)) {
+                correct = checkAnswerVariations(normalizedUserAnswer, normalizedCorrectAnswer, q)
+            }
+
+            // Log for debugging
+            if (!correct) {
+                Timber.d("Answer mismatch - User: '$normalizedUserAnswer', Expected: '$normalizedCorrectAnswer'")
+            }
 
             // Record the attempt
             quizRepo.recordQuestionAttempt(q, correct)
@@ -378,6 +429,40 @@ class QuizGeneratorViewModel @Inject constructor(
                 }
             )
             _state.update { it.copy(currentQuiz = updated) }
+        }
+    }
+
+    // Helper function to normalize answers
+    private fun normalizeAnswer(answer: String): String {
+        return answer
+            .lowercase()
+            .trim()
+            // Remove common articles
+            .replace(Regex("^(the|a|an)\\s+"), "")
+            // Remove punctuation
+            .replace(Regex("[.,!?;:]"), "")
+            // Normalize whitespace
+            .replace(Regex("\\s+"), " ")
+    }
+
+    // Check for acceptable answer variations
+    private fun checkAnswerVariations(userAnswer: String, correctAnswer: String, question: Question): Boolean {
+        // Common variations for specific question types
+        val variations = when {
+            // Photosynthesis variations
+            correctAnswer.contains("photosynthesis") -> {
+                listOf("photosynthesis", "photo synthesis", "photosynthetic process")
+            }
+            // Geography variations
+            correctAnswer.contains("geography") -> {
+                listOf("geography", "physical geography", "earth science", "geoscience")
+            }
+            // Add more subject-specific variations as needed
+            else -> emptyList()
+        }
+
+        return variations.any { variant ->
+            normalizeAnswer(variant).equals(userAnswer, ignoreCase = true)
         }
     }
 
@@ -568,6 +653,22 @@ class QuizGeneratorViewModel @Inject constructor(
     ): String {
         val (baseInstructions, exampleJson) = getQuestionTypeInstructions(questionType)
 
+        // Enhanced instructions for specific question types to ensure correct answers
+        val typeSpecificInstructions = when (questionType) {
+            QuestionType.FILL_IN_BLANK -> """
+                CRITICAL: The correctAnswer field MUST contain the exact word or phrase that fills the blank.
+                For example, if the question is "_____ is the process of light being converted into chemical energy",
+                then correctAnswer MUST be "Photosynthesis" (not something else).
+            """.trimIndent()
+
+            QuestionType.SHORT_ANSWER -> """
+                CRITICAL: The correctAnswer should be a concise, accurate answer to the question.
+                It should directly answer what is being asked.
+            """.trimIndent()
+
+            else -> ""
+        }
+
         return """
         Create ONE $questionType question about $topic.
         Subject: $subject
@@ -580,6 +681,8 @@ class QuizGeneratorViewModel @Inject constructor(
         - Return ONLY the JSON, no other text
         
         $baseInstructions
+        
+        $typeSpecificInstructions
         
         Example format:
         $exampleJson
@@ -896,8 +999,6 @@ class QuizGeneratorViewModel @Inject constructor(
                 - The statement must be definitively true or false
                 - NO "which of the following" phrasing
                 - options array should be ["True", "False"]
-                
-                Example: "The heart pumps blood throughout the body." (Answer: True)
                 """.trimIndent(),
                 """
                 {
@@ -919,6 +1020,7 @@ class QuizGeneratorViewModel @Inject constructor(
                 - The answer should be 1-3 words maximum
                 - NO multiple choice phrasing
                 - options array should be empty []
+                - CRITICAL: correctAnswer MUST be the exact word/phrase that fills the blank
                 
                 Example: "The process by which plants make food using sunlight is called _____." (Answer: photosynthesis)
                 """.trimIndent(),
@@ -941,6 +1043,7 @@ class QuizGeneratorViewModel @Inject constructor(
                 - Answer should be 1-2 sentences
                 - NO "which of the following" phrasing
                 - options array should be empty []
+                - correctAnswer should directly answer the question
                 
                 Example: "Explain the main function of red blood cells."
                 """.trimIndent(),

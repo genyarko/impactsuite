@@ -1,10 +1,24 @@
 package com.example.mygemma3n.feature.quiz
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -17,9 +31,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -378,12 +396,48 @@ fun EnhancedQuizSetupScreen(
 
 /* Enhanced progress indicator with mode info ----------------------------------- */
 
+/* Enhanced progress indicator with mode info ----------------------------------- */
+
 @Composable
 private fun GenerationProgress(
     done: Int,
     mode: QuizMode,
     modifier: Modifier = Modifier
 ) {
+    val state by (hiltViewModel<QuizGeneratorViewModel>()).state.collectAsStateWithLifecycle()
+
+    // Animation states for creative loading
+    val infiniteTransition = rememberInfiniteTransition(label = "loading")
+    val bookRotation by infiniteTransition.animateFloat(
+        initialValue = -15f,
+        targetValue = 15f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "book_rotation"
+    )
+
+    val pencilOffset by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 20f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1500, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pencil_offset"
+    )
+
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 0.9f,
+        targetValue = 1.1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse"
+    )
+
     Column(
         modifier = modifier
             .verticalScroll(rememberScrollState())
@@ -392,24 +446,146 @@ private fun GenerationProgress(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        CircularProgressIndicator(
-            modifier = Modifier.size(64.dp)
-        )
+        // Creative animated icon
+        Box(
+            modifier = Modifier
+                .size(120.dp)
+                .padding(16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            // Background circle with pulse
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .scale(pulseScale)
+                    .clip(CircleShape)
+                    .background(
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                    )
+            )
+
+            // Book icon rotating
+            Icon(
+                Icons.Default.MenuBook,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(48.dp)
+                    .rotate(bookRotation)
+                    .offset(y = (-10).dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+
+            // Pencil writing animation
+            Icon(
+                Icons.Default.Edit,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(32.dp)
+                    .offset(x = pencilOffset.dp, y = pencilOffset.dp)
+                    .rotate(-45f),
+                tint = MaterialTheme.colorScheme.secondary
+            )
+
+            // Sparkles around
+            repeat(3) { index ->
+                val sparkleRotation by infiniteTransition.animateFloat(
+                    initialValue = 0f,
+                    targetValue = 360f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(3000 + index * 500, easing = LinearEasing)
+                    ),
+                    label = "sparkle_$index"
+                )
+
+                Icon(
+                    Icons.Default.AutoAwesome,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(16.dp)
+                        .offset(x = 40.dp)
+                        .rotate(sparkleRotation + index * 120f),
+                    tint = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.7f)
+                )
+            }
+        }
+
         Spacer(Modifier.height(24.dp))
+
+        // Dynamic status text with animation
+        AnimatedContent(
+            targetState = state.generationPhase,
+            transitionSpec = {
+                fadeIn() + expandVertically() togetherWith fadeOut() + shrinkVertically()
+            },
+            label = "phase"
+        ) { phase ->
+            Text(
+                text = phase,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 32.dp)
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+
         Text(
             when (mode) {
-                QuizMode.NORMAL -> "Generating quiz questions..."
-                QuizMode.REVIEW -> "Preparing review questions..."
-                QuizMode.ADAPTIVE -> "Analyzing your progress and generating adaptive questions..."
+                QuizMode.NORMAL -> "Creating a fresh quiz just for you"
+                QuizMode.REVIEW -> "Finding questions you haven't seen in a while"
+                QuizMode.ADAPTIVE -> "Tailoring difficulty to your skill level"
             },
             style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
             modifier = Modifier.padding(horizontal = 32.dp)
         )
-        Spacer(Modifier.height(16.dp))
-        Text(
-            "Questions created: $done",
-            style = MaterialTheme.typography.bodyMedium
-        )
+
+        Spacer(Modifier.height(24.dp))
+
+        // Progress with animated questions counter
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth(0.8f)
+                    .height(8.dp)
+                    .clip(RoundedCornerShape(4.dp)),
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                strokeCap = ProgressIndicatorDefaults.LinearStrokeCap
+            )
+
+            // Questions counter bubble
+            if (done > 0) {
+                Card(
+                    modifier = Modifier.offset(y = 24.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "$done questions ready",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
