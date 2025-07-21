@@ -6,11 +6,13 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -18,12 +20,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @Composable
 fun LiveCaptionScreen(
     viewModel: LiveCaptionViewModel = hiltViewModel()
 ) {
-    val state by viewModel.captionState.collectAsState()
+    val state by viewModel.captionState.collectAsStateWithLifecycle()
 
     Box(
         modifier = Modifier
@@ -141,7 +144,7 @@ fun LiveCaptionScreen(
                 )
 
                 Icon(
-                    Icons.Default.ArrowForward,
+                    Icons.AutoMirrored.Filled.ArrowForward,
                     contentDescription = null,
                     tint = Color.White,
                     modifier = Modifier.padding(horizontal = 8.dp)
@@ -272,12 +275,12 @@ fun LanguagePickerDialog(
                     modifier = Modifier.padding(16.dp)
                 )
 
-                Divider()
+                HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
 
                 LazyColumn(
                     modifier = Modifier.weight(1f)
                 ) {
-                    items(Language.values().toList()) { language ->
+                    items(Language.entries) { language ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -307,7 +310,7 @@ fun LanguagePickerDialog(
                     }
                 }
 
-                Divider()
+                HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
 
                 TextButton(
                     onClick = onDismiss,
