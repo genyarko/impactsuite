@@ -38,6 +38,7 @@ import com.example.mygemma3n.feature.caption.LiveCaptionScreen
 import com.example.mygemma3n.feature.quiz.QuizScreen
 import com.example.mygemma3n.feature.plant.PlantScannerScreen
 import com.example.mygemma3n.feature.plant.PlantScannerViewModel
+import com.example.mygemma3n.feature.summarizer.SummarizerScreen
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -340,6 +341,7 @@ fun Gemma3nNavigation(
         composable("live_caption")   { LiveCaptionScreen() }
         composable("quiz_generator") { QuizScreen() }
         composable("cbt_coach")      { CBTCoachScreen() }
+        composable("summarizer")     { SummarizerScreen() }
 
         // ───── Chat list first ───────────────────────────────────────────
         composable("chat_list") {
@@ -505,6 +507,15 @@ fun HomeScreen(
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("Chat")
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = { navController.navigate("summarizer") },
+            enabled = isGemmaInitialized,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Document Summarizer")
         }
 
         Spacer(modifier = Modifier.height(8.dp))
