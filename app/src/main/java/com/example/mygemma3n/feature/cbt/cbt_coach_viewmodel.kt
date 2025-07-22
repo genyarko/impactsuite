@@ -365,7 +365,7 @@ class CBTCoachViewModel @Inject constructor(
         }
     }
 
-    // Keep existing methods but with timeout protection
+
     private suspend fun generateCBTResponseWithContext(
         userInput: String,
         emotionResult: EmotionDetector.EmotionDetectionResult,
