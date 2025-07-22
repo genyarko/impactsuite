@@ -182,6 +182,8 @@ dependencies {
 
 // JSON Parsing
     implementation(libs.gson)
+    implementation(libs.pdfbox)
+    implementation(libs.poi.ooxml)
 
 // DataStore
     implementation(libs.androidx.datastore.preferences)
