@@ -433,9 +433,10 @@ fun HomeScreen(
     ) {
         // App Title
         Text(
-            text = "Gemma 3n Impact Suite",
+            text = "G3N",
             style = MaterialTheme.typography.headlineLarge,
-            fontWeight = FontWeight.Bold
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
         )
 
         Spacer(modifier = Modifier.height(32.dp))

@@ -79,7 +79,7 @@ class AudioCaptureService : Service() {
             return
         }
 
-        android.util.Log.d("AudioCaptureService", "startCapture: Starting audio capture")
+        Timber.tag("AudioCaptureService").d("startCapture: Starting audio capture")
         _isRunning.value = true
 
         // Start foreground service with notification
@@ -112,12 +112,7 @@ class AudioCaptureService : Service() {
         _audioDataFlow.value = null
 
         // Stop foreground service
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
-        }
+        stopForeground(STOP_FOREGROUND_REMOVE)
 
         stopSelf()
     }
@@ -164,12 +159,12 @@ class AudioCaptureService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Live Caption Active")
             .setContentText("Capturing audio for live transcription")
-            .setSmallIcon(R.drawable.ic_launcher_background)
+            .setSmallIcon(R.drawable.logo)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
             .addAction(
-                R.drawable.ic_launcher_foreground,
+                R.drawable.logo,
                 "Stop",
                 stopPendingIntent
             )
