@@ -6,9 +6,14 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material3.*
@@ -17,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -32,6 +38,7 @@ fun LiveCaptionScreen(
     val state by viewModel.captionState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
+    var textInput by remember { mutableStateOf("") }
 
     // Auto-scroll to bottom when new items are added
     LaunchedEffect(state.transcriptHistory.size) {
@@ -90,7 +97,7 @@ fun LiveCaptionScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(bottom = 80.dp) // Space for floating controls
+                contentPadding = PaddingValues(bottom = 140.dp) // More space for text input + FAB
             ) {
                 if (state.transcriptHistory.isEmpty() && !state.isListening) {
                     item {
@@ -168,7 +175,76 @@ fun LiveCaptionScreen(
             }
         }
 
-        // Floating action button for control
+        // Text input field at the bottom
+        Card(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 80.dp) // Above FAB
+                .imePadding(), // Adjust for keyboard
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
+            ),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextField(
+                    value = textInput,
+                    onValueChange = { textInput = it },
+                    modifier = Modifier.weight(1f),
+                    placeholder = {
+                        Text(
+                            "Type to translate...",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
+                    },
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                    ),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        imeAction = ImeAction.Send
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onSend = {
+                            if (textInput.isNotBlank()) {
+                                viewModel.submitTextInput(textInput)
+                                textInput = ""
+                            }
+                        }
+                    )
+                )
+
+                // Send button
+                IconButton(
+                    onClick = {
+                        if (textInput.isNotBlank()) {
+                            viewModel.submitTextInput(textInput)
+                            textInput = ""
+                        }
+                    },
+                    enabled = textInput.isNotBlank()
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "Send",
+                        tint = if (textInput.isNotBlank())
+                            MaterialTheme.colorScheme.primary
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                    )
+                }
+            }
+        }
+
+        // Floating action button for voice control
         FloatingActionButton(
             onClick = {
                 if (state.isListening) {
@@ -195,8 +271,8 @@ fun LiveCaptionScreen(
         if (state.isListening) {
             Card(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 90.dp),
+                    .align(Alignment.TopEnd)
+                    .padding(top = 70.dp, end = 16.dp), // Moved to top-right
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
                 )
@@ -243,11 +319,26 @@ fun TranscriptItem(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(
-                        text = sourceLanguage.displayName,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Show icon based on source
+                        Icon(
+                            imageVector = if (entry.source == TranscriptSource.VOICE)
+                                Icons.Default.Mic
+                            else
+                                Icons.Default.Keyboard,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
+                        Text(
+                            text = sourceLanguage.displayName,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
+                    }
                     Text(
                         text = sdf.format(Date(entry.timestamp)),
                         style = MaterialTheme.typography.labelSmall,

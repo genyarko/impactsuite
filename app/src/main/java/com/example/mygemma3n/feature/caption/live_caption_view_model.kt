@@ -242,8 +242,11 @@ class LiveCaptionViewModel @Inject constructor(
 
         Timber.d("Got transcript: '$transcript'")
 
-        // Add to history instead of concatenating
-        val newEntry = TranscriptEntry(transcript = transcript)
+        // Add to history with VOICE source
+        val newEntry = TranscriptEntry(
+            transcript = transcript,
+            source = TranscriptSource.VOICE
+        )
         _state.update {
             it.copy(
                 currentTranscript = transcript,
@@ -341,6 +344,44 @@ class LiveCaptionViewModel @Inject constructor(
             viewModelScope.launch { chatRepository.addMessage(sid, ChatMessage.AI(content = text)) }
         }
     }
+
+    /* ───────────────────────────────────────────────────────────── */
+    /*  Text input                                                   */
+    /* ───────────────────────────────────────────────────────────── */
+    fun submitTextInput(text: String) {
+        if (text.isBlank()) return
+
+        viewModelScope.launch {
+            // Create or ensure we have a session
+            if (sessionId == null) {
+                sessionId = chatRepository.createNewSession(
+                    title = "Text translation ${sdf.format(Date())}"
+                )
+            }
+
+            // Add to history with TYPED source
+            val newEntry = TranscriptEntry(
+                transcript = text,
+                source = TranscriptSource.TYPED
+            )
+            _state.update {
+                it.copy(
+                    currentTranscript = text,
+                    transcriptHistory = it.transcriptHistory + newEntry
+                )
+            }
+
+            // Persist to chat
+            persistUserMessage(text)
+
+            // Translate if needed
+            if (shouldTranslate()) {
+                translateAndPersist(text)
+            }
+        }
+    }
+
+
 
     /* ───────────────────────────────────────────────────────────── */
     /*  UTILS                                                       */

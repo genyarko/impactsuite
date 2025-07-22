@@ -262,8 +262,16 @@ data class CaptionState(
 data class TranscriptEntry(
     val transcript: String,
     val translation: String? = null,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val source: TranscriptSource = TranscriptSource.VOICE
 )
 // Extension function for Flow<FloatArray>
 fun Flow<FloatArray>.chunked(size: Int): Flow<FloatArray> =
     AudioUtils.chunked(this, size)
+
+
+
+enum class TranscriptSource {
+    VOICE,
+    TYPED
+}
