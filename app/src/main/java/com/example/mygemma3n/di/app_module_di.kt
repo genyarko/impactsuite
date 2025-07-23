@@ -27,9 +27,10 @@ import com.example.mygemma3n.feature.quiz.QuizDatabase
 import com.example.mygemma3n.feature.quiz.QuizRepository
 import com.example.mygemma3n.remote.EmergencyDatabase
 import com.example.mygemma3n.shared_utilities.*
+import com.google.firebase.Firebase
 import com.google.firebase.analytics.FirebaseAnalytics
-import com.google.firebase.analytics.ktx.analytics
-import com.google.firebase.ktx.Firebase
+import com.google.firebase.analytics.analytics
+
 import com.google.gson.Gson
 import dagger.Module
 import dagger.Provides

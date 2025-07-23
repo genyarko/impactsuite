@@ -5,16 +5,16 @@ assetDeliveryKtx = "2.3.0"
 cameraView = "1.4.2"
 coreSplashscreen = "1.0.1"
 datastorePreferences = "1.1.7"
-datastorePreferencesVersion = "1.1.0"
+datastorePreferencesVersion = "1.1.7"
 edgeLitert = "0.9.0"
-firebaseBom = "33.16.0"
+firebaseBom = "34.0.0"
 gax = "2.68.1"
 generativeai = "0.9.0"
 googleAuthLibraryOauth2Http = "1.37.1"
 googleCloudSpeech = "4.63.0"
 gson = "2.13.1"
-hiltAndroidTesting = "2.56.2"
-hiltCompiler = "2.56.2"
+hiltAndroidTesting = "2.57"
+hiltCompiler = "2.57"
 hiltCompilerVersion = "1.2.0"
 kotlin = "2.2.0"
 coreKtx = "1.16.0"
@@ -24,15 +24,19 @@ espressoCore = "3.6.1"
 kotlinxCoroutinesAndroid = "1.10.2"
 kotlinxCoroutinesPlayServices = "1.10.2"
 leakcanaryAndroid = "2.14"
-lifecycleRuntimeKtx = "2.9.1"
+lifecycleRuntimeKtx = "2.9.2"
 activityCompose = "1.10.1"
-composeBom = "2025.06.01"
-litertSupport = "1.3.0"
-mapsCompose = "6.6.0"
+composeBom = "2025.07.00"
+litertSupport = "1.4.0"
+mapsCompose = "6.7.0"
 media3Exoplayer = "1.7.1"
-okhttp = "4.12.0"
+okhttp = "5.1.0"
+openpdf = "2.2.4"
+pdfboxAndroid = "2.0.27.0"
+pdfboxAndroidVersion = "2.0.27.0"
 playServicesLocation = "21.3.0"
 playServicesMaps = "19.2.0"
+poiOoxml = "5.4.1"
 roomCompiler = "2.7.2"
 roomKtx = "2.7.2"
 roomKtxVersion = "2.7.2"
@@ -40,11 +44,11 @@ roomRuntime = "2.7.2"
 sttAndroid = "v1.4.0"
 supabaseKt = "0.11.0"
 hiltCommon = "1.2.0"
-playServicesMeasurementApi = "22.5.0"
+playServicesMeasurementApi = "23.0.0"
 localagentsRag = "0.2.0"
 media3CommonKtx = "1.7.1"
 tasksCore = "0.20230731"
-tasksCoreVersion = "0.10.24"
+tasksCoreVersion = "0.20230731"
 tasksGenai = "0.10.25"
 tasksText = "0.20230731"
 tensorflowLite = "2.17.0"
@@ -53,20 +57,22 @@ tensorflowLiteGpuApi = "2.17.0"
 tensorflowLiteMetadata = "0.5.0"
 tensorflowLiteSelectTfOps = "2.16.1"
 tensorflowLiteSupport = "0.5.0"
+textRecognition = "16.0.1"
 whisperCpp = "android-v1.5.4"
 workRuntimeKtx = "2.10.2"
 hiltWork = "1.2.0"
-navigationComposeJvmstubs = "2.9.0"
-firebaseAnalytics = "22.5.0"
-firebaseCrashlytics = "19.4.4"
+navigationComposeJvmstubs = "2.9.2"
+firebaseAnalytics = "23.0.0"
+firebaseCrashlytics = "20.0.0"
 timber = "5.0.1"
-litert = "1.3.0"
-litertGpu = "1.3.0"
-appcompat = "1.6.1"
-material = "1.10.0"
+litert = "1.4.0"
+litertGpu = "1.4.0"
+appcompat = "1.7.1"
+material = "1.12.0"
 playServicesMlkitSubjectSegmentation = "16.0.0-beta1"
-pdfbox = "2.0.30"
-poi = "5.2.3"
+pdfbox = "3.0.5"
+poi = "5.4.1"
+firebase-perf = "21.0.2"
 
 [libraries]
 accompanist-permissions = { module = "com.google.accompanist:accompanist-permissions", version.ref = "accompanistPermissions" }
@@ -123,8 +129,11 @@ leakcanary-android = { module = "com.squareup.leakcanary:leakcanary-android", ve
 litert-support = { module = "com.google.ai.edge.litert:litert-support", version.ref = "litertSupport" }
 maps-compose = { module = "com.google.maps.android:maps-compose", version.ref = "mapsCompose" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+openpdf = { module = "com.github.librepdf:openpdf", version.ref = "openpdf" }
+pdfbox-android = { module = "org.apache.pdfbox:pdfbox-android", version.ref = "pdfboxAndroid" }
 play-services-location = { module = "com.google.android.gms:play-services-location", version.ref = "playServicesLocation" }
 play-services-maps = { module = "com.google.android.gms:play-services-maps", version.ref = "playServicesMaps" }
+poi-ooxml-v523 = { module = "org.apache.poi:poi-ooxml", version.ref = "poiOoxml" }
 stt-android = { module = "com.github.coqui-ai:STT-Android", version.ref = "sttAndroid" }
 supabase-kt = { module = "io.supabase:supabase-kt", version.ref = "supabaseKt" }
 androidx-hilt-common = { group = "androidx.hilt", name = "hilt-common", version.ref = "hiltCommon" }
@@ -144,15 +153,16 @@ tensorflow-lite-gpu-api = { module = "org.tensorflow:tensorflow-lite-gpu-api", v
 tensorflow-lite-metadata = { module = "org.tensorflow:tensorflow-lite-metadata", version.ref = "tensorflowLiteMetadata" }
 tensorflow-lite-select-tf-ops = { module = "org.tensorflow:tensorflow-lite-select-tf-ops", version.ref = "tensorflowLiteSelectTfOps" }
 tensorflow-lite-support = { module = "org.tensorflow:tensorflow-lite-support", version.ref = "tensorflowLiteSupport" }
+text-recognition = { module = "com.google.mlkit:text-recognition", version.ref = "textRecognition" }
 timber = { module = "com.jakewharton.timber:timber", version.ref = "timber" }
 litert = { group = "com.google.ai.edge.litert", name = "litert", version.ref = "litert" }
 litert-gpu = { group = "com.google.ai.edge.litert", name = "litert-gpu", version.ref = "litertGpu" }
-androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
-material = { group = "com.google.android.material", name = "material", version.ref = "material" }
-whisper-cpp = { module = "com.github.ggerganov:whisper.cpp", version.ref = "whisperCpp" }
 play-services-mlkit-subject-segmentation = { group = "com.google.android.gms", name = "play-services-mlkit-subject-segmentation", version.ref = "playServicesMlkitSubjectSegmentation" }
 pdfbox = { module = "org.apache.pdfbox:pdfbox", version.ref = "pdfbox" }
 poi-ooxml = { module = "org.apache.poi:poi-ooxml", version.ref = "poi" }
+firebase-perf = { module = "com.google.firebase:firebase-perf", version.ref = "firebase-perf" }
+tom_roush-pdfbox-android = { module = "com.tom_roush:pdfbox-android", version.ref = "pdfboxAndroidVersion" }
+
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
