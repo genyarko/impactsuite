@@ -35,10 +35,16 @@ class SummarizerViewModel @Inject constructor(
 
     private var originalText: String? = null
 
-    // Performance optimization: Process text in chunks
-    private val CHUNK_SIZE = 1000 // Characters per chunk for better performance
-    private val MAX_TEXT_LENGTH = 10000 // Maximum text to process
-    private val SUMMARY_CHUNK_SIZE = 500 // Smaller chunks for summary generation
+    // Token-aware chunk sizes (assuming ~4 chars per token)
+    private val MAX_PROMPT_TOKENS = 400 // Leave room for instructions
+    private val MAX_INPUT_CHARS = MAX_PROMPT_TOKENS * 4 - 200 // ~1400 chars for content
+    private val EXTRACTIVE_SUMMARY_LENGTH = 1200 // First pass: extract key sentences
+    private val FINAL_SUMMARY_LENGTH = 800 // Final summary length
+    private val MAX_TEXT_LENGTH = 6000 // Further reduced to prevent truncation
+    private val SENTENCE_CHUNK_SIZE = MAX_INPUT_CHARS // Token-aware chunking
+
+    // Cache for model initialization
+    private var isModelReady = false
 
     /* ---------- Public API ---------- */
 
@@ -52,6 +58,12 @@ class SummarizerViewModel @Inject constructor(
             )}
 
             try {
+                // Pre-initialize model if not ready
+                if (!isModelReady) {
+                    _state.update { it.copy(processingProgress = 0.1f) }
+                    initializeModelIfNeeded()
+                }
+
                 // Extract text with progress updates
                 val text = extractTextWithProgress(uri)
                 if (text.isBlank()) {
@@ -62,12 +74,10 @@ class SummarizerViewModel @Inject constructor(
                 val processedText = preprocessText(text)
                 Timber.d("Extracted ${text.length} characters, processed to ${processedText.length}")
 
-                // Update progress
-                _state.update { it.copy(processingProgress = 0.5f) }
+                _state.update { it.copy(processingProgress = 0.4f) }
 
-                // Generate summary with chunking for better performance
-                val summary = generateOptimizedSummary(processedText)
-                _state.update { it.copy(processingProgress = 0.9f) }
+                // Use hierarchical summarization for better performance
+                val summary = generateHierarchicalSummary(processedText)
 
                 val name = uri.lastPathSegment?.substringAfterLast('/') ?: "document"
 
@@ -93,6 +103,13 @@ class SummarizerViewModel @Inject constructor(
         }
     }
 
+    private suspend fun initializeModelIfNeeded() {
+        if (!gemmaService.isInitialized()) {
+            gemmaService.initializeBestAvailable()
+            isModelReady = true
+        }
+    }
+
     fun clear() {
         originalText = null
         _state.value = SummarizerState()
@@ -106,7 +123,7 @@ class SummarizerViewModel @Inject constructor(
         }
     }
 
-    /* ---------- Text Extraction with Alternative PDF Support ---------- */
+    /* ---------- Text Extraction (unchanged) ---------- */
 
     private suspend fun extractTextWithProgress(uri: Uri): String = withContext(Dispatchers.IO) {
         val mime = context.contentResolver.getType(uri) ?: ""
@@ -172,25 +189,27 @@ class SummarizerViewModel @Inject constructor(
         return BufferedReader(InputStreamReader(inputStream)).use { it.readText() }
     }
 
-    /* ---------- Text Processing & Optimization ---------- */
+    /* ---------- Optimized Text Processing ---------- */
 
     private fun preprocessText(text: String): String {
-        // Clean and normalize text for better processing
         return text
-            .replace(Regex("\\s+"), " ") // Normalize whitespace
-            .replace(Regex("[\\x00-\\x1F\\x7F-\\x9F]"), "") // Remove control characters
+            .replace(Regex("\\s+"), " ")
+            .replace(Regex("[\\x00-\\x1F\\x7F-\\x9F]"), "")
             .trim()
-            .take(MAX_TEXT_LENGTH) // Limit text length for performance
+            .take(MAX_TEXT_LENGTH) // Reduced for faster processing
     }
 
     suspend fun processText(text: String) {
         _state.update { it.copy(isLoading = true, error = null, processingProgress = 0f) }
         try {
-            val processedText = preprocessText(text)
-            _state.update { it.copy(processingProgress = 0.5f) }
+            if (!isModelReady) {
+                initializeModelIfNeeded()
+            }
 
-            val summary = generateOptimizedSummary(processedText)
-            _state.update { it.copy(processingProgress = 0.9f) }
+            val processedText = preprocessText(text)
+            _state.update { it.copy(processingProgress = 0.3f) }
+
+            val summary = generateHierarchicalSummary(processedText)
 
             _state.update {
                 it.copy(
@@ -210,70 +229,136 @@ class SummarizerViewModel @Inject constructor(
         }
     }
 
-    /* ---------- Optimized Gemma Generation ---------- */
+    /* ---------- Hierarchical Summarization Strategy ---------- */
 
-    private suspend fun generateOptimizedSummary(text: String): String = coroutineScope {
-        if (!gemmaService.isInitialized()) {
-            gemmaService.initializeBestAvailable()
+    private suspend fun generateHierarchicalSummary(text: String): String = coroutineScope {
+        Timber.d("Starting hierarchical summarization for ${text.length} characters")
+
+        // Step 1: For short texts, summarize directly
+        if (text.length <= FINAL_SUMMARY_LENGTH * 2) {
+            _state.update { it.copy(processingProgress = 0.7f) }
+            return@coroutineScope generateDirectSummary(text)
         }
 
-        // For short texts, summarize directly
-        if (text.length <= SUMMARY_CHUNK_SIZE * 2) {
-            val prompt = buildString {
-                appendLine("Summarize this text in 2-3 concise sentences:")
-                appendLine()
-                appendLine(text)
+        // Step 2: Extractive summarization first (faster)
+        _state.update { it.copy(processingProgress = 0.5f) }
+        val extractiveSummary = performExtractiveSummary(text)
+        Timber.d("Extractive summary: ${extractiveSummary.length} characters")
+
+        // Step 3: Abstractive summarization on extracted content
+        _state.update { it.copy(processingProgress = 0.8f) }
+        val finalSummary = if (extractiveSummary.length > FINAL_SUMMARY_LENGTH) {
+            generateAbstractiveSummary(extractiveSummary)
+        } else {
+            generateDirectSummary(extractiveSummary)
+        }
+
+        return@coroutineScope finalSummary
+    }
+
+    private fun performExtractiveSummary(text: String): String {
+        // Simple sentence scoring and extraction
+        val sentences = text.split(Regex("[.!?]+")).filter { it.trim().length > 20 }
+
+        if (sentences.size <= 5) return text
+
+        // Score sentences by keyword frequency and position
+        val wordFreq = text.lowercase()
+            .split(Regex("\\W+"))
+            .filter { it.length > 3 }
+            .groupingBy { it }
+            .eachCount()
+
+        val scoredSentences = sentences.mapIndexed { index, sentence ->
+            val words = sentence.lowercase().split(Regex("\\W+"))
+            val score = words.sumOf { wordFreq[it] ?: 0 } / words.size.toDouble() +
+                    (if (index < sentences.size * 0.3) 0.5 else 0.0) // Boost early sentences
+            sentence to score
+        }.sortedByDescending { it.second }
+
+        // Take top sentences up to target length (token-aware)
+        val selectedSentences = mutableListOf<String>()
+        var currentLength = 0
+
+        for ((sentence, _) in scoredSentences) {
+            val sentenceLength = sentence.length
+            if (currentLength + sentenceLength <= EXTRACTIVE_SUMMARY_LENGTH) {
+                selectedSentences.add(sentence.trim())
+                currentLength += sentenceLength
             }
-
-            return@coroutineScope gemmaService.generateTextAsync(
-                prompt,
-                UnifiedGemmaService.GenerationConfig(
-                    maxTokens = 150,
-                    temperature = 0.3f, // Lower temperature for more focused summaries
-                    topK = 20
-                )
-            ).trim()
+            // Stop early if we have enough quality content
+            if (selectedSentences.size >= 8 || currentLength >= EXTRACTIVE_SUMMARY_LENGTH * 0.8) break
         }
 
-        // For longer texts, use chunking strategy
-        val chunks = text.chunked(SUMMARY_CHUNK_SIZE)
-        val chunkSummaries = mutableListOf<String>()
+        return selectedSentences.joinToString(". ") + "."
+    }
 
-        // Process chunks in parallel for better performance
-        val deferredSummaries = chunks.map { chunk ->
-            async(Dispatchers.Default) {
-                val prompt = "Summarize in 1-2 sentences: $chunk"
-                gemmaService.generateTextAsync(
-                    prompt,
-                    UnifiedGemmaService.GenerationConfig(
-                        maxTokens = 80,
-                        temperature = 0.3f
-                    )
-                ).trim()
-            }
-        }
+    private suspend fun generateDirectSummary(text: String): String {
+        // Ensure we don't exceed token limits
+        val truncatedText = if (text.length > MAX_INPUT_CHARS) {
+            text.take(MAX_INPUT_CHARS) + "..."
+        } else text
 
-        chunkSummaries.addAll(deferredSummaries.awaitAll())
+        val prompt = "Summarize in 3-4 sentences: $truncatedText"
 
-        // Combine chunk summaries into final summary
-        val combinedSummary = chunkSummaries.joinToString(" ")
-        val finalPrompt = buildString {
-            appendLine("Create a coherent 3-4 sentence summary from these points:")
-            appendLine()
-            appendLine(combinedSummary)
-        }
+        Timber.d("Direct summary prompt length: ${prompt.length} chars (~${prompt.length/4} tokens)")
 
-        return@coroutineScope gemmaService.generateTextAsync(
-            finalPrompt,
+        return gemmaService.generateTextAsync(
+            prompt,
             UnifiedGemmaService.GenerationConfig(
-                maxTokens = 200,
-                temperature = 0.4f
+                maxTokens = 100, // Conservative token count
+                temperature = 0.2f,
+                topK = 15
             )
         ).trim()
     }
+
+    private suspend fun generateAbstractiveSummary(extractedText: String): String {
+        if (extractedText.length <= MAX_INPUT_CHARS) {
+            return generateDirectSummary(extractedText)
+        }
+
+        val chunks = extractedText.chunked(MAX_INPUT_CHARS)
+        val chunkSummaries = mutableListOf<String>()
+
+        Timber.d("Processing ${chunks.size} chunks sequentially to avoid model reinitialization")
+
+        for (chunk in chunks.take(3)) {          // limit to 3 chunks
+            val summary = withContext(Dispatchers.Default) {  // ✅ replaces async/await
+                val prompt = "Key points in 2 sentences: $chunk"
+                Timber.d("Chunk prompt length: ${prompt.length} chars (~${prompt.length / 4} tokens)")
+
+                gemmaService.generateTextAsync(
+                    prompt,
+                    UnifiedGemmaService.GenerationConfig(
+                        maxTokens = 60,
+                        temperature = 0.2f
+                    )
+                ).trim()
+            }
+            chunkSummaries.add(summary)
+        }
+
+        val combinedSummary = chunkSummaries.joinToString(" ")
+        val finalText = if (combinedSummary.length > MAX_INPUT_CHARS) {
+            combinedSummary.take(MAX_INPUT_CHARS) + "..."
+        } else combinedSummary
+
+        val finalPrompt = "Combine into 3-4 sentences: $finalText"
+        Timber.d("Final prompt length: ${finalPrompt.length} chars (~${finalPrompt.length / 4} tokens)")
+
+        return gemmaService.generateTextAsync(
+            finalPrompt,
+            UnifiedGemmaService.GenerationConfig(
+                maxTokens = 80,
+                temperature = 0.3f
+            )
+        ).trim()
+    }
+
 }
 
-/* ---------- Simplified State for Summary Only ---------- */
+/* ---------- State Definition ---------- */
 
 data class SummarizerState(
     val fileName: String? = null,

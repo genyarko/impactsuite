@@ -296,7 +296,7 @@ private fun LoadingCard(progress: Float) {
                 text = when {
                     progress < 0.3f -> "Extracting text..."
                     progress < 0.6f -> "Generating summary..."
-                    progress < 0.9f -> "Creating questions..."
+                    progress < 0.9f -> "Getting there..."
                     else -> "Finalizing..."
                 },
                 style = MaterialTheme.typography.bodyLarge,
