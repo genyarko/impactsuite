@@ -14,18 +14,34 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.LocalHospital
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Quiz
+import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Summarize
 import androidx.compose.material3.*
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.datastore.preferences.core.edit
@@ -70,6 +86,7 @@ import timber.log.Timber
 import javax.inject.Inject
 import com.example.mygemma3n.di.GemmaServiceEntryPoint
 import com.example.mygemma3n.feature.chat.ChatListScreen
+import com.example.mygemma3n.feature.tutor.TutorScreen
 import com.example.mygemma3n.ui.components.InitializationScreen
 import com.example.mygemma3n.ui.settings.QuizSettingsScreen
 import kotlinx.coroutines.async
@@ -363,6 +380,11 @@ fun Gemma3nNavigation(
         composable("settings") {
             QuizSettingsScreen(onNavigateBack = { navController.popBackStack() })
         }
+        composable("tutor") {
+            TutorScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
         composable("api_settings") {
             val context = LocalContext.current
             val speechService = remember {
@@ -392,7 +414,7 @@ fun HomeScreen(
     val gemmaModelName = remember { unifiedGemmaService.getCurrentModel()?.displayName }
 
     // Only check model files once
-    var downloadProgress by remember { mutableStateOf(100f) }
+    var downloadProgress by remember { mutableFloatStateOf(100f) }
     var isModelReady by remember { mutableStateOf(true) }
     var isPreparingModel by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -401,19 +423,15 @@ fun HomeScreen(
 
     // Only check model availability if not already checked
     LaunchedEffect(Unit) {
-        // Since we already initialized in MainActivity, just verify the state
         if (isGemmaInitialized) {
-            // Model is already initialized, just update UI
             isModelReady = true
             downloadProgress = 100f
 
-            // Get list of available models for display
             val assets = ctx.assets.list("models")?.toSet().orEmpty()
             availableModels = assets.filter {
                 it.endsWith(".task") || it.endsWith(".tflite")
             }.toList()
         } else {
-            // Only check if not initialized (shouldn't happen if MainActivity did its job)
             checkModelAvailability(ctx) { prog, ready, prep, err, models ->
                 downloadProgress = prog
                 isModelReady = ready
@@ -424,132 +442,284 @@ fun HomeScreen(
         }
     }
 
-    Column(
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.Center
+            .background(MaterialTheme.colorScheme.background),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // App Title
-        Text(
-            text = "G3N",
-            style = MaterialTheme.typography.headlineLarge,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center
-        )
-
-        Spacer(modifier = Modifier.height(32.dp))
-
-        // Simplified status UI - since model is already initialized
-        if (isGemmaInitialized && gemmaModelName != null) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
+        // Header Section
+        item {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // App Logo/Icon (you can replace with your actual logo)
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .background(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    MaterialTheme.colorScheme.primary,
+                                    MaterialTheme.colorScheme.primaryContainer
+                                )
+                            ),
+                            shape = CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        Icons.Default.CheckCircle,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "AI Model Ready: $gemmaModelName",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                        text = "G3N",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimary
                     )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "AI Assistant",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+
+                Text(
+                    text = "Powered by Gemma",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        // Status Card
+        item {
+            if (isGemmaInitialized && gemmaModelName != null) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "AI Model Ready",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Text(
+                                text = gemmaModelName,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Feature Buttons - all enabled since model is initialized
-        Button(
-            onClick = { navController.navigate("live_caption") },
-            enabled = isGemmaInitialized,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Live Caption & Translation")
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(
-            onClick = { navController.navigate("quiz_generator") },
-            enabled = isGemmaInitialized,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Offline Quiz Generator")
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(
-            onClick = { navController.navigate("cbt_coach") },
-            enabled = isGemmaInitialized,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Voice CBT Coach")
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(
-            onClick = { navController.navigate("chat_list") },
-            enabled = isGemmaInitialized,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Chat")
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(
-            onClick = { navController.navigate("summarizer") },
-            enabled = isGemmaInitialized,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Document Summarizer")
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(
-            onClick = { navController.navigate("plant_scanner") },
-            enabled = isModelReady,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Image Classification")
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(
-            onClick = { navController.navigate("crisis_handbook") },
-            enabled = isGemmaInitialized,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Crisis Handbook")
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-
-        // API Settings Button
-        OutlinedButton(
-            onClick = { navController.navigate("api_settings") },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(
-                Icons.Default.Settings,
-                contentDescription = null
+        // Feature Categories
+        item {
+            Text(
+                text = "Features",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.padding(vertical = 8.dp)
             )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("API Settings")
+        }
+
+        // Main Features Grid
+        items(getFeatureItems(isGemmaInitialized, isModelReady).chunked(2)) { rowItems ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                rowItems.forEach { feature ->
+                    FeatureCard(
+                        feature = feature,
+                        modifier = Modifier.weight(1f),
+                        onClick = { navController.navigate(feature.route) }
+                    )
+                }
+
+                // Add empty space if odd number of items
+                if (rowItems.size == 1) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+
+        // Settings Section
+        item {
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedCard(
+                onClick = { navController.navigate("api_settings") },
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.outlinedCardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Settings,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "API Settings",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
         }
     }
 }
+
+@Composable
+private fun FeatureCard(
+    feature: FeatureItem,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Card(
+        onClick = onClick,
+        modifier = modifier.aspectRatio(1f),
+        enabled = feature.enabled,
+        colors = CardDefaults.cardColors(
+            containerColor = if (feature.enabled) {
+                MaterialTheme.colorScheme.surfaceContainerLow
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerLowest
+            }
+        ),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = if (feature.enabled) 6.dp else 2.dp
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = feature.icon,
+                contentDescription = null,
+                modifier = Modifier.size(32.dp),
+                tint = if (feature.enabled) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                }
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = feature.title,
+                style = MaterialTheme.typography.titleSmall,
+                textAlign = TextAlign.Center,
+                color = if (feature.enabled) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                },
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+data class FeatureItem(
+    val title: String,
+    val route: String,
+    val icon: ImageVector,
+    val enabled: Boolean
+)
+
+private fun getFeatureItems(isGemmaInitialized: Boolean, isModelReady: Boolean) = listOf(
+    FeatureItem(
+        title = "AI Tutor",
+        route = "tutor",
+        icon = Icons.Default.School,
+        enabled = isGemmaInitialized
+    ),
+    FeatureItem(
+        title = "Live Caption",
+        route = "live_caption",
+        icon = Icons.Default.ClosedCaption,
+        enabled = isGemmaInitialized
+    ),
+    FeatureItem(
+        title = "Quiz Generator",
+        route = "quiz_generator",
+        icon = Icons.Default.Quiz,
+        enabled = isGemmaInitialized
+    ),
+    FeatureItem(
+        title = "CBT Coach",
+        route = "cbt_coach",
+        icon = Icons.Default.Psychology,
+        enabled = isGemmaInitialized
+    ),
+    FeatureItem(
+        title = "Chat",
+        route = "chat_list",
+        icon = Icons.AutoMirrored.Filled.Chat,
+        enabled = isGemmaInitialized
+    ),
+    FeatureItem(
+        title = "Summarizer",
+        route = "summarizer",
+        icon = Icons.Default.Summarize,
+        enabled = isGemmaInitialized
+    ),
+    FeatureItem(
+        title = "Image Classification",
+        route = "plant_scanner",
+        icon = Icons.Default.PhotoCamera,
+        enabled = isModelReady
+    ),
+    FeatureItem(
+        title = "Crisis Handbook",
+        route = "crisis_handbook",
+        icon = Icons.Default.LocalHospital,
+        enabled = isGemmaInitialized
+    )
+)
 
 // Helper function to check model availability (stays at top level, not inside HomeScreen)
 fun checkModelAvailability(
