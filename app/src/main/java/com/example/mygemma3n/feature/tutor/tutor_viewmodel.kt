@@ -108,39 +108,38 @@ class TutorViewModel @Inject constructor(
         }
     }
 
-        fun processUserInput(input: String) = viewModelScope.launch{
+    fun processUserInput(input: String) = viewModelScope.launch {
         addTutorMessage(input, isUser = true)
         _state.update { it.copy(isLoading = true) }
 
         try {
             val student = currentStudent ?: throw IllegalStateException("No student profile")
             val subject = _state.value.currentSubject ?: throw IllegalStateException("No subject selected")
-            val sessionType = _state.value.sessionType ?: throw IllegalStateException("No session type")
 
-            // Analyze input to detect what the student needs
-            val studentNeed = analyzeStudentInput(input)
+            // Check for structured response first
+            val structuredResponse = generateStructuredResponse(student, input, subject)
 
-            // Get relevant educational content using RAG
-            val relevantContent = offlineRAG.queryWithContext(
-                query = input,
-                subject = subject
-            )
+            val response = if (structuredResponse != null) {
+                structuredResponse
+            } else {
+                // Fall back to AI generation
+                val studentNeed = analyzeStudentInput(input)
+                val relevantContent = offlineRAG.queryWithContext(
+                    query = input,
+                    subject = subject
+                )
 
-            // Generate personalized response
-            val response = generateTutorResponse(
-                student = student,
-                userInput = input,
-                studentNeed = studentNeed,
-                relevantContent = relevantContent,
-                sessionType = sessionType,
-                subject = subject
-            )
+                generateTutorResponse(
+                    student = student,
+                    userInput = input,
+                    studentNeed = studentNeed,
+                    relevantContent = relevantContent,
+                    sessionType = _state.value.sessionType ?: TutorSessionType.CONCEPT_EXPLANATION,
+                    subject = subject
+                )
+            }
 
             addTutorMessage(response, isUser = false)
-
-            // Track concepts covered
-            val conceptsInResponse = extractConcepts(response)
-            updateConceptTracking(conceptsInResponse)
 
         } catch (e: Exception) {
             _state.update { it.copy(
@@ -149,6 +148,58 @@ class TutorViewModel @Inject constructor(
             )}
         } finally {
             _state.update { it.copy(isLoading = false) }
+        }
+    }
+
+    private suspend fun generateStructuredResponse(
+        student: StudentProfileEntity,
+        userInput: String,
+        subject: OfflineRAG.Subject
+    ): String? {
+        // Check for common question patterns and provide structured responses
+        return when {
+            userInput.contains("balanced diet", ignoreCase = true) -> {
+                TutorResponseFormatter.formatListResponse(
+                    items = listOf(
+                        "Carbohydrates", "Proteins", "Fats",
+                        "Vitamins", "Minerals", "Fiber"
+                    ),
+                    intro = "A balanced diet has 6 main food groups:",
+                    explanations = mapOf(
+                        "Carbohydrates" to "Give you energy for activities",
+                        "Proteins" to "Help your body grow and repair",
+                        "Fats" to "Store energy and keep you warm"
+                    ),
+                    student = student
+                )
+            }
+
+            userInput.contains("what is matter", ignoreCase = true) -> {
+                """Matter is anything that has mass and takes up space.
+            
+            Examples:
+            • Heavy things: bowling ball
+            • Light things: feather  
+            • Everything around you!
+            
+            If you can touch it or it fills space, it's matter!""".formatForTutor(student)
+            }
+
+            userInput.contains("area of", ignoreCase = true) &&
+                    userInput.contains("trapezoid", ignoreCase = true) -> {
+                TutorResponseFormatter.formatStepsResponse(
+                    steps = listOf(
+                        "Find the two parallel sides (bases)",
+                        "Add the bases together",
+                        "Multiply by the height",
+                        "Divide by 2"
+                    ),
+                    intro = "To find the area of a trapezoid:",
+                    student = student
+                )
+            }
+
+            else -> null
         }
     }
 
@@ -167,17 +218,23 @@ class TutorViewModel @Inject constructor(
             relevantContent = relevantContent,
             sessionType = sessionType,
             subject = subject,
-            conversationHistory = conversationContext.takeLast(5)
+            conversationHistory = conversationContext.takeLast(3) // Reduce context for brevity
         )
 
-        return gemmaService.generateTextAsync(
+        val rawResponse = gemmaService.generateTextAsync(
             prompt,
             UnifiedGemmaService.GenerationConfig(
-                maxTokens = 400,
-                temperature = 0.5f
+                maxTokens = 200, // Reduced from 400
+                temperature = 0.4f, // Lower temperature for more focused responses
+                topK = 30 // Slightly lower for more predictable outputs
             )
         )
+
+        // Format the response for the student's grade level
+        return rawResponse.formatForTutor(student)
     }
+
+    // Replace the buildTutorPrompt method in TutorViewModel.kt
 
     private fun buildTutorPrompt(
         student: StudentProfileEntity,
@@ -209,37 +266,48 @@ class TutorViewModel @Inject constructor(
             LearningStyle.KINESTHETIC -> "Suggest hands-on activities and real-world applications."
         }
 
+        // More aggressive word limits based on grade
         val maxWords = when (student.gradeLevel) {
-            in 1..3  -> 25
-            in 4..6  -> 45
-            in 7..9  -> 70
-            in 10..12-> 120
-            else     -> 100
+            in 1..3  -> 30   // Very short for young kids
+            in 4..6  -> 50   // Still concise for elementary
+            in 7..9  -> 75   // Moderate for middle school
+            in 10..12-> 100  // More detailed for high school
+            else     -> 80
+        }
+
+        // Response format guidelines
+        val formatGuide = when {
+            userInput.contains("what is", ignoreCase = true) ||
+                    userInput.contains("what are", ignoreCase = true) ->
+                "Start with a one-sentence definition. If listing items, list ALL items first with bullet points (•), then explain briefly."
+
+            userInput.contains("how", ignoreCase = true) ->
+                "Give numbered steps (1. 2. 3.) Keep each step to one sentence."
+
+            else -> "Be direct and conversational. No unnecessary metaphors."
         }
 
         return """
-            $roleContext
-            
-            Learning style preference: $learningStyleGuide
-            
-            Context from educational content:
-            $relevantContent
-            
-            Recent conversation:
-            ${conversationHistory.joinToString("\n")}
-            
-            Student asks: "$userInput"
-            
-            Detected need: ${studentNeed.description}
-            
-            Provide a helpful, encouraging response that:
-            1. Addresses their specific question
-            2. Adapts to their grade level and learning style
-            3. Builds on their current understanding
-            4. Encourages critical thinking
-            
-            Keep response under $maxWords words and conversational but concise.
-        """.trimIndent()
+        $roleContext
+        
+        Learning style: $learningStyleGuide
+        
+        Context: $relevantContent
+        
+        Student asks: "$userInput"
+        
+        STRICT REQUIREMENTS:
+        1. Maximum $maxWords words - BE CONCISE
+        2. $formatGuide
+        3. For grade ${student.gradeLevel}: Use simple vocabulary
+        4. If explaining multiple concepts/items:
+           - List them ALL first
+           - Then give ONE sentence about each
+        5. Avoid long analogies - use them sparingly or unless specifically requested
+        6. End with encouragement if appropriate
+        
+        Remember: Quality over quantity. Clear and short is better than detailed and long.
+    """.trimIndent()
     }
 
     // Helper classes and methods
