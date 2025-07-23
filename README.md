@@ -1,6 +1,6 @@
-# ImpactSuite
+# G3N
 
-ImpactSuite is an Android application showcasing how on‑device generative AI models can power helpful
+G3N is an Android application showcasing how on‑device generative AI models can power helpful
 experiences entirely offline.  The app is written in Kotlin using Jetpack Compose and leverages
 Google's **Gemma 3n** models via Google AI Edge LiteRT and MediaPipe.
 
