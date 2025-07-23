@@ -6,11 +6,14 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.room.Room
 import androidx.work.WorkManager
 import com.example.mygemma3n.data.AppDatabase
+import com.example.mygemma3n.data.ChatRepository
 import com.example.mygemma3n.data.GeminiApiService
 import com.example.mygemma3n.data.ModelDownloadManager
 import com.example.mygemma3n.data.ModelRepository
 import com.example.mygemma3n.data.TextEmbeddingService
 import com.example.mygemma3n.data.TextEmbeddingServiceExtensions
+import com.example.mygemma3n.data.TutorDao
+import com.example.mygemma3n.data.TutorRepository
 import com.example.mygemma3n.data.UnifiedGemmaService
 import com.example.mygemma3n.data.VectorDatabase
 import com.example.mygemma3n.data.local.*
@@ -25,7 +28,9 @@ import com.example.mygemma3n.feature.quiz.EnhancedPromptManager
 import com.example.mygemma3n.feature.quiz.PerformanceOptimizedQuizGenerator
 import com.example.mygemma3n.feature.quiz.QuizDatabase
 import com.example.mygemma3n.feature.quiz.QuizRepository
+import com.example.mygemma3n.feature.tutor.TutorPromptManager
 import com.example.mygemma3n.remote.EmergencyDatabase
+import com.example.mygemma3n.remote.TutorDatabase
 import com.example.mygemma3n.shared_utilities.*
 import com.google.firebase.Firebase
 import com.google.firebase.analytics.FirebaseAnalytics
@@ -308,5 +313,54 @@ object AppModule {
     @Singleton
     fun provideChatDao(db: AppDatabase): ChatDao = db.chatDao()
 
+
+    // Tutor Feature
+    // In AppModule.kt, add:
+
+    @Provides
+    @Singleton
+    fun provideTutorDatabase(
+        @ApplicationContext context: Context
+    ): TutorDatabase {
+        return Room.databaseBuilder(
+            context,
+            TutorDatabase::class.java,
+            "tutor_database"
+        )
+            .fallbackToDestructiveMigration(false)
+            .build()
+    }
+
+    @Provides
+    @Singleton
+    fun provideTutorDao(database: TutorDatabase): TutorDao = database.tutorDao()
+
+    @Provides
+    @Singleton
+    fun provideTutorRepository(
+        tutorDao: TutorDao,
+        chatRepository: ChatRepository,
+        gson: Gson
+    ): TutorRepository = TutorRepository(tutorDao, chatRepository, gson)
+
+    @Provides
+    @Singleton
+    fun provideTutorPromptManager(
+        @ApplicationContext context: Context
+    ): TutorPromptManager = TutorPromptManager(context)
+
+    @Provides
+    @Singleton
+    fun provideTutorOfflineRAGExtension(
+        offlineRAG: OfflineRAG,
+        vectorDB: OptimizedVectorDatabase,
+        embeddingService: TextEmbeddingService,
+        @ApplicationContext context: Context
+    ): TutorOfflineRAGExtension = TutorOfflineRAGExtension(
+        offlineRAG,
+        vectorDB,
+        embeddingService,
+        context
+    )
 
 }
