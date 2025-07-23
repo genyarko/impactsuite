@@ -58,4 +58,4 @@ Large model files are configured for Git LFS to avoid bloating the repository.
 
 ## License
 
-This project is provided for educational purposes and has no specific license.
+This project is provided for educational purposes and has no specific license
