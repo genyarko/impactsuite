@@ -84,7 +84,9 @@ android {
         kotlinCompilerExtensionVersion = "1.5.10"
     }
 
+
     packagingOptions {
+
         resources {
             // Exclude these to prevent merge conflicts
             excludes.add("META-INF/DEPENDENCIES")
@@ -155,10 +157,11 @@ dependencies {
     implementation(libs.kotlinx.coroutines.play.services)
 
 // Firebase
+    // --- Firebase (BoM 34+) ------------------------------
+    implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.crashlytics)
     implementation(libs.firebase.analytics)
-    implementation(platform(libs.firebase.bom))
-    implementation(libs.firebase.perf.ktx)
+    implementation(libs.firebase.perf)    // <- no -ktx
 
 // CameraX
     implementation(libs.androidx.camera.core)
@@ -234,6 +237,13 @@ dependencies {
     implementation(libs.asset.delivery.ktx)
 
     implementation(libs.androidx.datastore.preferences.v110)
+
+    //implementation(libs.pdfbox.android)
+    implementation(libs.poi.ooxml.v523)
+    //implementation("com.tom-roush:pdfbox-android:2.0.29.0")
+
+    //implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    implementation(libs.text.recognition)
 
 //    // Coqui STT (formerly Mozilla DeepSpeech)
 //    implementation("ai.coqui.stt:libstt:1.4.0")

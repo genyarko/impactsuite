@@ -55,10 +55,7 @@ import com.example.mygemma3n.feature.caption.SpeechRecognitionService
 import com.example.mygemma3n.feature.cbt.CBTCoachScreen
 import com.example.mygemma3n.feature.chat.ChatScreen
 import com.example.mygemma3n.feature.crisis.CrisisHandbookScreen
-import com.google.android.play.core.assetpacks.AssetPackManagerFactory
-import com.google.android.play.core.assetpacks.AssetPackStateUpdateListener
-import com.google.android.play.core.assetpacks.model.AssetPackStatus
-import com.google.android.play.core.assetpacks.AssetPackManager
+
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.EntryPointAccessors
 import java.io.File
@@ -345,7 +342,7 @@ fun Gemma3nNavigation(
 
         // ───── Chat list first ───────────────────────────────────────────
         composable("chat_list") {
-            ChatListScreen(                          // expects lambda first:contentReference[oaicite:0]{index=0}
+            ChatListScreen(
                 onNavigateToChat = { id ->
                     navController.navigate("chat/$id")
                 }
@@ -780,7 +777,7 @@ fun ApiSettingsScreen(
 
                             // Validate Gemini API key
                             if (apiKey.isNotBlank()) {
-                                if (geminiApiService.validateKey(apiKey)) {   // ← rename here
+                                if (geminiApiService.validateKey(apiKey)) {
                                     context.dataStore.edit { it[API_KEY] = apiKey }
                                     messages.add("✓ Gemini API key validated")
                                 } else {
@@ -981,5 +978,3 @@ fun ApiSettingsScreen(
 
 
 }
-
-

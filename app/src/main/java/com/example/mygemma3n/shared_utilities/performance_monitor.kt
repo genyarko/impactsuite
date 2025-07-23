@@ -5,12 +5,13 @@ import android.content.Context
 import android.os.Debug
 import android.util.Log
 import com.google.firebase.analytics.FirebaseAnalytics
-import com.google.firebase.analytics.ktx.logEvent
+import com.google.firebase.analytics.logEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import java.util.concurrent.ConcurrentLinkedQueue
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -215,7 +216,7 @@ class PerformanceMonitor @Inject constructor(
     }
 
     private fun logPerformanceWarning(metric: InferenceMetric, warning: PerformanceWarning) {
-        Log.w(TAG, "${warning.type}: ${warning.message}")
+        Timber.tag(TAG).w("${warning.type}: ${warning.message}")
 
         analytics.logEvent("performance_warning") {
             param("warning_type", warning.type.name)
