@@ -197,38 +197,6 @@ class TranslationCache @Inject constructor() {
     fun getCacheSize(): Int = cache.size
 }
 
-// Helper function to build multimodal prompt
-fun buildMultimodalPrompt(
-    instruction: String,
-    audioData: FloatArray? = null,
-    imageData: ByteArray? = null,
-    previousContext: String? = null
-): String {
-    val promptBuilder = StringBuilder()
-
-    // Add instruction
-    promptBuilder.append(instruction)
-
-    // Add previous context if available
-    previousContext?.let {
-        promptBuilder.append("\n\nPrevious context:\n$it")
-    }
-
-    // Add audio placeholder (in real implementation, this would be processed)
-    audioData?.let {
-        promptBuilder.append("\n\n[AUDIO INPUT: ${it.size} samples at 16kHz]")
-    }
-
-    // Add image placeholder (in real implementation, this would be processed)
-    imageData?.let {
-        promptBuilder.append("\n\n[IMAGE INPUT: ${it.size} bytes]")
-    }
-
-    promptBuilder.append("\n\nResponse:")
-
-    return promptBuilder.toString()
-}
-
 // Audio processing utilities
 object AudioUtils {
 
@@ -271,6 +239,39 @@ object AudioUtils {
     }
 }
 
+/* ───────── state class ───────── */
+data class CaptionState(
+    val isListening: Boolean = false,
+    val currentTranscript: String = "",
+    val translatedText: String = "",
+    val sourceLanguage: Language = Language.AUTO,
+    val targetLanguage: Language = Language.ENGLISH,
+    val latencyMs: Long = 0,
+    val isModelReady: Boolean = false,
+    val error: String? = null,
+
+    /* new diagnostics / buffers */
+    val audioBuffer: MutableList<FloatArray> = mutableListOf(),
+    val pendingBuffer: MutableList<FloatArray> = mutableListOf(),
+    val lastProcessedTime: Long = 0L,
+    val silenceStartTime: Long? = null,
+    /* history tracking */
+    val transcriptHistory: List<TranscriptEntry> = emptyList()
+)
+
+data class TranscriptEntry(
+    val transcript: String,
+    val translation: String? = null,
+    val timestamp: Long = System.currentTimeMillis(),
+    val source: TranscriptSource = TranscriptSource.VOICE
+)
 // Extension function for Flow<FloatArray>
 fun Flow<FloatArray>.chunked(size: Int): Flow<FloatArray> =
     AudioUtils.chunked(this, size)
+
+
+
+enum class TranscriptSource {
+    VOICE,
+    TYPED
+}

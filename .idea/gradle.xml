@@ -20,6 +20,7 @@
             <option value="$PROJECT_DIR$/feature_crisis" />
             <option value="$PROJECT_DIR$/feature_plant" />
             <option value="$PROJECT_DIR$/feature_quiz" />
+            <option value="$PROJECT_DIR$/gemma3n_assetpack" />
           </set>
         </option>
       </GradleProjectSettings>

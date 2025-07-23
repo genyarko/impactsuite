@@ -132,3 +132,7 @@
 -dontwarn android.lifecycle.**
 -keep class android.arch.** { *; }
 -keep class android.lifecycle.** { *; }
+
+
+-keep class com.google.mediapipe.** { *; }
+-dontwarn com.google.mediapipe.**

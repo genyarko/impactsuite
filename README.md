@@ -9,6 +9,7 @@ Google's **Gemma 3n** models via Google AI Edge LiteRT and MediaPipe.
 - **Live Caption & Translation** – streams microphone audio into a lightweight Gemma model to produce captions with optional translation.
 - **Offline Quiz Generator** – generates multiple choice quizzes from a topic using Gemma and stores results in Room.
 - **Voice CBT Coach** – records audio, detects emotion and suggests Cognitive Behavioural Therapy techniques while maintaining a local conversation history.
+- **Document Summarizer** – extracts text from PDFs, DOCX or TXT files and produces a short summary with review questions.
 - **Image Classification** – uses CameraX with a TensorFlow Lite classifier for on‑device image recognition.
 - **Crisis Handbook** – answers safety questions and links to local resources using function calling.
 

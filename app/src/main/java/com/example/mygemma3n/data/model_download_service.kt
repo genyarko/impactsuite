@@ -1,12 +1,8 @@
 package com.example.mygemma3n.data
 
 import android.content.Context
-import androidx.hilt.work.HiltWorker
 import androidx.lifecycle.asFlow
 import androidx.work.*
-import dagger.assisted.Assisted
-import dagger.assisted.AssistedFactory
-import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.withContext
@@ -40,13 +36,116 @@ class ModelRepository @Inject constructor(
         val downloadedAt: Long = System.currentTimeMillis()
     )
 
+    /**
+     * Gets the path to the Gemma model, checking multiple sources:
+     * 1. Downloaded models in the models directory
+     * 2. Cached model from assets
+     * 3. Direct copy from assets (if not cached yet)
+     */
+    suspend fun getGemmaModelPath(): String? = withContext(Dispatchers.IO) {
+        // Check for downloaded models first
+        val downloadedModel = getAvailableModels().firstOrNull()
+        if (downloadedModel != null && File(downloadedModel.path).exists()) {
+            Timber.d("Using downloaded model: ${downloadedModel.path}")
+            return@withContext downloadedModel.path
+        }
+
+        // Check for cached asset model
+        val modelNames = listOf("models/gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
+
+        for (modelName in modelNames) {
+            val cachedFile = File(context.cacheDir, modelName)
+            if (cachedFile.exists()) {
+                Timber.d("Using cached model: ${cachedFile.absolutePath}")
+                return@withContext cachedFile.absolutePath
+            }
+        }
+
+        // Copy from assets if not cached
+        for (modelName in modelNames) {
+            try {
+                val cachedFile = File(context.cacheDir, modelName)
+                context.assets.open(modelName).use { input ->
+                    cachedFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                Timber.d("Copied model from assets to: ${cachedFile.absolutePath}")
+                return@withContext cachedFile.absolutePath
+            } catch (e: Exception) {
+                // Try next model name
+                continue
+            }
+        }
+
+        Timber.e("No Gemma model found")
+        null
+    }
+
+    /**
+     * Loads the Gemma model as ByteArray, with fallback to bundled asset
+     */
+    suspend fun loadGemmaModel(): ByteArray? = withContext(Dispatchers.IO) {
+        try {
+            // Try to get model path
+            val modelPath = getGemmaModelPath()
+            if (modelPath != null) {
+                return@withContext File(modelPath).readBytes()
+            }
+
+            // Direct fallback to asset loading
+            val modelNames = listOf("models/gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
+            for (modelName in modelNames) {
+                try {
+                    context.assets.open(modelName).use { input ->
+                        return@withContext input.readBytes()
+                    }
+                } catch (e: Exception) {
+                    continue
+                }
+            }
+
+            Timber.e("Failed to load any Gemma model")
+            null
+        } catch (e: Exception) {
+            Timber.e(e, "Error loading Gemma model")
+            null
+        }
+    }
+
+    /**
+     * Check if any Gemma model is available (downloaded or in assets)
+     */
+    suspend fun isAnyModelAvailable(): Boolean = withContext(Dispatchers.IO) {
+        // Check downloaded models
+        if (getAvailableModels().isNotEmpty()) {
+            return@withContext true
+        }
+
+        // Check cached models
+        val modelNames = listOf("models/gemma-3n-E2B-it-int4.task", "gemma-3n-E4B-it-int4.task")
+        for (modelName in modelNames) {
+            if (File(context.cacheDir, modelName).exists()) {
+                return@withContext true
+            }
+        }
+
+        // Check assets
+        try {
+            val assetList = context.assets.list("") ?: emptyArray()
+            return@withContext modelNames.any { it in assetList }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     suspend fun saveModel(
         name: String,
         file: File,
         type: String,
         checksum: String? = null
     ): ModelInfo = withContext(Dispatchers.IO) {
-        val targetFile = File(modelsDir, "$name.tflite")
+        val targetFile = File(modelsDir, name)
         file.copyTo(targetFile, overwrite = true)
 
         val modelInfo = ModelInfo(
@@ -79,12 +178,12 @@ class ModelRepository @Inject constructor(
     }
 
     fun getModelPath(name: String): String? {
-        val modelFile = File(modelsDir, "$name.tflite")
+        val modelFile = File(modelsDir, name)
         return if (modelFile.exists()) modelFile.absolutePath else null
     }
 
     fun isModelDownloaded(name: String): Boolean {
-        return File(modelsDir, "$name.tflite").exists()
+        return File(modelsDir, name).exists()
     }
 
     fun getAvailableModels(): List<ModelInfo> {
@@ -112,22 +211,36 @@ class ModelRepository @Inject constructor(
     }
 
     fun getModelSize(name: String): Long {
-        val modelFile = File(modelsDir, "$name.tflite")
+        val modelFile = File(modelsDir, name)
         return if (modelFile.exists()) modelFile.length() else 0L
     }
+
+    // --------- Original methods for bundled asset pack model loading ---------
+    /**
+     * Loads the Gemma 3N model from the install-time asset pack.
+     * @return ByteArray with the full model file contents.
+     * @throws IOException if the asset does not exist.
+     */
+    fun loadBundledModel(): ByteArray {
+        context.assets.open("gemma-3n-E4B-it-int4.task").use { input ->
+            return input.readBytes()
+        }
+    }
+    /**
+     * Optionally, return an InputStream if your model loader needs it.
+     */
+    fun openBundledModelStream() = context.assets.open("gemma-3n-E4B-it-int4.task")
+    // -------------------------------------------------------------
 }
 
-// Download Worker
-@HiltWorker
-class ModelDownloadWorker @AssistedInject constructor(
-    @Assisted context: Context,
-    @Assisted params: WorkerParameters,
-    private val modelRepository: ModelRepository
+// Download Worker - Without Hilt
+class ModelDownloadWorker(
+    context: Context,
+    params: WorkerParameters
 ) : CoroutineWorker(context, params) {
 
-
-
-
+    // Create ModelRepository directly without injection
+    private val modelRepository = ModelRepository(context.applicationContext)
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val modelUrl = inputData.getString(KEY_MODEL_URL) ?: return@withContext Result.failure()
@@ -482,7 +595,6 @@ class ModelDownloadManager @Inject constructor(
         // Gemma 3n model URLs (these would be real URLs in production)
         const val GEMMA_3N_2B_URL = "https://example.com/models/gemma_3n_2b_it.tflite"
         const val GEMMA_3N_4B_URL = "https://example.com/models/gemma_3n_4b_it.tflite"
-        const val GEMMA_3N_8B_URL = "https://example.com/models/gemma_3n_8b_it.tflite"
 
         // Model metadata
         val MODEL_CONFIGS = mapOf(

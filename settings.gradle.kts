@@ -22,6 +22,7 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "ImpactSuite"
+
 include(":app")
 include(":edge_ai")
 include(":data")
@@ -33,4 +34,7 @@ include(":feature_crisis")
 include(":common_ui")
 include(":common_utils")
 
- 
+
+
+
+include(":gemma3n_assetpack")

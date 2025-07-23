@@ -7,11 +7,24 @@ plugins {
     id("kotlin-parcelize")
     id("com.google.gms.google-services")
     id("com.google.firebase.crashlytics")
+    id("org.jetbrains.kotlin.kapt")
+    id("com.android.asset-pack")
 }
+
 
 android {
     namespace = "com.example.mygemma3n"
     compileSdk = 36
+    assetPacks += listOf(":gemma3n_assetpack")
+
+    androidResources {            
+        noCompress += "tflite"
+        noCompress += "task"
+        noCompress += "mbundle"
+
+    }
+
+
 
     defaultConfig {
         applicationId = "com.example.mygemma3n"
@@ -34,6 +47,7 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
+            manifestPlaceholders["logLevel"] = "DEBUG"
             buildConfigField("Boolean", "ENABLE_PERFORMANCE_MONITORING", "true")
         }
         release {
@@ -64,19 +78,30 @@ android {
         compose = true
         buildConfig = true
         viewBinding = true
+        mlModelBinding = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.10"
     }
 
+
     packagingOptions {
+
         resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-        }
-        jniLibs {
-            useLegacyPackaging = true
-            // Keep all native libraries for AI Edge
-            pickFirsts += "**/*.so"
+            // Exclude these to prevent merge conflicts
+            excludes.add("META-INF/DEPENDENCIES")
+            excludes.add("META-INF/INDEX.LIST")
+            excludes.add("META-INF/LICENSE")
+            excludes.add("META-INF/LICENSE.txt")
+            excludes.add("META-INF/NOTICE")
+            excludes.add("META-INF/NOTICE.txt")
+            excludes.add("META-INF/notice.txt")
+            excludes.add("META-INF/ASL2.0")
+            excludes.add("META-INF/io.netty.versions.properties")
+            excludes.add("META-INF/*.kotlin_module")
+
+            // Or use a wildcard to cover all META-INF files:
+            // excludes.add("META-INF/*")
         }
     }
 
@@ -84,7 +109,10 @@ android {
     sourceSets {
         getByName("main") {
             assets {
-                srcDirs("src/main/assets", "src/main/ml")
+                srcDirs("src/main/assets", "src/main/ml", "src\\main\\assets", "src\\main\\assets",
+                    "src\\main\\assets",
+                    "src\\main\\assets"
+                )
             }
         }
     }
@@ -112,17 +140,16 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     implementation(libs.litert.gpu)
-    ksp(libs.hilt.android.compiler)
+    implementation(libs.play.services.mlkit.subject.segmentation)
     ksp(libs.androidx.room.compiler)
 
 // WorkManager
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.room.ktx.v261)
-    ksp(libs.androidx.room.compiler.v261)
 
 // Hilt Dependency Injection
     implementation(libs.hilt.android)
-    ksp(libs.hilt.compiler)
+    kapt(libs.hilt.compiler)
     implementation(libs.androidx.hilt.common)
 
 // Coroutines
@@ -130,16 +157,20 @@ dependencies {
     implementation(libs.kotlinx.coroutines.play.services)
 
 // Firebase
+    // --- Firebase (BoM 34+) ------------------------------
+    implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.crashlytics)
     implementation(libs.firebase.analytics)
-    implementation(platform(libs.firebase.bom))
-    implementation(libs.firebase.perf.ktx)
+    implementation(libs.firebase.perf)    // <- no -ktx
 
 // CameraX
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.camera2)
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
+
+    // Gemini API - THIS IS THE KEY ADDITION
+    implementation(libs.generativeai)
 
 // Permissions
     implementation(libs.accompanist.permissions)
@@ -154,6 +185,8 @@ dependencies {
 
 // JSON Parsing
     implementation(libs.gson)
+    implementation(libs.pdfbox)
+    implementation(libs.poi.ooxml)
 
 // DataStore
     implementation(libs.androidx.datastore.preferences)
@@ -176,16 +209,60 @@ dependencies {
     debugImplementation(libs.androidx.ui.test.manifest)
     implementation(libs.play.services.measurement.api)
     implementation(libs.localagents.rag)
+
+    // Tensorflow Lite
+    implementation(libs.tensorflow.lite)
+    implementation(libs.tensorflow.lite.select.tf.ops)
+    implementation(libs.tensorflow.lite.support)
     implementation(libs.tensorflow.lite.gpu)
     implementation(libs.tensorflow.lite.gpu.api)
+    implementation(libs.tensorflow.lite.metadata)
 
+
+    // MediaPipe for .task models (if you want to use .task files)
+    implementation(libs.tasks.genai)
+
+    implementation(libs.tasks.text)
+// For downloading models
+    implementation(libs.okhttp)
+
+    // Hilt work manager
     implementation(libs.androidx.hilt.work)
-
     // Optional instrumentation-test helpers
     androidTestImplementation(libs.hilt.android.testing)
 
     // Leak Detection (debug only)
     debugImplementation(libs.leakcanary.android)
+
+    implementation(libs.asset.delivery.ktx)
+
+    implementation(libs.androidx.datastore.preferences.v110)
+
+    //implementation(libs.pdfbox.android)
+    implementation(libs.poi.ooxml.v523)
+    //implementation("com.tom-roush:pdfbox-android:2.0.29.0")
+
+    //implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    implementation(libs.text.recognition)
+
+//    // Coqui STT (formerly Mozilla DeepSpeech)
+//    implementation("ai.coqui.stt:libstt:1.4.0")
+//// Java facade
+//    implementation("ai.coqui.stt:libstt-android:1.4.0")
+//// Whisper cpp JNI binding (pre‑compiled for arm64, x86_64, etc.)
+//    implementation("com.github.ggerganov:whisper.cpp:android-v1.5.4")
+
+
+    // Google Cloud Speech-to-Text with exclusions
+    implementation(libs.google.cloud.speech) {
+        exclude(group = "com.google.protobuf", module = "protobuf-java")
+        exclude(group = "com.google.api.grpc", module = "proto-google-common-protos")
+        exclude(group = "com.google.firebase", module = "protolite-well-known-types")
+    }
+
+
+
+
 }
 
 // Enable Gemma 3n model optimizations
@@ -194,5 +271,15 @@ android {
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
         }
+    }
+}
+
+configurations.all {
+    resolutionStrategy {
+        force(
+            "com.google.protobuf:protobuf-java:3.21.12",
+            "com.google.api.grpc:proto-google-common-protos:2.29.0",
+            "com.google.firebase:protolite-well-known-types:18.0.1"
+        )
     }
 }

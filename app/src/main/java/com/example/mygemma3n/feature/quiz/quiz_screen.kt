@@ -1,317 +1,1221 @@
 package com.example.mygemma3n.feature.quiz
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowForward
-import androidx.compose.material.icons.filled.Cancel
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Done
-import androidx.compose.material.icons.filled.ThumbUp
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ElevatedButton
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.example.mygemma3n.feature.quiz.Subject
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
-// QuizScreen.kt - Compose UI
+
+/* top-level screen ------------------------------------------------------- */
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuizScreen(
     viewModel: QuizGeneratorViewModel = hiltViewModel()
 ) {
-    val state by viewModel.quizState.collectAsState()
+    val state by viewModel.state.collectAsStateWithLifecycle()
 
-    // Add debug logging
-    LaunchedEffect(state) {
-        println("QuizScreen State: subjects=${state.subjects.size}, isGenerating=${state.isGenerating}, hasQuiz=${state.currentQuiz != null}")
+    // Ensure subjects are loaded
+    LaunchedEffect(Unit) {
+        if (state.subjects.isEmpty()) {
+            viewModel.loadSubjects()
+        }
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Adaptive Quiz Generator") },
+                title = {
+                    Column {
+                        Text("Adaptive Quiz Generator")
+                        if (state.learnerProfile != null) {
+                            Text(
+                                "Streak: ${state.learnerProfile!!.streakDays} days | Total: ${state.learnerProfile!!.totalQuestionsAnswered} questions",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
+                ),
+                actions = {
+                    if (state.reviewQuestionsAvailable > 0) {
+                        Badge(
+                            modifier = Modifier.padding(end = 16.dp)
+                        ) {
+                            Text("${state.reviewQuestionsAvailable} reviews")
+                        }
+                    }
+                }
             )
         }
-    ) { paddingValues ->
+    ) { pv ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues)
+                .padding(pv)
         ) {
             when {
                 state.currentQuiz == null && !state.isGenerating -> {
-                    // Show setup screen OR empty state
-                    if (state.subjects.isEmpty()) {
-                        // Show empty state with manual subject selection
-                        EmptyStateQuizSetup(
-                            onGenerateQuiz = { s, t, c ->
-                                viewModel.generateAdaptiveQuiz(s, t, c)
-                            }
-                        )
-                    } else {
-                        QuizSetupScreen(
-                            subjects = state.subjects,
-                            onGenerateQuiz = { s, t, c ->
-                                viewModel.generateAdaptiveQuiz(s, t, c)
-                            }
-                        )
+                    // Use subjects from state, fallback to all subjects if empty
+                    val availableSubjects = state.subjects.ifEmpty {
+                        Subject.entries
                     }
-                }
 
-                state.isGenerating -> {
-                    // Generation Progress
-                    Column(
-                        modifier = Modifier.align(Alignment.Center),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        CircularProgressIndicator()
-                        Text(
-                            "Generating adaptive quiz...",
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                        Text(
-                            "Questions created: ${state.questionsGenerated}",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
-                }
-
-                state.currentQuiz != null -> {
-                    // Quiz Taking Screen
-                    QuizTakingScreen(
-                        quiz = state.currentQuiz!!,
-                        onAnswerSubmit = { questionId, answer ->
-                            viewModel.submitAnswer(questionId, answer)
-                        },
-                        onQuizComplete = {
-                            viewModel.completeQuiz()
+                    EnhancedQuizSetupScreen(
+                        subjects = availableSubjects,
+                        userProgress = state.userProgress,
+                        learnerProfile = state.learnerProfile,
+                        mode = state.mode,
+                        reviewAvailable = state.reviewQuestionsAvailable,
+                        onModeChange = viewModel::setQuizMode,
+                        onGenerateQuiz = { s, t, c ->
+                            viewModel.generateAdaptiveQuiz(s, t, c)
                         }
                     )
+                }
+
+                state.isGenerating -> GenerationProgress(
+                    done = state.questionsGenerated,
+                    mode = state.mode
+                )
+
+                else -> state.currentQuiz?.let { quiz ->
+                    EnhancedQuizTakingScreen(
+                        quiz = quiz,
+                        conceptCoverage = state.conceptCoverage,
+                        onAnswerSubmit = viewModel::submitAnswer,
+                        onQuizComplete = viewModel::completeQuiz
+                    )
+                }
+            }
+
+            // Error snackbar with proper dismissal
+            state.error?.let { error ->
+                Snackbar(
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                    action = {
+                        TextButton(
+                            onClick = {
+                                viewModel.clearError()
+                            }
+                        ) {
+                            Text("Dismiss")
+                        }
+                    },
+                    dismissAction = {
+                        IconButton(
+                            onClick = {
+                                viewModel.clearError()
+                            }
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Dismiss"
+                            )
+                        }
+                    }
+                ) {
+                    Text(error)
                 }
             }
         }
     }
 }
 
-// New composable for when subjects list is empty
-@Composable
-fun EmptyStateQuizSetup(
-    onGenerateQuiz: (Subject, String, Int) -> Unit
-) {
-    var selectedSubject by remember { mutableStateOf<Subject?>(null) }
-    var topicText by remember { mutableStateOf("") }
-    var questionCount by remember { mutableStateOf(10f) }
+/* Enhanced setup screen with mode selection ----------------------------------- */
 
-    // All available subjects from the enum
-    val allSubjects = remember { Subject.values().toList() }
+@Composable
+fun EnhancedQuizSetupScreen(
+    subjects: List<Subject>,
+    userProgress: Map<Subject, Float>,
+    learnerProfile: LearnerProfile?,
+    mode: QuizMode,
+    reviewAvailable: Int,
+    onModeChange: (QuizMode) -> Unit,
+    onGenerateQuiz: (Subject, String, Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var subject by remember { mutableStateOf<Subject?>(null) }
+    var topicText by remember { mutableStateOf("") }
+    var questionCnt by remember { mutableFloatStateOf(10f) }
+    var showDropdown by remember { mutableStateOf(false) }
 
     Column(
-        modifier = Modifier
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
             .fillMaxSize()
             .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text(
-            "Create a new adaptive quiz",
-            style = MaterialTheme.typography.headlineSmall
-        )
+        Text("Create a new adaptive quiz", style = MaterialTheme.typography.headlineSmall)
 
-        Text(
-            "No educational content loaded. You can still create a quiz!",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
-        // Subject selection
+        // Mode selector
         Card(
             modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer
+            )
         ) {
-            Column(
-                modifier = Modifier.padding(16.dp)
-            ) {
+            Column(Modifier.padding(16.dp)) {
                 Text(
-                    "Select Subject:",
-                    style = MaterialTheme.typography.labelLarge
+                    "Quiz Mode",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Bold
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(Modifier.height(8.dp))
 
-                allSubjects.forEach { subject ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    QuizMode.entries.forEach { qMode ->
+                        FilterChip(
+                            selected = mode == qMode,
+                            onClick = { onModeChange(qMode) },
+                            label = {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    when (qMode) {
+                                        QuizMode.NORMAL -> Icon(Icons.Default.Quiz, null, Modifier.size(12.dp))
+                                        QuizMode.REVIEW -> Icon(Icons.Default.Refresh, null, Modifier.size(12.dp))
+                                        QuizMode.ADAPTIVE -> Icon(Icons.Default.AutoAwesome, null, Modifier.size(12.dp))
+                                    }
+                                    Text(
+                                        text = qMode.name,
+                                        fontSize = 10.sp
+                                    )
+
+                                    if (qMode == QuizMode.REVIEW && reviewAvailable > 0) {
+                                        Badge { Text("$reviewAvailable") }
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                // Mode description
+                Text(
+                    when (mode) {
+                        QuizMode.NORMAL -> "Standard quiz with mixed difficulty questions"
+                        QuizMode.REVIEW -> "Review questions you haven't seen in a while"
+                        QuizMode.ADAPTIVE -> "Difficulty adjusts based on your performance"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                )
+            }
+        }
+
+        // Subject selector with progress - FIXED
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(4.dp)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Select Subject", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(8.dp))
+
+                OutlinedButton(
+                    onClick = { showDropdown = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        androidx.compose.material3.RadioButton(
-                            selected = selectedSubject == subject,
-                            onClick = { selectedSubject = subject }
+                        Text(subject?.name ?: "Choose subject")
+                        subject?.let { subj ->
+                            val accuracy = userProgress[subj] ?: 0f
+                            LinearProgressIndicator(
+                                progress = { accuracy },
+                                modifier = Modifier
+                                    .width(60.dp)
+                                    .height(4.dp),
+                                color = when {
+                                    accuracy > 0.8f -> Color.Green
+                                    accuracy > 0.6f -> Color.Yellow
+                                    else -> Color.Red
+                                }
+                            )
+                        }
+                    }
+                }
+
+                DropdownMenu(
+                    expanded = showDropdown,
+                    onDismissRequest = { showDropdown = false },
+                    modifier = Modifier.fillMaxWidth(0.9f)
+                ) {
+                    subjects.forEach { s ->
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(s.name)
+                                    val accuracy = userProgress[s] ?: 0f
+                                    Text(
+                                        "${(accuracy * 100).toInt()}%",
+                                        color = when {
+                                            accuracy > 0.8f -> Color.Green
+                                            accuracy > 0.6f -> Color.Yellow
+                                            else -> Color.Red
+                                        }
+                                    )
+                                }
+                            },
+                            onClick = {
+                                subject = s
+                                showDropdown = false
+                            }
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(subject.name)
+                    }
+                }
+
+                // Show mastered concepts for selected subject
+                subject?.let { subj ->
+                    learnerProfile?.masteredConcepts?.takeIf { it.isNotEmpty() }?.let { concepts ->
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Mastered: ${concepts.take(3).joinToString(", ")}${if (concepts.size > 3) " +${concepts.size - 3} more" else ""}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     }
                 }
             }
         }
 
-        // Topic text field
+        // Topic input
         OutlinedTextField(
             value = topicText,
             onValueChange = { topicText = it },
             label = { Text("Topic (optional)") },
-            placeholder = { Text("e.g., Linear Equations, Cell Biology") },
+            placeholder = { Text("e.g., Linear Equations") },
             modifier = Modifier.fillMaxWidth()
         )
 
         // Question count slider
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Text("Number of questions: ${questionCount.toInt()}")
-            androidx.compose.material3.Slider(
-                value = questionCount,
-                onValueChange = { questionCount = it },
+        Column(Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Number of questions: ${questionCnt.toInt()}")
+                if (mode == QuizMode.REVIEW && reviewAvailable < questionCnt) {
+                    Text(
+                        "Only $reviewAvailable available for review",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+            Slider(
+                value = questionCnt,
+                onValueChange = { questionCnt = it },
                 valueRange = 5f..20f,
-                steps = 14
+                steps = 14,
+                enabled = mode != QuizMode.REVIEW || reviewAvailable >= 5
             )
         }
 
         // Generate button
         Button(
             onClick = {
-                selectedSubject?.let { subject ->
-                    onGenerateQuiz(subject, topicText.trim(), questionCount.toInt())
-                }
+                subject?.let { s -> onGenerateQuiz(s, topicText.trim(), questionCnt.toInt()) }
             },
-            enabled = selectedSubject != null,
+            enabled = subject != null && (mode != QuizMode.REVIEW || reviewAvailable >= 5),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Generate Quiz")
-            Spacer(Modifier.width(4.dp))
-            Icon(Icons.Default.ArrowForward, contentDescription = null)
+            Icon(
+                when (mode) {
+                    QuizMode.NORMAL -> Icons.Default.PlayArrow
+                    QuizMode.REVIEW -> Icons.Default.Refresh
+                    QuizMode.ADAPTIVE -> Icons.Default.AutoAwesome
+                },
+                contentDescription = null
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                when (mode) {
+                    QuizMode.NORMAL -> "Generate Quiz"
+                    QuizMode.REVIEW -> "Start Review Session"
+                    QuizMode.ADAPTIVE -> "Start Adaptive Quiz"
+                }
+            )
         }
     }
 }
-/* ────────────────────────────────────────────────────────────────
- * QuizSetupScreen – select subject / topic / #questions
- * ──────────────────────────────────────────────────────────────── */
+
+/* Enhanced progress indicator with mode info ----------------------------------- */
+
+/* Enhanced progress indicator with mode info ----------------------------------- */
+
 @Composable
-fun QuizSetupScreen(
-    subjects: List<Subject>,
-    onGenerateQuiz: (Subject, String, Int) -> Unit,
+private fun GenerationProgress(
+    done: Int,
+    mode: QuizMode,
     modifier: Modifier = Modifier
 ) {
-    var selectedSubject by remember { mutableStateOf<Subject?>(null) }
-    var topicText by remember { mutableStateOf("") }
-    var questionCount by remember { mutableStateOf(10f) }
+    val state by (hiltViewModel<QuizGeneratorViewModel>()).state.collectAsStateWithLifecycle()
+
+    // Animation states for creative loading
+    val infiniteTransition = rememberInfiniteTransition(label = "loading")
+    val bookRotation by infiniteTransition.animateFloat(
+        initialValue = -15f,
+        targetValue = 15f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "book_rotation"
+    )
+
+    val pencilOffset by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 20f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1500, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pencil_offset"
+    )
+
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 0.9f,
+        targetValue = 1.1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse"
+    )
 
     Column(
         modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        // Creative animated icon
+        Box(
+            modifier = Modifier
+                .size(120.dp)
+                .padding(16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            // Background circle with pulse
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .scale(pulseScale)
+                    .clip(CircleShape)
+                    .background(
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                    )
+            )
+
+            // Book icon rotating
+            Icon(
+                Icons.Default.MenuBook,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(48.dp)
+                    .rotate(bookRotation)
+                    .offset(y = (-10).dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+
+            // Pencil writing animation
+            Icon(
+                Icons.Default.Edit,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(32.dp)
+                    .offset(x = pencilOffset.dp, y = pencilOffset.dp)
+                    .rotate(-45f),
+                tint = MaterialTheme.colorScheme.secondary
+            )
+
+            // Sparkles around
+            repeat(3) { index ->
+                val sparkleRotation by infiniteTransition.animateFloat(
+                    initialValue = 0f,
+                    targetValue = 360f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(3000 + index * 500, easing = LinearEasing)
+                    ),
+                    label = "sparkle_$index"
+                )
+
+                Icon(
+                    Icons.Default.AutoAwesome,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(16.dp)
+                        .offset(x = 40.dp)
+                        .rotate(sparkleRotation + index * 120f),
+                    tint = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.7f)
+                )
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        // Dynamic status text with animation
+        AnimatedContent(
+            targetState = state.generationPhase,
+            transitionSpec = {
+                fadeIn() + expandVertically() togetherWith fadeOut() + shrinkVertically()
+            },
+            label = "phase"
+        ) { phase ->
+            Text(
+                text = phase,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 32.dp)
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            when (mode) {
+                QuizMode.NORMAL -> "Creating a fresh quiz just for you"
+                QuizMode.REVIEW -> "Finding questions you haven't seen in a while"
+                QuizMode.ADAPTIVE -> "Tailoring difficulty to your skill level"
+            },
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 32.dp)
+        )
+
+        Spacer(Modifier.height(24.dp))
+
+        // Progress with animated questions counter
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth(0.8f)
+                    .height(8.dp)
+                    .clip(RoundedCornerShape(4.dp)),
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                strokeCap = ProgressIndicatorDefaults.LinearStrokeCap
+            )
+
+            // Questions counter bubble
+            if (done > 0) {
+                Card(
+                    modifier = Modifier.offset(y = 24.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "$done questions ready",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/* Empty state setup (unchanged but with mode selector) -------------------- */
+
+@Composable
+fun EmptyStateQuizSetup(
+    mode: QuizMode,
+    onModeChange: (QuizMode) -> Unit,
+    onGenerateQuiz: (Subject, String, Int) -> Unit
+) {
+    var subject by remember { mutableStateOf<Subject?>(null) }
+    var topicText by remember { mutableStateOf("") }
+    var questionCnt by remember { mutableFloatStateOf(10f) }
+
+    val subjects = remember { Subject.entries }
+
+    Column(
+        modifier = Modifier
+            .verticalScroll(rememberScrollState())
             .fillMaxSize()
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        Text("Create a new adaptive quiz", style = MaterialTheme.typography.headlineSmall)
         Text(
-            "Create a new adaptive quiz",
-            style = MaterialTheme.typography.headlineSmall
+            "No educational content loaded. You can still create a quiz!",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        // 1. Subject dropdown
-        OutlinedButton(
-            onClick = { /* show menu – simple selector for brevity */ },
-            modifier = Modifier.fillMaxWidth()
+        // Mode selector card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer
+            )
         ) {
-            Text(selectedSubject?.name ?: "Choose subject")
-        }
-        // Simple drop-down menu
-        androidx.compose.material3.DropdownMenu(
-            expanded = selectedSubject == null,   // opens first time
-            onDismissRequest = { /* no-op */ }
-        ) {
-            subjects.forEach { subj ->
-                androidx.compose.material3.DropdownMenuItem(
-                    text = { Text(subj.name) },
-                    onClick = { selectedSubject = subj }
-                )
+            Column(Modifier.padding(16.dp)) {
+                Text("Quiz Mode", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    QuizMode.entries.forEach { qMode ->
+                        FilterChip(
+                            selected = mode == qMode,
+                            onClick = { onModeChange(qMode) },
+                            label = { Text(qMode.name) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
             }
         }
 
-        // 2. Topic text field
+        // Subject chooser
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(4.dp)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Select Subject:", style = MaterialTheme.typography.labelLarge)
+                Spacer(Modifier.height(8.dp))
+                subjects.forEach { s ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = subject == s,
+                            onClick = { subject = s }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(s.name)
+                    }
+                }
+            }
+        }
+
         OutlinedTextField(
             value = topicText,
             onValueChange = { topicText = it },
             label = { Text("Topic (optional)") },
+            placeholder = { Text("e.g., Linear Equations") },
             modifier = Modifier.fillMaxWidth()
         )
 
-        // 3. Question count slider
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Text("Number of questions: ${questionCount.toInt()}")
-            androidx.compose.material3.Slider(
-                value = questionCount,
-                onValueChange = { questionCount = it },
+        Column(Modifier.fillMaxWidth()) {
+            Text("Number of questions: ${questionCnt.toInt()}")
+            Slider(
+                value = questionCnt,
+                onValueChange = { questionCnt = it },
                 valueRange = 5f..20f,
-                steps = 15
+                steps = 14
             )
         }
 
-        // 4. Generate button
         Button(
             onClick = {
-                val subj = selectedSubject ?: return@Button
-                onGenerateQuiz(subj, topicText.trim(), questionCount.toInt())
+                subject?.let { onGenerateQuiz(it, topicText.trim(), questionCnt.toInt()) }
             },
-            enabled = selectedSubject != null
+            enabled = subject != null,
+            modifier = Modifier.fillMaxWidth()
         ) {
             Text("Generate Quiz")
             Spacer(Modifier.width(4.dp))
-            Icon(Icons.Default.ArrowForward, contentDescription = null)
+            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
         }
     }
 }
 
-/* ────────────────────────────────────────────────────────────────
- * AnswerOption – used by QuizTakingScreen for MCQ choices
- * ──────────────────────────────────────────────────────────────── */
+/* Enhanced quiz taking screen with hints and concept display ------------------ */
+
+@Composable
+fun EnhancedQuizTakingScreen(
+    quiz: Quiz,
+    conceptCoverage: Map<String, Int>,
+    onAnswerSubmit: (String, String) -> Unit,
+    onQuizComplete: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var index by remember { mutableIntStateOf(0) }
+    val q = quiz.questions[index]
+    var chosenAnswer by remember(q.id) { mutableStateOf<String?>(null) }
+    var showHint by remember(q.id) { mutableStateOf(false) }
+
+    var isSubmitting by remember(q.id) { mutableStateOf(false) }
+    LaunchedEffect(q.isAnswered) { if (q.isAnswered) isSubmitting = false }
+
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        // Progress and stats row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                LinearProgressIndicator(
+                    progress = { (index + 1) / quiz.questions.size.toFloat() },
+                    modifier = Modifier.fillMaxWidth(),
+                    strokeCap = ProgressIndicatorDefaults.LinearStrokeCap,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Question ${index + 1} of ${quiz.questions.size}",
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
+
+            // Concept coverage chip
+            @OptIn(ExperimentalMaterial3Api::class)
+            if (conceptCoverage.isNotEmpty()) {
+                AssistChip(
+                    onClick = { /* TODO: show concept list */ },
+                    modifier = Modifier.padding(start = 8.dp),
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Category,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    },
+                    label = {
+                        Text(
+                            "${conceptCoverage.size} concepts",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                )
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // Question card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(4.dp)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                // Difficulty badge
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(q.questionText, style = MaterialTheme.typography.headlineSmall)
+                    Badge(
+                        containerColor = when (q.difficulty) {
+                            Difficulty.EASY -> Color.Green
+                            Difficulty.MEDIUM -> Color.Yellow
+                            Difficulty.HARD -> Color.Red
+                            Difficulty.ADAPTIVE -> MaterialTheme.colorScheme.primary
+                        }
+                    ) {
+                        Text(q.difficulty.name)
+                    }
+                }
+
+                // Review indicator
+                q.lastSeenAt?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.History,
+                            null,
+                            Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "Review question",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
+                // Hint section
+                if (q.hint != null && !q.isAnswered) {
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedButton(
+                        onClick = { showHint = !showHint },
+                        modifier = Modifier.align(Alignment.Start)
+                    ) {
+                        Icon(
+                            if (showHint) Icons.Default.VisibilityOff else Icons.Default.Lightbulb,
+                            null,
+                            Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (showHint) "Hide Hint" else "Show Hint")
+                    }
+
+                    AnimatedVisibility(
+                        visible = showHint,
+                        enter = expandVertically(),
+                        exit = shrinkVertically()
+                    ) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Lightbulb,
+                                    null,
+                                    tint = MaterialTheme.colorScheme.onTertiaryContainer
+                                )
+                                Text(
+                                    q.hint,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        // Answer options - using the enhanced answer section
+        EnhancedAnswerSection(
+            question = q,
+            chosenAnswer = chosenAnswer,
+            onAnswerChange = { chosenAnswer = it }
+        )
+
+        // Enhanced feedback card
+        if (q.isAnswered && q.feedback != null) {
+            Spacer(Modifier.height(16.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (q.userAnswer == q.correctAnswer)
+                        MaterialTheme.colorScheme.primaryContainer
+                    else
+                        MaterialTheme.colorScheme.errorContainer
+                )
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            if (q.userAnswer == q.correctAnswer)
+                                Icons.Default.CheckCircle
+                            else
+                                Icons.Default.Cancel,
+                            null,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            if (q.userAnswer == q.correctAnswer) "Correct!" else "Incorrect",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(q.feedback, style = MaterialTheme.typography.bodyMedium)
+
+                    if (q.explanation.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        HorizontalDivider(
+                            Modifier,
+                            DividerDefaults.Thickness,
+                            DividerDefaults.color
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row {
+                            Icon(
+                                Icons.Default.Info,
+                                null,
+                                Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                q.explanation,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
+
+                    // Concepts covered
+                    if (q.conceptsCovered.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Tag,
+                                null,
+                                Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                "Concepts: ${q.conceptsCovered.joinToString(", ")}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.weight(1f))
+
+        // Navigation buttons
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            if (index > 0) {
+                OutlinedButton(onClick = {
+                    index--
+                    showHint = false
+                }) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Previous")
+                }
+            } else {
+                Spacer(Modifier.width(1.dp))
+            }
+
+            when {
+                /* ─── Submit Answer (now with loading support) ─── */
+                !q.isAnswered && chosenAnswer != null -> {
+                    Button(
+                        onClick = {
+                            isSubmitting = true
+                            onAnswerSubmit(q.id, chosenAnswer!!)
+                            showHint = false
+                        },
+                        enabled = !isSubmitting,
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    ) {
+                        if (isSubmitting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                        } else {
+                            Icon(Icons.AutoMirrored.Filled.Send, null)
+                            Spacer(Modifier.width(4.dp))
+                            Text("Submit Answer")
+                        }
+                    }
+                }
+
+                /* ─── Next question ─── */
+                q.isAnswered && index < quiz.questions.size - 1 -> {
+                    Button(onClick = {
+                        index++
+                        chosenAnswer = null
+                        showHint = false
+                    }) {
+                        Text("Next")
+                        Spacer(Modifier.width(4.dp))
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, null)
+                    }
+                }
+
+                /* ─── Complete quiz ─── */
+                q.isAnswered && index == quiz.questions.size - 1 -> {
+                    Button(onClick = onQuizComplete) {
+                        Icon(Icons.Default.Done, null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Complete Quiz")
+                    }
+                }
+
+                else -> {
+                    Spacer(Modifier.width(1.dp))
+                }
+            }
+        }
+    }
+}
+
+/* Enhanced Answer Section - handles all question types properly */
+
+@Composable
+fun EnhancedAnswerSection(
+    question: Question,
+    chosenAnswer: String?,
+    onAnswerChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // Validate question type matches the available options
+    val effectiveQuestionType = when {
+        question.questionType == QuestionType.MULTIPLE_CHOICE && question.options.size < 2 -> {
+            // Fallback to short answer if not enough options
+            QuestionType.SHORT_ANSWER
+        }
+        question.questionType == QuestionType.TRUE_FALSE && question.options.size != 2 -> {
+            // Force true/false options
+            QuestionType.TRUE_FALSE
+        }
+        else -> question.questionType
+    }
+
+    Column(modifier = modifier) {
+        // Show a warning if question type was adjusted
+        if (effectiveQuestionType != question.questionType) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Warning,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Question format adjusted due to missing options",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+            }
+        }
+
+        when (effectiveQuestionType) {
+            QuestionType.MULTIPLE_CHOICE -> {
+                val validOptions = if (question.options.size >= 2) {
+                    question.options
+                } else {
+                    // Create dummy options if needed
+                    listOf("Option A", "Option B", "Option C", "Option D")
+                }
+
+                validOptions.forEachIndexed { idx, opt ->
+                    AnswerOption(
+                        text = opt,
+                        isSelected = chosenAnswer == opt,
+                        isCorrect = question.isAnswered && opt == question.correctAnswer,
+                        isWrong = question.isAnswered && opt == question.userAnswer && opt != question.correctAnswer,
+                        enabled = !question.isAnswered,
+                        onClick = { onAnswerChange(opt) },
+                        prefix = "${('A'..'D').toList()[idx]}. "
+                    )
+                    if (idx < validOptions.size - 1) {
+                        Spacer(Modifier.height(8.dp))
+                    }
+                }
+            }
+
+            QuestionType.TRUE_FALSE -> {
+                // For True/False, ensure we show only True/False buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    listOf("True" to Icons.Default.Check, "False" to Icons.Default.Close).forEach { (opt, icon) ->
+                        ElevatedButton(
+                            onClick = { onAnswerChange(opt) },
+                            enabled = !question.isAnswered,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.elevatedButtonColors(
+                                containerColor = when {
+                                    question.isAnswered && opt == question.correctAnswer ->
+                                        MaterialTheme.colorScheme.primary
+                                    question.isAnswered && opt == question.userAnswer ->
+                                        MaterialTheme.colorScheme.error
+                                    chosenAnswer == opt ->
+                                        MaterialTheme.colorScheme.secondaryContainer
+                                    else -> MaterialTheme.colorScheme.surface
+                                }
+                            )
+                        ) {
+                            Icon(icon, null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(opt)
+                        }
+                    }
+                }
+            }
+            QuestionType.FILL_IN_BLANK -> {
+                var txt by remember(question.id) { mutableStateOf(chosenAnswer ?: "") }
+
+                // Show the question with visual blank indicator
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                ) {
+                    Text(
+                        text = question.questionText.replace("_____", "[ ? ]"),
+                        modifier = Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
+
+                OutlinedTextField(
+                    value = txt,
+                    onValueChange = {
+                        txt = it
+                        onAnswerChange(it)
+                    },
+                    label = { Text("Fill in the blank") },
+                    placeholder = { Text("Type your answer") },
+                    enabled = !question.isAnswered,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Sentences
+                    )
+                )
+            }
+
+            QuestionType.SHORT_ANSWER -> {
+                var txt by remember(question.id) { mutableStateOf(chosenAnswer ?: "") }
+                OutlinedTextField(
+                    value = txt,
+                    onValueChange = {
+                        txt = it
+                        onAnswerChange(it)
+                    },
+                    label = { Text("Your answer") },
+                    placeholder = { Text("Type your answer here...") },
+                    enabled = !question.isAnswered,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 96.dp, max = 200.dp),
+                    maxLines = 4,
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Sentences
+                    )
+                )
+
+                // Character counter for short answers
+                if (!question.isAnswered) {
+                    Text(
+                        "${txt.length}/200 characters",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.align(Alignment.End)
+                    )
+                }
+            }
+
+            else -> {
+                // Fallback for any other type
+                Text(
+                    "Unsupported question type",
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        }
+    }
+}
+
+/* Answer option helper (enhanced with better visual feedback) ---------------- */
+
 @Composable
 fun AnswerOption(
     text: String,
@@ -319,271 +1223,58 @@ fun AnswerOption(
     isCorrect: Boolean,
     isWrong: Boolean,
     enabled: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    prefix: String = ""
 ) {
-    val containerColor = when {
-        isCorrect  -> MaterialTheme.colorScheme.primary
-        isWrong    -> MaterialTheme.colorScheme.error
+    val container = when {
+        isCorrect -> MaterialTheme.colorScheme.primary
+        isWrong -> MaterialTheme.colorScheme.error
         isSelected -> MaterialTheme.colorScheme.secondaryContainer
-        else       -> MaterialTheme.colorScheme.surface
+        else -> MaterialTheme.colorScheme.surface
     }
-    val contentColor =
-        if (isCorrect || isWrong)
-            MaterialTheme.colorScheme.onPrimary
-        else
-            MaterialTheme.colorScheme.onSurface
+    val content = when {
+        isCorrect || isWrong -> MaterialTheme.colorScheme.onPrimary
+        else -> MaterialTheme.colorScheme.onSurface
+    }
 
     ElevatedButton(
-        onClick  = onClick,
-        enabled  = enabled,
-        colors   = ButtonDefaults.elevatedButtonColors(
-            containerColor = containerColor,
-            contentColor   = contentColor
+        onClick = onClick,
+        enabled = enabled,
+        colors = ButtonDefaults.elevatedButtonColors(
+            containerColor = container,
+            contentColor = content
         ),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
     ) {
-        Text(text)
-    }
-}
-
-@Composable
-fun QuizTakingScreen(
-    quiz: Quiz,
-    onAnswerSubmit: (String, String) -> Unit,
-    onQuizComplete: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var currentQuestionIndex by remember { mutableStateOf(0) }
-    val currentQuestion = quiz.questions[currentQuestionIndex]
-    var selectedAnswer by remember(currentQuestion.id) { mutableStateOf<String?>(null) }
-
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        // Progress indicator
-        LinearProgressIndicator(
-            progress = (currentQuestionIndex + 1) / quiz.questions.size.toFloat(),
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Question counter
-        Text(
-            text = "Question ${currentQuestionIndex + 1} of ${quiz.questions.size}",
-            style = MaterialTheme.typography.labelLarge
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Question
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp)
-            ) {
-                Text(
-                    text = currentQuestion.questionText,
-                    style = MaterialTheme.typography.headlineSmall
-                )
-
-                if (currentQuestion.hint != null && !currentQuestion.isAnswered) {
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    var showHint by remember { mutableStateOf(false) }
-
-                    TextButton(
-                        onClick = { showHint = !showHint }
-                    ) {
-                        Icon(
-                            Icons.Default.ThumbUp,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(if (showHint) "Hide Hint" else "Show Hint")
-                    }
-
-                    if (showHint) {
-                        Text(
-                            text = currentQuestion.hint,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Answer options
-        when (currentQuestion.questionType) {
-            QuestionType.MULTIPLE_CHOICE -> {
-                currentQuestion.options.forEach { option ->
-                    AnswerOption(
-                        text = option,
-                        isSelected = selectedAnswer == option,
-                        isCorrect = currentQuestion.isAnswered && option == currentQuestion.correctAnswer,
-                        isWrong = currentQuestion.isAnswered && option == currentQuestion.userAnswer && option != currentQuestion.correctAnswer,
-                        enabled = !currentQuestion.isAnswered,
-                        onClick = { selectedAnswer = option }
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
-            }
-
-            QuestionType.TRUE_FALSE -> {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    listOf("True", "False").forEach { option ->
-                        ElevatedButton(
-                            onClick = { selectedAnswer = option },
-                            enabled = !currentQuestion.isAnswered,
-                            colors = ButtonDefaults.elevatedButtonColors(
-                                containerColor = when {
-                                    currentQuestion.isAnswered && option == currentQuestion.correctAnswer ->
-                                        MaterialTheme.colorScheme.primary
-                                    currentQuestion.isAnswered && option == currentQuestion.userAnswer && option != currentQuestion.correctAnswer ->
-                                        MaterialTheme.colorScheme.error
-                                    selectedAnswer == option ->
-                                        MaterialTheme.colorScheme.secondaryContainer
-                                    else -> MaterialTheme.colorScheme.surface
-                                }
-                            )
-                        ) {
-                            Text(option)
-                        }
-                    }
-                }
-            }
-
-            QuestionType.FILL_IN_BLANK -> {
-                var textAnswer by remember { mutableStateOf("") }
-
-                OutlinedTextField(
-                    value = textAnswer,
-                    onValueChange = {
-                        textAnswer = it
-                        selectedAnswer = it
-                    },
-                    label = { Text("Your answer") },
-                    enabled = !currentQuestion.isAnswered,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-
-            QuestionType.SHORT_ANSWER -> TODO()
-            QuestionType.MATCHING -> TODO()
-        }
-
-        // Feedback section
-        if (currentQuestion.isAnswered && currentQuestion.feedback != null) {
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (currentQuestion.userAnswer == currentQuestion.correctAnswer)
-                        MaterialTheme.colorScheme.primaryContainer
-                    else
-                        MaterialTheme.colorScheme.errorContainer
-                )
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            if (currentQuestion.userAnswer == currentQuestion.correctAnswer)
-                                Icons.Default.CheckCircle
-                            else
-                                Icons.Default.Cancel,
-                            contentDescription = null
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (currentQuestion.userAnswer == currentQuestion.correctAnswer)
-                                "Correct!" else "Incorrect",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text(
-                        text = currentQuestion.feedback,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-
-                    if (currentQuestion.explanation != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Explanation: ${currentQuestion.explanation}",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.weight(1f))
-
-        // Navigation buttons
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.Start,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            if (currentQuestionIndex > 0) {
-                OutlinedButton(
-                    onClick = { currentQuestionIndex-- }
-                ) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = null)
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Previous")
-                }
-            } else {
-                Spacer(modifier = Modifier.width(1.dp))
+            if (isCorrect) {
+                Icon(Icons.Default.CheckCircle, null, Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+            } else if (isWrong) {
+                Icon(Icons.Default.Cancel, null, Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
             }
 
-            if (!currentQuestion.isAnswered && selectedAnswer != null) {
-                Button(
-                    onClick = {
-                        onAnswerSubmit(currentQuestion.id, selectedAnswer!!)
-                    }
-                ) {
-                    Text("Submit Answer")
-                }
-            } else if (currentQuestion.isAnswered) {
-                if (currentQuestionIndex < quiz.questions.size - 1) {
-                    Button(
-                        onClick = {
-                            currentQuestionIndex++
-                            selectedAnswer = null
-                        }
-                    ) {
-                        Text("Next")
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Icon(Icons.Default.ArrowForward, contentDescription = null)
-                    }
-                } else {
-                    Button(
-                        onClick = onQuizComplete
-                    ) {
-                        Icon(Icons.Default.Done, contentDescription = null)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Complete Quiz")
-                    }
-                }
+            if (prefix.isNotEmpty()) {
+                Text(
+                    prefix,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyLarge
+                )
             }
+
+            Text(
+                text,
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }

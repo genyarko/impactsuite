@@ -4,225 +4,423 @@ import android.app.Application
 import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.mygemma3n.gemma.GemmaEngine
+import com.example.mygemma3n.data.ChatRepository
+import com.example.mygemma3n.data.UnifiedGemmaService
+import com.example.mygemma3n.feature.chat.ChatMessage
 import com.example.mygemma3n.service.AudioCaptureService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import timber.log.Timber
+import java.text.SimpleDateFormat
+import java.util.*
 import javax.inject.Inject
+import com.example.mygemma3n.dataStore
+import com.example.mygemma3n.SPEECH_API_KEY
 
+/**
+ * Live‑caption ViewModel – **v2.1**
+ *
+ * Improvements
+ * ------------
+ * • **More tolerant buffering** – waits up to **2 s** of speech before flushing
+ *   and requires **4 consecutive silent frames (~400 ms)** to count as a pause.
+ * • Fixes premature truncation (e.g. "my name is" → "my name is George") on
+ *   mid‑tier phones where inference is slower than capture.
+ *
+ * Reduce max tokens for almost instantaneous response
+ */
 @HiltViewModel
 class LiveCaptionViewModel @Inject constructor(
     application: Application,
-    private val gemmaEngine: GemmaEngine,
-    private val translationCache: TranslationCache
+    private val speechService: SpeechRecognitionService,
+    private val gemmaService: UnifiedGemmaService,
+    private val translationCache: TranslationCache,
+    private val chatRepository: ChatRepository,
 ) : AndroidViewModel(application) {
 
-    private val _captionState = MutableStateFlow(CaptionState())
-    val captionState: StateFlow<CaptionState> = _captionState.asStateFlow()
+    /* ───────── UI STATE ───────── */
+    private val _state = MutableStateFlow(CaptionState())
+    val captionState: StateFlow<CaptionState> = _state.asStateFlow()
 
-    private var audioProcessingJob: Job? = null
+    /* ───────── buffers / jobs ───────── */
+    private val audioBuffer   = mutableListOf<FloatArray>()
+    private val pendingBuffer = mutableListOf<FloatArray>()
+    private var silenceStart: Long? = null
+    private var silentFrames = 0
+    private var audioJob: Job? = null
 
-    data class CaptionState(
-        val isListening: Boolean = false,
-        val currentTranscript: String = "",
-        val translatedText: String = "",
-        val sourceLanguage: Language = Language.AUTO,
-        val targetLanguage: Language = Language.ENGLISH,
-        val latencyMs: Long = 0,
-        val error: String? = null
-    )
+    /* ───────── chat session ───────── */
+    private var sessionId: String? = null
 
-    init {
-        // Monitor service state
-        viewModelScope.launch {
-            AudioCaptureService.isRunning.collect { isRunning ->
-                _captionState.update { it.copy(isListening = isRunning) }
+    /* ───────── constants ───────── */
+    private val sampleRate = 16_000
+    private val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+    private val MAX_UTTERANCE_MS = 2_000L
+    private val SILENCE_FRAMES_TO_FLUSH = 4
 
-                if (isRunning) {
-                    startProcessingAudio()
-                } else {
-                    stopProcessingAudio()
-                }
-            }
-        }
-    }
+    /* ───────── init engines ───────── */
+    init { initialiseEngines(); observeRecorder() }
+
+    /* ───────────────────────────────────────────────────────────── */
+    /*  PUBLIC  API                                                */
+    /* ───────────────────────────────────────────────────────────── */
 
     fun startLiveCaption() {
-        if (_captionState.value.isListening) return
-
-        try {
-            val context = getApplication<Application>()
-            val intent = Intent(context, AudioCaptureService::class.java).apply {
-                action = AudioCaptureService.ACTION_START_CAPTURE
-            }
-            context.startService(intent)
-
-            _captionState.update { it.copy(error = null) }
-        } catch (e: Exception) {
-            _captionState.update {
-                it.copy(error = "Failed to start service: ${e.message}")
-            }
-        }
-    }
-
-    fun stopLiveCaption() {
-        val context = getApplication<Application>()
-        val intent = Intent(context, AudioCaptureService::class.java).apply {
-            action = AudioCaptureService.ACTION_STOP_CAPTURE
-        }
-        context.startService(intent)
-    }
-
-    private fun startProcessingAudio() {
-        audioProcessingJob = viewModelScope.launch {
-            AudioCaptureService.audioDataFlow
-                .filterNotNull()
-                .chunked(1600) // Process in 100ms chunks (16kHz * 0.1s)
-                .transform { audioChunk ->
-                    val startTime = System.currentTimeMillis()
-
-                    // Process audio through Gemma for transcription
-                    val transcript = processAudioChunk(audioChunk)
-
-                    if (transcript.isNotEmpty()) {
-                        emit(transcript)
-
-                        val latency = System.currentTimeMillis() - startTime
-                        _captionState.update { it.copy(latencyMs = latency) }
-                    }
-                }
-                .scan("") { acc, newText ->
-                    // Keep last 500 characters for context
-                    val combined = acc + " " + newText
-                    if (combined.length > 500) {
-                        combined.takeLast(500)
-                    } else {
-                        combined
-                    }.trim()
-                }
-                .collect { transcript ->
-                    _captionState.update { it.copy(currentTranscript = transcript) }
-
-                    // Translate if needed
-                    if (_captionState.value.targetLanguage != _captionState.value.sourceLanguage &&
-                        _captionState.value.sourceLanguage != Language.AUTO) {
-                        translateText(transcript)
-                    }
-                }
-        }
-    }
-
-    private fun stopProcessingAudio() {
-        audioProcessingJob?.cancel()
-        audioProcessingJob = null
-    }
-
-    fun setSourceLanguage(language: Language) {
-        _captionState.update {
-            it.copy(
-                sourceLanguage = language,
-                translatedText = "" // Clear translation when language changes
-            )
-        }
-    }
-
-    fun setTargetLanguage(language: Language) {
-        _captionState.update {
-            it.copy(
-                targetLanguage = language,
-                translatedText = "" // Clear translation when language changes
-            )
-        }
-
-        // Retranslate current text if available
-        val currentTranscript = _captionState.value.currentTranscript
-        if (currentTranscript.isNotEmpty() &&
-            language != _captionState.value.sourceLanguage) {
-            viewModelScope.launch {
-                translateText(currentTranscript)
-            }
-        }
-    }
-
-    private suspend fun processAudioChunk(audioChunk: FloatArray): String {
-        // In production, this would use Gemma's audio processing capabilities
-        // For now, we'll use a simplified approach
-
-        val prompt = buildMultimodalPrompt(
-            instruction = """
-                Transcribe the audio to text. 
-                Language: ${_captionState.value.sourceLanguage.displayName}
-                Output only the transcribed text, nothing else.
-            """.trimIndent(),
-            audioData = audioChunk,
-            previousContext = _captionState.value.currentTranscript.takeLast(100)
-        )
-
-        return try {
-            gemmaEngine.generateText(
-                prompt = prompt,
-                config = GemmaEngine.GenerationConfig(
-                    maxNewTokens = 50,
-                    temperature = 0.1f,
-                    doSample = false // Greedy decoding for accuracy
-                )
-            ).toList().joinToString("")
-        } catch (e: Exception) {
-            ""
-        }
-    }
-
-    private suspend fun translateText(text: String) {
-        if (text.isBlank()) return
-
-        // Check cache first
-        val cacheKey = "${text.take(100)}_${_captionState.value.sourceLanguage.code}_${_captionState.value.targetLanguage.code}"
-        translationCache.get(cacheKey)?.let { cached ->
-            _captionState.update { it.copy(translatedText = cached) }
+        if (_state.value.isListening) return
+        if (!_state.value.isModelReady) {
+            _state.update { it.copy(error = "AI model not ready. Please wait.") }
             return
         }
 
-        // Generate translation
-        val translationPrompt = """
-            Translate the following text from ${_captionState.value.sourceLanguage.displayName} to ${_captionState.value.targetLanguage.displayName}.
-            Maintain the original meaning and tone.
-            
-            Text: "$text"
-            
-            Translation:
-        """.trimIndent()
+        viewModelScope.launch {
+            /* create a fresh chat session */
+            sessionId = chatRepository.createNewSession(
+                title = "Live caption ${sdf.format(Date())}"
+            )
+        }
 
-        try {
-            val translation = gemmaEngine.generateText(
-                prompt = translationPrompt,
-                config = GemmaEngine.GenerationConfig(
-                    maxNewTokens = 100,
-                    temperature = 0.3f
-                )
-            ).toList().joinToString("").trim()
-
-            if (translation.isNotEmpty()) {
-                translationCache.put(cacheKey, translation)
-                _captionState.update { it.copy(translatedText = translation) }
+        getApplication<Application>().startService(
+            Intent(getApplication(), AudioCaptureService::class.java).apply {
+                action = AudioCaptureService.ACTION_START_CAPTURE
             }
-        } catch (e: Exception) {
-            _captionState.update {
-                it.copy(error = "Translation error: ${e.message}")
+        )
+    }
+
+    fun stopLiveCaption() {
+        getApplication<Application>().startService(
+            Intent(getApplication(), AudioCaptureService::class.java).apply {
+                action = AudioCaptureService.ACTION_STOP_CAPTURE
+            }
+        )
+
+        /* clear UI and history */
+        _state.update { it.copy(
+            currentTranscript = "",
+            translatedText = "",
+            transcriptHistory = emptyList()
+        ) }
+        audioBuffer.clear(); pendingBuffer.clear(); silenceStart = null; silentFrames = 0; audioJob?.cancel()
+        sessionId = null
+    }
+
+    fun setSourceLanguage(lang: Language) =
+        _state.update { it.copy(sourceLanguage = lang, translatedText = "") }
+
+    fun setTargetLanguage(lang: Language) {
+        _state.update { it.copy(targetLanguage = lang) }
+        // Re-translate all history entries if language changed
+        if (lang != _state.value.sourceLanguage) {
+            viewModelScope.launch {
+                val currentHistory = _state.value.transcriptHistory
+                currentHistory.forEach { entry ->
+                    if (entry.transcript.isNotBlank()) {
+                        translateHistoryEntry(entry.transcript, entry.timestamp)
+                    }
+                }
             }
         }
     }
 
+    private suspend fun translateHistoryEntry(transcript: String, timestamp: Long) {
+        val tgt = _state.value.targetLanguage
+        val srcLang = _state.value.sourceLanguage
+        if (tgt == srcLang) return
+
+        val key = "${transcript.take(100)}_${srcLang.code}_${tgt.code}"
+        val translation = translationCache.get(key) ?: run {
+            val prompt = """
+                Translate this ${srcLang.displayName} text to ${tgt.displayName}. Give ONLY the direct translation, no explanations or alternatives:
+                "$transcript"
+            """.trimIndent()
+            val result = gemmaService.generateTextAsync(
+                prompt,
+                UnifiedGemmaService.GenerationConfig(maxTokens = 50, temperature = 0.1f)
+            ).trim()
+            translationCache.put(key, result)
+            result
+        }
+
+        if (translation.isNotBlank()) {
+            _state.update { state ->
+                val updatedHistory = state.transcriptHistory.map { entry ->
+                    if (entry.timestamp == timestamp && entry.transcript == transcript) {
+                        entry.copy(translation = translation)
+                    } else {
+                        entry
+                    }
+                }
+                state.copy(transcriptHistory = updatedHistory)
+            }
+        }
+    }
+
+    /* ───────────────────────────────────────────────────────────── */
+    /*  ENGINE INITIALISATION                                      */
+    /* ───────────────────────────────────────────────────────────── */
+
+    private fun initialiseEngines() = viewModelScope.launch {
+        try {
+            // Speech key from DataStore
+            if (!speechService.isInitialized) {
+                val key = getApplication<Application>().dataStore.data
+                    .map { it[SPEECH_API_KEY] ?: "" }
+                    .first()
+                if (key.isBlank()) {
+                    _state.update { it.copy(error = "Please enter your Speech API key in Settings") }
+                    return@launch
+                }
+                speechService.initializeWithApiKey(key)
+            }
+
+            // Gemma for translation
+            if (!gemmaService.isInitialized()) {
+                _state.update { it.copy(error = "Initialising AI model…") }
+                gemmaService.initializeBestAvailable()
+            }
+
+            _state.update { it.copy(isModelReady = true, error = null) }
+        } catch (e: Exception) {
+            Timber.e(e, "Init failed")
+            _state.update { it.copy(error = e.message, isModelReady = false) }
+        }
+    }
+
+    private fun observeRecorder() = viewModelScope.launch {
+        AudioCaptureService.isRunning.collect { running ->
+            _state.update { it.copy(isListening = running) }
+            if (running) startProcessingAudio() else stopProcessingAudioInternally()
+        }
+    }
+
+    /* ───────────────────────────────────────────────────────────── */
+    /*  AUDIO BUFFERING + STT                                       */
+    /* ───────────────────────────────────────────────────────────── */
+
+    private fun startProcessingAudio() {
+        audioJob?.cancel()
+        audioJob = AudioCaptureService.audioDataFlow
+            .filterNotNull()
+            .onEach { chunk ->
+                audioBuffer += chunk
+
+                if (AudioUtils.detectSilence(chunk)) {
+                    silentFrames++
+                    if (silentFrames >= SILENCE_FRAMES_TO_FLUSH) {
+                        flushBuffer(); silentFrames = 0
+                    }
+                } else {
+                    silentFrames = 0
+                    if (durationMs(audioBuffer) >= MAX_UTTERANCE_MS) flushBuffer()
+                }
+            }
+            .catch { e -> _state.update { it.copy(error = "Audio error: ${e.message}") } }
+            .launchIn(viewModelScope)
+    }
+
+    private fun stopProcessingAudioInternally() { audioJob?.cancel(); audioJob = null }
+
+    private fun flushBuffer() {
+        if (audioBuffer.isEmpty()) return
+        pendingBuffer.clear(); pendingBuffer += audioBuffer; audioBuffer.clear(); silenceStart = null
+        viewModelScope.launch { processPending() }
+    }
+
+    private suspend fun processPending() {
+        if (pendingBuffer.isEmpty() || !speechService.isInitialized) return
+        val combined = combine(pendingBuffer)
+        val pcm = toPcmBytes(combined)
+
+        val transcript = try {
+            speechService.transcribeAudioData(pcm, langCode())
+        } catch (e: Exception) {
+            _state.update { it.copy(error = "Transcription error: ${e.message}") }
+            return
+        }
+        if (transcript.isBlank()) return
+
+        Timber.d("Got transcript: '$transcript'")
+
+        // Add to history with VOICE source
+        val newEntry = TranscriptEntry(
+            transcript = transcript,
+            source = TranscriptSource.VOICE
+        )
+        _state.update {
+            it.copy(
+                currentTranscript = transcript,
+                transcriptHistory = it.transcriptHistory + newEntry
+            )
+        }
+        persistUserMessage(transcript)
+
+        // Check if we should translate
+        val shouldTrans = shouldTranslate()
+        Timber.d("Should translate: $shouldTrans (source: ${_state.value.sourceLanguage}, target: ${_state.value.targetLanguage})")
+
+        if (shouldTrans) {
+            translateAndPersist(transcript)
+        }
+    }
+
+    /* ───────────────────────────────────────────────────────────── */
+    /*  TRANSLATION + PERSIST                                       */
+    /* ───────────────────────────────────────────────────────────── */
+
+    private suspend fun translateAndPersist(src: String) {
+        val tgt = _state.value.targetLanguage
+        var srcLang = _state.value.sourceLanguage
+
+        // If source is AUTO, default to English for translation purposes
+        if (srcLang == Language.AUTO) {
+            srcLang = Language.ENGLISH
+            Timber.d("Source language is AUTO, using English as default")
+        }
+
+        if (tgt == srcLang) {
+            Timber.d("Source and target languages are the same, skipping translation")
+            return
+        }
+
+        Timber.d("Starting translation: $srcLang -> $tgt for text: '$src'")
+
+        val key = "${src.take(100)}_${srcLang.code}_${tgt.code}"
+        val translation = translationCache.get(key) ?: run {
+            val prompt = """
+                Translate this ${srcLang.displayName} text to ${tgt.displayName}. Give ONLY the direct translation, no explanations or alternatives:
+                "$src"
+            """.trimIndent()
+
+            Timber.d("Sending prompt to Gemma: $prompt")
+
+            try {
+                val result = gemmaService.generateTextAsync(
+                    prompt,
+                    UnifiedGemmaService.GenerationConfig(maxTokens = 50, temperature = 0.1f)
+                ).trim()
+                translationCache.put(key, result)
+                result
+            } catch (e: Exception) {
+                Timber.e(e, "Translation failed")
+                ""
+            }
+        }
+
+        if (translation.isNotBlank()) {
+            // Update the last history entry with translation
+            _state.update { state ->
+                val updatedHistory = state.transcriptHistory.toMutableList()
+                val lastIndex = updatedHistory.lastIndex
+                if (lastIndex >= 0 && updatedHistory[lastIndex].transcript == src) {
+                    updatedHistory[lastIndex] = updatedHistory[lastIndex].copy(translation = translation)
+                    Timber.d("Updated history entry at index $lastIndex with translation: '$translation'")
+                } else {
+                    Timber.w("Could not find matching history entry for transcript: '$src'")
+                }
+                state.copy(
+                    translatedText = translation,
+                    transcriptHistory = updatedHistory
+                )
+            }
+            persistAiMessage(translation)
+        } else {
+            Timber.w("Translation was blank")
+        }
+    }
+
+    /* ───────────────────────────────────────────────────────────── */
+    /*  CHAT PERSISTENCE                                            */
+    /* ───────────────────────────────────────────────────────────── */
+
+    private fun persistUserMessage(text: String) {
+        sessionId?.let { sid ->
+            viewModelScope.launch { chatRepository.addMessage(sid, ChatMessage.User(content = text)) }
+        }
+    }
+
+    private fun persistAiMessage(text: String) {
+        sessionId?.let { sid ->
+            viewModelScope.launch { chatRepository.addMessage(sid, ChatMessage.AI(content = text)) }
+        }
+    }
+
+    /* ───────────────────────────────────────────────────────────── */
+    /*  Text input                                                   */
+    /* ───────────────────────────────────────────────────────────── */
+    fun submitTextInput(text: String) {
+        if (text.isBlank()) return
+
+        viewModelScope.launch {
+            // Create or ensure we have a session
+            if (sessionId == null) {
+                sessionId = chatRepository.createNewSession(
+                    title = "Text translation ${sdf.format(Date())}"
+                )
+            }
+
+            // Add to history with TYPED source
+            val newEntry = TranscriptEntry(
+                transcript = text,
+                source = TranscriptSource.TYPED
+            )
+            _state.update {
+                it.copy(
+                    currentTranscript = text,
+                    transcriptHistory = it.transcriptHistory + newEntry
+                )
+            }
+
+            // Persist to chat
+            persistUserMessage(text)
+
+            // Translate if needed
+            if (shouldTranslate()) {
+                translateAndPersist(text)
+            }
+        }
+    }
+
+
+
+    /* ───────────────────────────────────────────────────────────── */
+    /*  UTILS                                                       */
+    /* ───────────────────────────────────────────────────────────── */
+
+    private fun combine(chunks: List<FloatArray>): FloatArray {
+        val out = FloatArray(chunks.sumOf { it.size }); var pos = 0
+        for (c in chunks) { c.copyInto(out, pos); pos += c.size }
+        return out
+    }
+
+    private fun toPcmBytes(samples: FloatArray): ByteArray {
+        val bytes = ByteArray(samples.size * 2)
+        for (i in samples.indices) {
+            val v = (samples[i].coerceIn(-1f, 1f) * 32767).toInt()
+            bytes[i * 2] = (v and 0xFF).toByte()
+            bytes[i * 2 + 1] = ((v ushr 8) and 0xFF).toByte()
+        }
+        return bytes
+    }
+
+    private fun langCode(): String = when (val src = _state.value.sourceLanguage) {
+        Language.AUTO -> "en-US"
+        else -> "${src.code}-US"
+    }
+
+    private fun durationMs(chunks: List<FloatArray>): Long =
+        if (chunks.isEmpty()) 0 else chunks.sumOf { it.size } * 1_000L / sampleRate
+
+    private fun shouldTranslate() = _state.value.targetLanguage != _state.value.sourceLanguage
+    private fun now() = System.currentTimeMillis()
+
+    /* ───────────────────────────────────────────────────────────── */
+    /*  CLEANUP                                                      */
+    /* ───────────────────────────────────────────────────────────── */
+
     override fun onCleared() {
         super.onCleared()
+        audioJob?.cancel()
         stopLiveCaption()
     }
-}
-
-// Extension function for Flow operations
-suspend fun <T> Flow<T>.toList(): List<T> {
-    val list = mutableListOf<T>()
-    collect { list.add(it) }
-    return list
 }

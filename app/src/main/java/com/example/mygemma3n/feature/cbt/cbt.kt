@@ -1,6 +1,5 @@
 package com.example.mygemma3n.feature.cbt
 
-
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
 import java.util.UUID
@@ -10,24 +9,6 @@ import javax.inject.Singleton
 // Emotion detection
 enum class Emotion {
     HAPPY, SAD, ANGRY, ANXIOUS, NEUTRAL, FEARFUL, SURPRISED, DISGUSTED
-}
-
-@Singleton
-class EmotionDetector @Inject constructor() {
-    suspend fun detectFromAudio(audioData: FloatArray): Emotion {
-        // Simplified emotion detection from audio features
-        // In production, this would use audio analysis
-        val energy = audioData.map { it * it }.average()
-        val variance = audioData.map { (it - energy).let { d -> d * d } }.average()
-
-        return when {
-            energy > 0.7 && variance > 0.5 -> Emotion.ANGRY
-            energy > 0.5 && variance < 0.3 -> Emotion.HAPPY
-            energy < 0.3 && variance < 0.2 -> Emotion.SAD
-            energy < 0.4 && variance > 0.6 -> Emotion.ANXIOUS
-            else -> Emotion.NEUTRAL
-        }
-    }
 }
 
 // CBT Techniques
@@ -52,7 +33,7 @@ enum class TechniqueCategory {
 
 @Singleton
 class CBTTechniques @Inject constructor() {
-    private val techniques = listOf(
+    val techniques = listOf(
         CBTTechnique(
             id = "thought_challenging",
             name = "Thought Challenging",
@@ -116,6 +97,8 @@ class CBTTechniques @Inject constructor() {
     }
 
     fun getAllTechniques(): List<CBTTechnique> = techniques
+
+    fun getTechniqueById(id: String): CBTTechnique? = techniques.find { it.id == id }
 }
 
 // Messages
@@ -127,13 +110,41 @@ sealed class Message {
         override val content: String,
         override val timestamp: Long = System.currentTimeMillis(),
         val audioData: FloatArray? = null
-    ) : Message()
+    ) : Message() {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (javaClass != other?.javaClass) return false
+
+            other as User
+
+            if (content != other.content) return false
+            if (timestamp != other.timestamp) return false
+            if (audioData != null) {
+                if (other.audioData == null) return false
+                if (!audioData.contentEquals(other.audioData)) return false
+            } else if (other.audioData != null) return false
+
+            return true
+        }
+
+        override fun hashCode(): Int {
+            var result = content.hashCode()
+            result = 31 * result + timestamp.hashCode()
+            result = 31 * result + (audioData?.contentHashCode() ?: 0)
+            return result
+        }
+    }
 
     data class AI(
         override val content: String,
         override val timestamp: Long = System.currentTimeMillis(),
-        val technique: CBTTechnique? = null
-    ) : Message()
+        val techniqueId: String? = null  // Changed from CBTTechnique? to String?
+    ) : Message() {
+        // Helper property to get technique name without needing the full object
+        fun getTechniqueName(cbtTechniques: CBTTechniques): String? {
+            return techniqueId?.let { cbtTechniques.getTechniqueById(it)?.name }
+        }
+    }
 }
 
 // Thought Record for CBT
@@ -150,18 +161,22 @@ data class ThoughtRecord(
     val newEmotionIntensity: Float
 )
 
-// Session data
+// Session data - Modified to store techniqueId instead of CBTTechnique object
 @Entity(tableName = "cbt_sessions")
 data class CBTSession(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
     val timestamp: Long,
     val emotion: Emotion,
-    val technique: CBTTechnique? = null,
+    val techniqueId: String? = null,  // Changed from CBTTechnique? to String?
     val transcript: String,
     val duration: Long = 0,
     val completed: Boolean = false,
     val effectiveness: Float? = null
-)
+) {
+    // Transient property to get the technique object when needed
+    @Ignore
+    var technique: CBTTechnique? = null
+}
 
 // Room database for sessions
 @Dao
@@ -195,21 +210,12 @@ class CBTConverters {
 
     @TypeConverter
     fun toEmotion(name: String): Emotion = Emotion.valueOf(name)
-
-    @TypeConverter
-    fun fromTechnique(technique: CBTTechnique?): String? = technique?.id
-
-    @TypeConverter
-    fun toTechnique(id: String?): CBTTechnique? {
-        return id?.let { techId ->
-            CBTTechniques().getAllTechniques().find { it.id == techId }
-        }
-    }
 }
 
 @Singleton
 class SessionRepository @Inject constructor(
-    private val database: CBTDatabase
+    private val database: CBTDatabase,
+    private val cbtTechniques: CBTTechniques  // Inject this to resolve techniques
 ) {
     suspend fun saveSession(session: CBTSession) {
         database.sessionDao().insert(session)
@@ -219,8 +225,21 @@ class SessionRepository @Inject constructor(
         return database.sessionDao().getAllSessions()
     }
 
+    suspend fun getAllSessionsWithTechniques(): List<CBTSession> {
+        val sessions = database.sessionDao().getAllSessions()
+        // This would need to be collected from the Flow
+        // For now, returning empty list - you'd implement this properly
+        return emptyList()
+    }
+
     suspend fun updateSessionEffectiveness(sessionId: String, effectiveness: Float) {
         database.sessionDao().updateSession(sessionId, true, effectiveness)
+    }
+
+    // Helper method to get session with technique resolved
+    suspend fun getSessionWithTechnique(sessionId: String): CBTSession? {
+        // You'd implement this to fetch the session and resolve its technique
+        return null
     }
 }
 

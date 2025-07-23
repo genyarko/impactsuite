@@ -20,6 +20,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -49,9 +50,11 @@ class AudioCaptureService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        Timber.tag("AudioCaptureService").d("Service created")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Timber.tag("AudioCaptureService").d("onStartCommand: ${intent?.action}")
         when (intent?.action) {
             ACTION_START_CAPTURE -> startCapture()
             ACTION_STOP_CAPTURE -> stopCapture()
@@ -63,15 +66,20 @@ class AudioCaptureService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun startCapture() {
-        if (_isRunning.value) return
+        if (_isRunning.value) {
+            Timber.tag("AudioCaptureService").d("startCapture: Already running")
+            return
+        }
 
         // Check permission first
         if (!audioCapture.hasRecordPermission()) {
+            Timber.tag("AudioCaptureService").e("startCapture: RECORD_AUDIO permission not granted")
             _audioDataFlow.value = null
             stopSelf()
             return
         }
 
+        Timber.tag("AudioCaptureService").d("startCapture: Starting audio capture")
         _isRunning.value = true
 
         // Start foreground service with notification
@@ -83,30 +91,28 @@ class AudioCaptureService : Service() {
                 audioCapture.startCapture()
                     .collect { audioData ->
                         _audioDataFlow.value = audioData
+                        Timber.tag("AudioCaptureService")
+                            .d("Emitted audioData of size: ${audioData.size}")
                     }
             } catch (e: SecurityException) {
+                Timber.tag("AudioCaptureService").e(e, "SecurityException: ${e.message}")
                 // Permission was revoked while running
-                e.printStackTrace()
                 stopCapture()
             } catch (e: Exception) {
-                e.printStackTrace()
+                Timber.tag("AudioCaptureService").e(e, "Exception: ${e.message}")
                 stopCapture()
             }
         }
     }
 
     private fun stopCapture() {
+        Timber.tag("AudioCaptureService").d("stopCapture called")
         _isRunning.value = false
         audioCapture.stopCapture()
         _audioDataFlow.value = null
 
         // Stop foreground service
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
-        }
+        stopForeground(STOP_FOREGROUND_REMOVE)
 
         stopSelf()
     }
@@ -153,22 +159,26 @@ class AudioCaptureService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Live Caption Active")
             .setContentText("Capturing audio for live transcription")
-            .setSmallIcon(R.drawable.ic_launcher_background) // You'll need to add this icon
+            .setSmallIcon(R.drawable.logo)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
             .addAction(
-                R.drawable.ic_launcher_foreground, // You'll need to add this icon
+                R.drawable.logo,
                 "Stop",
                 stopPendingIntent
             )
             .build()
     }
 
+
+
     override fun onDestroy() {
         super.onDestroy()
+        Timber.tag("AudioCaptureService").d("Service destroyed")
         _isRunning.value = false
         audioCapture.stopCapture()
         serviceScope.cancel()
     }
+
 }
