@@ -64,6 +64,7 @@ class TutorPromptManager @Inject constructor(
             .plus("\n\nGuide the student to discover the answer through questions, don't give the answer directly.")
     }
 
+
     fun getConceptExplanationPrompt(
         subject: OfflineRAG.Subject,
         concept: String,
@@ -86,22 +87,39 @@ class TutorPromptManager @Inject constructor(
             ExplanationDepth.DETAILED -> "Provide comprehensive explanation with multiple examples."
         }
 
+        // Add character limits based on grade level
+        val maxCharacters = when (studentGrade) {
+            in 1..3 -> 200
+            in 4..6 -> 300
+            in 7..9 -> 400
+            else -> 500
+        }
+
         return """
-            $baseTemplate
-            
-            Subject: $subject
-            Concept: $concept
-            Student Grade: $studentGrade
-            
-            Style Guide: $styleGuide
-            Depth: $depthGuide
-            
-            Provide an explanation that:
-            1. Starts with the basics
-            2. Uses relatable examples
-            3. Checks understanding
-            4. Builds on prior knowledge
-        """.trimIndent()
+        $baseTemplate
+        
+        Subject: $subject
+        Concept: $concept
+        Student Grade: $studentGrade
+        
+        Style Guide: $styleGuide
+        Depth: $depthGuide
+        
+        CRITICAL INSTRUCTIONS:
+        1. Keep response under $maxCharacters characters
+        2. Structure your answer as:
+           - First: List key components/facts (if applicable)
+           - Then: Brief explanation
+           - Finally: One simple example
+        3. For lists (like food groups), name ALL items FIRST before explaining
+        4. Use bullet points (•) for lists within the text
+        5. Avoid lengthy metaphors - use them sparingly
+        
+        Example format for balanced diet:
+        "A balanced diet has 6 main parts: • Carbs • Proteins • Fats • Vitamins • Minerals • Fiber
+        
+        These work together like LEGO bricks to build a strong body. Carbs give energy, proteins build muscles..."
+    """.trimIndent()
     }
 
     fun getProblemSolvingPrompt(
