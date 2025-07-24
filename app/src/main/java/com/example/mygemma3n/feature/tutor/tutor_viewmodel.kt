@@ -844,7 +844,7 @@ class TutorViewModel @Inject constructor(
 
     private suspend fun loadCurriculumForSubject(context: Context, subject: OfflineRAG.Subject): List<CurriculumTopic> {
         val fileName = when (subject) {
-            OfflineRAG.Subject.SCIENCE -> "curriculum/science_curriculum.json"  // Add "curriculum/" prefix back
+            OfflineRAG.Subject.SCIENCE -> "curriculum/science_curriculum.json"
             OfflineRAG.Subject.MATHEMATICS -> "curriculum/mathematics_curriculum.json"
             OfflineRAG.Subject.ENGLISH -> "curriculum/english_curriculum.json"
             else -> return emptyList()
@@ -866,25 +866,72 @@ class TutorViewModel @Inject constructor(
                     when (value) {
                         is JSONArray -> {
                             for (i in 0 until value.length()) {
-                                val title = value.getString(i)
-                                topics.add(CurriculumTopic(title, subject, program, phaseOrSubject))
-                                Timber.d("Added topic: $title (program: $program, phase: $phaseOrSubject)")
+                                val rawTitle = value.getString(i)
+
+                                // Split “A and B” into two clean titles
+                                val splitTitles = rawTitle
+                                    .split(Regex("\\s+and\\s+", RegexOption.IGNORE_CASE))
+                                    .map { it.trim().replaceFirstChar(Char::uppercaseChar) }
+                                    .filter { it.isNotBlank() }
+
+                                // Add each singular topic
+                                splitTitles.forEach { single ->
+                                    topics.add(
+                                        CurriculumTopic(
+                                            title = single,
+                                            subject = subject,
+                                            phase = program,
+                                            gradeRange = phaseOrSubject
+                                        )
+                                    )
+                                    Timber.d("Added topic: $single (program: $program, phase: $phaseOrSubject)")
+                                }
                             }
                         }
+
                         is JSONObject -> {
                             // Handle nested structure
                             value.keys().forEach { topicGroup ->
                                 when (val subValue = value.get(topicGroup)) {
                                     is JSONArray -> {
                                         for (i in 0 until subValue.length()) {
-                                            val title = subValue.getString(i)
-                                            topics.add(CurriculumTopic(title, subject, program, phaseOrSubject))
-                                            Timber.d("Added topic: $title (program: $program, phase: $phaseOrSubject)")
+                                            val rawTitle = subValue.getString(i)
+
+                                            val splitTitles = rawTitle
+                                                .split(Regex("\\s+and\\s+", RegexOption.IGNORE_CASE))
+                                                .map { it.trim().replaceFirstChar(Char::uppercaseChar) }
+                                                .filter { it.isNotBlank() }
+
+                                            splitTitles.forEach { single ->
+                                                topics.add(
+                                                    CurriculumTopic(
+                                                        title = single,
+                                                        subject = subject,
+                                                        phase = program,
+                                                        gradeRange = phaseOrSubject
+                                                    )
+                                                )
+                                                Timber.d("Added topic: $single (program: $program, phase: $phaseOrSubject)")
+                                            }
                                         }
                                     }
                                     is String -> {
-                                        // Handle single string values if any
-                                        topics.add(CurriculumTopic(subValue, subject, program, phaseOrSubject))
+                                        val splitTitles = subValue
+                                            .split(Regex("\\s+and\\s+", RegexOption.IGNORE_CASE))
+                                            .map { it.trim().replaceFirstChar(Char::uppercaseChar) }
+                                            .filter { it.isNotBlank() }
+
+                                        splitTitles.forEach { single ->
+                                            topics.add(
+                                                CurriculumTopic(
+                                                    title = single,
+                                                    subject = subject,
+                                                    phase = program,
+                                                    gradeRange = phaseOrSubject
+                                                )
+                                            )
+                                            Timber.d("Added topic: $single (program: $program, phase: $phaseOrSubject)")
+                                        }
                                     }
                                 }
                             }
