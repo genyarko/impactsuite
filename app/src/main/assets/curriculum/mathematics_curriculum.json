@@ -1,85 +1,133 @@
 {
   "PYP": {
     "Phase 1 (KG–Grade 1)": [
-      "Sorting objects and basic graphs",
+      "Sorting objects",
+      "Basic graphs",
       "Comparing length, weight, time",
-      "2D/3D shape recognition",
-      "Simple patterns and sequences",
-      "Counting and comparing quantities"
+      "2d/3d shape recognition",
+      "Simple patterns",
+      "Sequences",
+      "Counting",
+      "Comparing quantities"
     ],
     "Phase 2 (Grades 1–2)": [
-      "Bar graphs and tally charts",
-      "Standard units and estimation",
-      "Shape classification and transformations",
+      "Bar graphs",
+      "Tally charts",
+      "Standard units",
+      "Estimation",
+      "Shape classification",
+      "Transformations",
       "Odd/even, skip counting, basic properties",
-      "Place value, addition and subtraction"
+      "Place value, addition",
+      "Subtraction"
     ],
     "Phase 3 (Grades 3–4)": [
-      "Data analysis and graph types",
-      "Perimeter, area and volume basics",
-      "Polygons, symmetry and congruence",
+      "Data analysis",
+      "Graph types",
+      "Perimeter, area",
+      "Volume basics",
+      "Polygons, symmetry",
+      "Congruence",
       "Multiplication/division patterns",
-      "Fractions and decimals"
+      "Fractions",
+      "Decimals"
     ],
     "Phase 4 (Grade 5–6)": [
-      "Databases and statistics (mean, median, mode)",
-      "Formulas for area/volume, angles and accuracy",
-      "3D visualization and scale",
+      "Databases",
+      "Statistics (mean, median, mode)",
+      "Formulas for area/volume, angles",
+      "Accuracy",
+      "3d visualization",
+      "Scale",
       "Algebraic patterns, exponents",
-      "Fractions, decimals and ratios"
+      "Fractions, decimals",
+      "Ratios"
     ]
   },
   "MYP": {
     "MYP 1 (Grade 6)": [
-      "Number systems and estimation",
-      "Algebraic patterns and equations",
-      "Geometry and angles",
-      "Fractions, percentages and proportions",
-      "Data management and time-series graphs"
+      "Number systems",
+      "Estimation",
+      "Algebraic patterns",
+      "Equations",
+      "Geometry",
+      "Angles",
+      "Fractions, percentages",
+      "Proportions",
+      "Data management",
+      "Time-series graphs"
     ],
     "MYP 2 (Grade 7)": [
-      "Ratios and rates",
-      "Probability with tables and diagrams",
-      "Integers and coordinates",
-      "Expanding expressions and linear equations",
-      "Circles and surface area/volume"
+      "Ratios",
+      "Rates",
+      "Probability with tables",
+      "Diagrams",
+      "Integers",
+      "Coordinates",
+      "Expanding expressions",
+      "Linear equations",
+      "Circles",
+      "Surface area/volume"
     ],
     "MYP 3 (Grade 8)": [
-      "Transformations and tessellation",
-      "Pythagoras and trigonometry",
-      "3D geometry and circle theorems",
-      "Linear graphs and bivariate data",
-      "Solving equations and inequalities"
+      "Transformations",
+      "Tessellation",
+      "Pythagoras",
+      "Trigonometry",
+      "3d geometry",
+      "Circle theorems",
+      "Linear graphs",
+      "Bivariate data",
+      "Solving equations",
+      "Inequalities"
     ],
     "MYP 4 (Grade 9)": [
-      "Rational/irrational numbers and radicals",
-      "Quadratic expressions and graphs",
-      "Box plots and histograms",
-      "Probability with Venn and tree diagrams"
+      "Rational/irrational numbers",
+      "Radicals",
+      "Quadratic expressions",
+      "Graphs",
+      "Box plots",
+      "Histograms",
+      "Probability with venn",
+      "Tree diagrams"
     ],
     "MYP 5 (Grade 10)": [
-      "Quadratic functions (algebraic and graphical)",
-      "Function transformations and exponential models",
-      "Systems of equations and linear programming",
-      "Advanced trigonometry and intro to calculus"
+      "Quadratic functions (algebraic",
+      "Graphical)",
+      "Function transformations",
+      "Exponential models",
+      "Systems of equations",
+      "Linear programming",
+      "Advanced trigonometry",
+      "Intro to calculus"
     ]
   },
   "DP": {
     "AA (Analysis & Approaches)": [
-      "Real numbers, sequences and series",
-      "Exponents, logs and binomial theorem",
+      "Real numbers, sequences",
+      "Series",
+      "Exponents, logs",
+      "Binomial theorem",
       "Polynomial, exponential, trig functions",
-      "Vectors and geometry in space",
-      "Statistics and hypothesis testing",
-      "Differentiation and integration",
-      "Differential equations (HL only)"
+      "Vectors",
+      "Geometry in space",
+      "Statistics",
+      "Hypothesis testing",
+      "Differentiation",
+      "Integration",
+      "Differential equations (hl only)"
     ],
     "AI (Applications & Interpretation)": [
-      "Financial math and sequences",
-      "Linear/quadratic models and piecewise functions",
-      "2D/3D geometry and bearings",
-      "Data representation and correlation",
-      "Discrete and continuous probability",
+      "Financial math",
+      "Sequences",
+      "Linear/quadratic models",
+      "Piecewise functions",
+      "2d/3d geometry",
+      "Bearings",
+      "Data representation",
+      "Correlation",
+      "Discrete",
+      "Continuous probability",
       "Calculus for real-world change models"
     ]
   },

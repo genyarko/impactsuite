@@ -29,7 +29,7 @@ fun FloatingTopicBubbles(
     topics: List<String>,
     onTopicSelected: (String) -> Unit,
     modifier: Modifier = Modifier,
-    maxVisibleTopics: Int = 6
+    maxVisibleTopics: Int = 3
 ) {
     // Take only a subset of topics to avoid overcrowding
     val visibleTopics = remember(topics) {
@@ -59,7 +59,7 @@ private fun FloatingBubble(
     onClick: () -> Unit
 ) {
     var isVisible by remember { mutableStateOf(false) }
-
+    val lift = 25f   // raise everything ~20 dp
     // Stagger the appearance of bubbles
     LaunchedEffect(index) {
         kotlinx.coroutines.delay(index * 150L)
@@ -120,7 +120,7 @@ private fun FloatingBubble(
             modifier = Modifier
                 .offset(
                     x = (xPosition + offsetX).dp,
-                    y = (yPosition + offsetY).dp
+                    y = (yPosition + offsetY - lift).dp   // ▼ subtract lift
                 )
         ) {
             TopicChip(
