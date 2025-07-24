@@ -4,6 +4,60 @@ import com.example.mygemma3n.data.StudentProfileEntity
 
 object TutorResponseFormatter {
 
+    // In TutorViewModel, add this method:
+    private fun formatTutorResponse(
+        rawResponse: String,
+        student: StudentProfileEntity,
+        approach: TutorViewModel.TeachingApproach
+    ): String {
+        // Detect if the response contains lists or steps
+        val hasNumberedSteps = rawResponse.contains(Regex("\\d+\\.\\s"))
+        val hasBulletPoints = rawResponse.contains("•") || rawResponse.contains("-")
+
+        return when {
+            // Format step-by-step instructions
+            hasNumberedSteps && approach == TutorViewModel.TeachingApproach.PROBLEM_SOLVING -> {
+                val steps = extractSteps(rawResponse)
+                val intro = extractIntro(rawResponse)
+                TutorResponseFormatter.formatStepsResponse(steps, intro, student)
+            }
+
+            // Format lists
+            hasBulletPoints && approach == TutorViewModel.TeachingApproach.EXPLANATION -> {
+                val items = extractListItems(rawResponse)
+                val intro = extractIntro(rawResponse)
+                TutorResponseFormatter.formatListResponse(items, intro, null, student)
+            }
+
+            // Default formatting
+            else -> rawResponse.formatForTutor(student)
+        }
+    }
+
+    // Helper methods to extract content
+    private fun extractSteps(response: String): List<String> {
+        return response.split(Regex("\\d+\\.\\s"))
+            .drop(1) // Skip content before first number
+            .map { it.trim().takeWhile { char -> char != '\n' } }
+            .filter { it.isNotBlank() }
+    }
+
+    private fun extractListItems(response: String): List<String> {
+        return response.split(Regex("[•\\-]\\s"))
+            .drop(1)
+            .map { it.trim().takeWhile { char -> char != '\n' } }
+            .filter { it.isNotBlank() }
+    }
+
+    private fun extractIntro(response: String): String {
+        val firstListMarker = response.indexOfAny(listOf("1.", "•", "-"))
+        return if (firstListMarker > 0) {
+            response.substring(0, firstListMarker).trim()
+        } else {
+            "Here's what you need to know:"
+        }
+    }
+
     /**
      * Formats and truncates responses to fit UI constraints
      */

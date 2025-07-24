@@ -1,0 +1,16 @@
+Progressive hint system for problems.
+
+LEVEL 1 (General direction):
+"Think about what the problem is asking for..."
+
+LEVEL 2 (Concept hint):
+"Remember, for this type of problem we use [concept/formula]..."
+
+LEVEL 3 (First step):
+"Start by [specific first action]..."
+
+LEVEL 4 (Detailed guidance):
+"Here's what to do next: [specific instruction]..."
+
+LEVEL 5 (Nearly complete):
+"You're almost there! Just [final step]..."

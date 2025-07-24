@@ -17,7 +17,7 @@ android {
     compileSdk = 36
     assetPacks += listOf(":gemma3n_assetpack")
 
-    androidResources {            
+    androidResources {
         noCompress += "tflite"
         noCompress += "task"
         noCompress += "mbundle"
@@ -86,9 +86,7 @@ android {
 
 
     packagingOptions {
-
         resources {
-            // Exclude these to prevent merge conflicts
             excludes.add("META-INF/DEPENDENCIES")
             excludes.add("META-INF/INDEX.LIST")
             excludes.add("META-INF/LICENSE")
@@ -99,11 +97,10 @@ android {
             excludes.add("META-INF/ASL2.0")
             excludes.add("META-INF/io.netty.versions.properties")
             excludes.add("META-INF/*.kotlin_module")
-
-            // Or use a wildcard to cover all META-INF files:
-            // excludes.add("META-INF/*")
+            excludes.add("mozilla/public-suffix-list.txt") // ✅ Add this line
         }
     }
+
 
     // Asset folders for models
     sourceSets {
@@ -141,6 +138,7 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     implementation(libs.litert.gpu)
     implementation(libs.play.services.mlkit.subject.segmentation)
+    implementation(libs.firebase.crashlytics.buildtools)
     ksp(libs.androidx.room.compiler)
 
 // WorkManager
