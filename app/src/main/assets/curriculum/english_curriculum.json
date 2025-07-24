@@ -1,0 +1,113 @@
+{
+  "programme": {
+    "PYP": {
+      "grades": "Kindergarten\u2013Grade 5",
+      "strands": {
+        "Oral Language": {
+          "Phase 1": "Spoken words connect us to others; language lets us share thoughts and feelings.",
+          "Phase 2": "Listening helps us gather and interpret information.",
+          "Phase 3": "Spoken language is adapted for different audiences; we listen critically to form opinions.",
+          "Phase 4": "Spoken language can persuade and influence.",
+          "Phase 5": "Spoken language influences others; metaphorical language creates images."
+        },
+        "Visual Language": {
+          "Phase 1": "Pictures and symbols convey meaning; learners attend using gestures/facial expressions.",
+          "Phase 2": "Static and moving images are used for different purposes.",
+          "Phase 3": "Visual text may represent reality or fantasy.",
+          "Phase 4": "Visual texts can influence thinking and behaviour.",
+          "Phase 5": "Commercial media aim to persuade through imagery."
+        },
+        "Reading": {
+          "Phase 1": "Illustrations and print convey meaning; stories tell about imagined and real worlds.",
+          "Phase 2": "Spoken language sounds are represented visually; reading is for learning.",
+          "Phase 3": "Different texts serve different purposes; structure conveys meaning.",
+          "Phase 4": "Reading, thinking, and reflection are interconnected.",
+          "Phase 5": "Readers understand author strategies; choose favourites and read for knowledge."
+        },
+        "Writing": {
+          "Phase 1": "Writing conveys meaning and is self-expression.",
+          "Phase 2": "Writing records and communicates; uses shared codes with reading.",
+          "Phase 3": "Writing is structured for purpose; uses imagery and anticipates reader reaction.",
+          "Phase 4": "Learners revise writing to improve quality.",
+          "Phase 5": "Writers use conventions, analyse writing, integrate strands."
+        }
+      }
+    },
+    "MYP": {
+      "grades": "Grade 6\u201310",
+      "units": {
+        "Grade 6": [
+          "Exploring challenges (personal narratives)",
+          "Impactful changes (research/scientific discoveries)",
+          "How laws shape lives (persuasive writing)",
+          "Myths & legends (analysis/storyboarding)",
+          "Advertisements (persuasion techniques)"
+        ],
+        "Grade 7": [
+          "Connecting tales (comparative storytelling)",
+          "People who made a difference (biographies)",
+          "Advertisements and media",
+          "Poetry and figurative language",
+          "Reflection on communities (character/theme analysis)"
+        ],
+        "Grade 8": [
+          "What is real? (realistic fiction)",
+          "Shakespeare (plays and poetry)",
+          "Debates and perspectives",
+          "Behaviour and identity",
+          "Media awareness"
+        ],
+        "Grade 9": [
+          "Truth and fairness (poetry)",
+          "Diverse voices (world literature)",
+          "Science fiction and innovation",
+          "Identity and relationships (novel study)",
+          "Global challenges (documentaries)"
+        ],
+        "Grade 10": [
+          "Prejudice (social justice stories)",
+          "Self-acceptance (memoirs, poetry)",
+          "Ambition (Shakespearean drama)",
+          "Greek drama and persuasion",
+          "Social change and interdisciplinary analysis"
+        ]
+      }
+    },
+    "DP": {
+      "grades": "Grade 11\u201312",
+      "Language A": {
+        "Language & Literature": {
+          "structure": [
+            "Readers, writers and texts",
+            "Time and space",
+            "Intertextuality: connecting texts"
+          ],
+          "themes": "Text analysis, aesthetic/language use, critical perspectives, culture and context"
+        },
+        "Literature": {
+          "structure": [
+            "Readers, writers and texts",
+            "Time and space",
+            "Intertextuality: connecting texts"
+          ],
+          "themes": "Literary forms, interpretation, cultural readings, reader-writer relationship"
+        }
+      },
+      "Language B": {
+        "themes": {
+          "Identities": "Nature of self, values, identity and culture",
+          "Experiences": "Life stories, customs, travel, rites of passage",
+          "Human ingenuity": "Creativity, media, technology, innovation",
+          "Social organisation": "Community, education, law, social systems",
+          "Sharing the planet": "Environment, conflict, rights, ethics"
+        }
+      }
+    }
+  },
+  "enhancements": {
+    "enableTopicSuggestions": true,
+    "trackProgressByStrand": true,
+    "gradeAlignedFiltering": true,
+    "bookmarkingEnabled": true
+  }
+}

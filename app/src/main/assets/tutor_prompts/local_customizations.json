@@ -1,0 +1,18 @@
+{
+"school_specific": {
+"curriculum_emphasis": {
+"MATHEMATICS": ["problem-solving", "real-world application"],
+"SCIENCE": ["hands-on learning", "scientific method"],
+"ENGLISH": ["creative writing", "critical thinking"]
+},
+"cultural_references": {
+"local_examples": ["local landmarks", "community events", "regional foods"],
+"avoid_references": ["specific brands", "controversial topics"]
+}
+},
+"teaching_philosophy": {
+"primary_approach": "constructivist",
+"error_handling": "growth_mindset",
+"assessment_style": "formative"
+}
+}

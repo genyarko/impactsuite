@@ -9,8 +9,13 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,6 +35,7 @@ import androidx.compose.ui.draw.clip
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -40,7 +46,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.mygemma3n.data.StudentProfileEntity
 import com.example.mygemma3n.data.TutorSessionType
 import com.example.mygemma3n.shared_utilities.OfflineRAG
-
+import com.example.mygemma3n.shared_utilities.TextToSpeechManager
+import com.example.mygemma3n.feature.tutor.FloatingTopicBubbles
 // feature/tutor/TutorScreen.kt
 
 @Composable
@@ -50,6 +57,10 @@ fun TutorScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val ttsManager = remember { TextToSpeechManager(context) }
+    DisposableEffect(Unit) {
+        onDispose { ttsManager.shutdown() }
+    }
 
     var showProfileDialog by remember { mutableStateOf(false) }
     var showSubjectSelector by remember { mutableStateOf(false) }
@@ -74,8 +85,19 @@ fun TutorScreen(
             if (state.currentSubject != null) {
                 TutorInputBar(
                     onSendMessage = { viewModel.processUserInput(it) },
-                    onVoiceInput = { /* Voice input */ },
-                    isLoading = state.isLoading
+                    onVoiceInput = {
+                        if (state.isRecording) {
+                            viewModel.stopRecording()
+                        } else {
+                            viewModel.startRecording()
+                        }
+                    },
+                    onToggleTopics = { viewModel.toggleFloatingTopics() },
+                    isLoading = state.isLoading,
+                    isRecording = state.isRecording,
+                    isTranscribing = state.isTranscribing,
+                    showFloatingTopics = state.showFloatingTopics,
+                    hasSuggestedTopics = state.suggestedTopics.isNotEmpty()
                 )
             }
         }
@@ -102,7 +124,13 @@ fun TutorScreen(
                     TutorChatInterface(
                         messages = state.messages,
                         isLoading = state.isLoading,
-                        conceptMastery = state.conceptMastery
+                        conceptMastery = state.conceptMastery,
+                        suggestedTopics = state.suggestedTopics,
+                        showFloatingTopics = state.showFloatingTopics,
+                        onMessageDoubleTap = { ttsManager.speak(it) },
+                        onTopicSelected = { topic ->
+                            viewModel.selectTopic(topic)
+                        }
                     )
                 }
             }
@@ -280,35 +308,89 @@ private fun SubjectSelectionCard(
 private fun TutorChatInterface(
     messages: List<TutorViewModel.TutorMessage>,
     isLoading: Boolean,
-    conceptMastery: Map<String, Float>
+    conceptMastery: Map<String, Float>,
+    suggestedTopics: List<String>,
+    showFloatingTopics: Boolean,
+    onMessageDoubleTap: (String) -> Unit,
+    onTopicSelected: (String) -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Concept mastery indicator
-        if (conceptMastery.isNotEmpty()) {
-            ConceptMasteryBar(conceptMastery)
-            HorizontalDivider()
-        }
-
-        // Messages
-        LazyColumn(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            reverseLayout = true
-        ) {
-            if (isLoading) {
-                item {
-                    TutorTypingIndicator()
-                }
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Concept mastery indicator
+            if (conceptMastery.isNotEmpty()) {
+                ConceptMasteryBar(conceptMastery)
+                HorizontalDivider()
             }
 
-            items(messages.reversed()) { message ->
-                TutorMessageBubble(
-                    message = message,
-                    modifier = Modifier.fillMaxWidth()
+            // Messages
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                reverseLayout = true
+            ) {
+                if (isLoading) {
+                    item {
+                        TutorTypingIndicator()
+                    }
+                }
+
+                items(messages.reversed()) { message ->
+                    TutorMessageBubble(
+                        message = message,
+                        modifier = Modifier.fillMaxWidth(),
+                        onDoubleTap = onMessageDoubleTap
+                    )
+                }
+
+                // Add space at the top for floating topics
+                if (showFloatingTopics && messages.isEmpty()) {
+                    item {
+                        Spacer(modifier = Modifier.height(200.dp))
+                    }
+                }
+            }
+        }
+
+        // Floating topic bubbles
+        if (showFloatingTopics && suggestedTopics.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 16.dp) // Above the input bar
+            ) {
+                FloatingTopicBubbles(
+                    topics = suggestedTopics,
+                    onTopicSelected = onTopicSelected
                 )
+            }
+        }
+    }
+}
+@Composable
+fun SuggestedTopicsSection(topics: List<String>) {
+    if (topics.isNotEmpty()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Suggested Topics",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 120.dp),
+                contentPadding = PaddingValues(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(topics) { topic ->
+                    AssistChip(
+                        onClick = { /* Handle topic click */ },
+                        label = { Text(topic) }
+                    )
+                }
             }
         }
     }
@@ -317,12 +399,18 @@ private fun TutorChatInterface(
 @Composable
 private fun TutorMessageBubble(
     message: TutorViewModel.TutorMessage,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onDoubleTap: (String) -> Unit = {}
 ) {
     Row(
-        modifier = modifier,
+        modifier = modifier.combinedClickable(
+            onClick = { /* consume single tap – no TTS */ },
+            onDoubleClick = {
+                if (!message.isUser) onDoubleTap(message.content)
+            }
+        ),
         horizontalArrangement = if (message.isUser) Arrangement.End else Arrangement.Start
-    ) {
+    ){
         if (!message.isUser) {
             Icon(
                 Icons.Default.SmartToy,
@@ -401,7 +489,12 @@ private fun TutorMessageBubble(
 private fun TutorInputBar(
     onSendMessage: (String) -> Unit,
     onVoiceInput: () -> Unit,
-    isLoading: Boolean
+    onToggleTopics: () -> Unit,  // Add this parameter
+    isLoading: Boolean,
+    isRecording: Boolean = false,
+    isTranscribing: Boolean = false,
+    showFloatingTopics: Boolean = false,  // Add this parameter
+    hasSuggestedTopics: Boolean = false   // Add this parameter
 ) {
     var textInput by remember { mutableStateOf("") }
 
@@ -419,15 +512,44 @@ private fun TutorInputBar(
                 value = textInput,
                 onValueChange = { textInput = it },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Ask your tutor...") },
+                placeholder = {
+                    Text(when {
+                        isTranscribing -> "Transcribing..."
+                        isRecording -> "Listening..."
+                        else -> "Ask your tutor..."
+                    })
+                },
                 maxLines = 4,
-                enabled = !isLoading,
+                enabled = !isLoading && !isRecording && !isTranscribing,
                 trailingIcon = {
-                    IconButton(
-                        onClick = onVoiceInput,
-                        enabled = !isLoading
-                    ) {
-                        Icon(Icons.Default.Mic, "Voice input")
+                    Row {
+                        // Topics button
+                        if (hasSuggestedTopics) {
+                            IconButton(
+                                onClick = onToggleTopics,
+                                enabled = !isLoading && !isRecording && !isTranscribing
+                            ) {
+                                Icon(
+                                    Icons.Default.Lightbulb,
+                                    contentDescription = "Show topics",
+                                    tint = if (showFloatingTopics)
+                                        MaterialTheme.colorScheme.primary
+                                    else LocalContentColor.current
+                                )
+                            }
+                        }
+
+                        // Voice input button
+                        IconButton(
+                            onClick = onVoiceInput,
+                            enabled = !isLoading && !isTranscribing
+                        ) {
+                            Icon(
+                                if (isRecording) Icons.Default.Stop else Icons.Default.Mic,
+                                contentDescription = if (isRecording) "Stop recording" else "Voice input",
+                                tint = if (isRecording) MaterialTheme.colorScheme.error else LocalContentColor.current
+                            )
+                        }
                     }
                 }
             )
@@ -441,7 +563,7 @@ private fun TutorInputBar(
                         textInput = ""
                     }
                 },
-                enabled = textInput.isNotBlank() && !isLoading
+                enabled = textInput.isNotBlank() && !isLoading && !isRecording && !isTranscribing
             ) {
                 Icon(Icons.AutoMirrored.Filled.Send, "Send")
             }
@@ -547,6 +669,69 @@ private fun getSubjectCards() = listOf(
     )
 )
 
+@Composable
+private fun TutorInputBar(
+    onSendMessage: (String) -> Unit,
+    onVoiceInput: () -> Unit,
+    isLoading: Boolean,
+    isRecording: Boolean = false,  // Add this parameter
+    isTranscribing: Boolean = false  // Add this parameter
+) {
+    var textInput by remember { mutableStateOf("") }
+
+    Surface(
+        tonalElevation = 3.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp),
+            verticalAlignment = Alignment.Bottom
+        ) {
+            OutlinedTextField(
+                value = textInput,
+                onValueChange = { textInput = it },
+                modifier = Modifier.weight(1f),
+                placeholder = {
+                    Text(when {
+                        isTranscribing -> "Transcribing..."
+                        isRecording -> "Listening..."
+                        else -> "Ask your tutor..."
+                    })
+                },
+                maxLines = 4,
+                enabled = !isLoading && !isRecording && !isTranscribing,
+                trailingIcon = {
+                    IconButton(
+                        onClick = onVoiceInput,
+                        enabled = !isLoading && !isTranscribing
+                    ) {
+                        Icon(
+                            if (isRecording) Icons.Default.Stop else Icons.Default.Mic,
+                            contentDescription = if (isRecording) "Stop recording" else "Voice input",
+                            tint = if (isRecording) MaterialTheme.colorScheme.error else LocalContentColor.current
+                        )
+                    }
+                }
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            FilledIconButton(
+                onClick = {
+                    if (textInput.isNotBlank()) {
+                        onSendMessage(textInput)
+                        textInput = ""
+                    }
+                },
+                enabled = textInput.isNotBlank() && !isLoading && !isRecording && !isTranscribing
+            ) {
+                Icon(Icons.AutoMirrored.Filled.Send, "Send")
+            }
+        }
+    }
+}
 @Composable
 private fun StudentProfileDialog(
     existingProfile: StudentProfileEntity?,

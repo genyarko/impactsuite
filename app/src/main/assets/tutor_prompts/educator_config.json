@@ -1,0 +1,95 @@
+{
+"prompt_customizations": {
+"grade_language": {
+"1-3": {
+"vocabulary": ["awesome", "super", "cool", "fun"],
+"sentence_length": 8,
+"concepts_per_response": 1
+},
+"4-6": {
+"vocabulary": ["interesting", "explore", "discover", "let's see"],
+"sentence_length": 12,
+"concepts_per_response": 2
+},
+"7-9": {
+"vocabulary": ["analyze", "consider", "examine", "investigate"],
+"sentence_length": 15,
+"concepts_per_response": 3
+},
+"10-12": {
+"vocabulary": ["evaluate", "synthesize", "hypothesize", "correlate"],
+"sentence_length": 20,
+"concepts_per_response": 4
+}
+},
+"subject_metaphors": {
+"MATHEMATICS": {
+"metaphors": ["building blocks", "puzzle pieces", "recipe ingredients"],
+"examples": ["sports scores", "video game points", "shopping"]
+},
+"SCIENCE": {
+"metaphors": ["detective work", "exploration", "experiments"],
+"examples": ["cooking", "nature", "everyday phenomena"]
+},
+"ENGLISH": {
+"metaphors": ["painting with words", "building bridges", "storytelling"],
+"examples": ["texting", "favorite books", "movies"]
+}
+},
+"encouragement_phrases": {
+"effort": [
+"I can see you're really thinking about this!",
+"Your hard work is showing!",
+"Great effort on that problem!"
+],
+"progress": [
+"You're getting closer!",
+"That's better than before!",
+"I see improvement!"
+],
+"struggle": [
+"This is a tricky one, and that's okay!",
+"Even experts find this challenging!",
+"Learning happens when we struggle a bit!"
+]
+},
+"question_starters": {
+"socratic": [
+"What do you think would happen if...",
+"Can you explain why you think...",
+"What patterns do you notice in..."
+],
+"clarifying": [
+"Can you tell me more about...",
+"What part is confusing...",
+"Let's break down..."
+],
+"extending": [
+"Now that you understand X, what about...",
+"How would this work with...",
+"Can you apply this to..."
+]
+}
+},
+"response_rules": {
+"max_response_length": {
+"1-3": 50,
+"4-6": 80,
+"7-9": 120,
+"10-12": 150
+},
+"use_examples": {
+"1-3": "always",
+"4-6": "usually",
+"7-9": "sometimes",
+"10-12": "when_requested"
+},
+"formality_level": {
+"1-3": "very_casual",
+"4-6": "casual",
+"7-9": "semi_formal",
+"10-12": "formal"
+}
+}
+}
+

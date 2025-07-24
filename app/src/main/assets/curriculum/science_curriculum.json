@@ -1,0 +1,130 @@
+{
+  "PYP": {
+    "Phase 1 (KG)": [
+      "Living vs non-living things",
+      "Five senses",
+      "Water properties",
+      "Basic materials (solid/liquid)",
+      "Science vocabulary and sorting"
+    ],
+    "Phase 2 (Grades 1-2)": [
+      "Building materials and uses",
+      "Forces: push, pull, friction",
+      "Simple machines",
+      "Health: food groups, personal hygiene"
+    ],
+    "Phase 3 (Grades 3-4)": [
+      "Sound: pitch, vibration, volume",
+      "Earth changes: weathering, erosion, tectonics",
+      "Cultural expressions through sound"
+    ],
+    "Phase 4 (Grades 5-6)": [
+      "Puberty and body systems",
+      "Nutrition and health",
+      "Solar system and Earth’s place",
+      "Navigation using stars"
+    ]
+  },
+  "MYP": {
+    "MYP 1 (Grade 6)": [
+      "Intro to science: safety, equipment, variables",
+      "States of matter and mixtures",
+      "Forces and motion basics",
+      "Scientific investigations",
+      "Solar system and moon phases",
+      "Cells and microscopes",
+      "Plant and human reproduction"
+    ],
+    "MYP 2 (Grade 7)": [
+      "Scientific inquiry skills",
+      "Matter, atoms, compounds",
+      "Acids and bases",
+      "Ecology and ecosystems",
+      "Cell biology & Earth systems",
+      "Human body systems",
+      "Motion, energy, conservation"
+    ],
+    "MYP 3 (Grade 8)": [
+      "Advanced motion and speed-time graphs",
+      "Cardiovascular and respiratory health",
+      "Chemical changes and particle theory",
+      "Earth history and rock cycle"
+    ],
+    "MYP 4–5 (Grades 9–10)": {
+      "Biology": [
+        "Cells and health",
+        "Ecology and biodiversity",
+        "Photosynthesis and respiration",
+        "Homeostasis and metabolism",
+        "Genetics and evolution",
+        "Neural and hormonal control",
+        "Biotechnology and environment"
+      ],
+      "Chemistry": [
+        "Periodic table and atomic structure",
+        "Organic compounds and nomenclature",
+        "Air and atmospheric chemistry",
+        "States of matter and separation techniques",
+        "Bonding and chemical reactions",
+        "Acids, bases, redox and electrochemistry"
+      ],
+      "Physics": [
+        "Forces and Newton’s laws",
+        "Energy and work",
+        "Electromagnetism and electricity",
+        "Waves and radiation",
+        "Heat, light and sound",
+        "Atomic structure and radioactivity",
+        "Astrophysics and the universe"
+      ]
+    }
+  },
+  "DP": {
+    "Biology": [
+      "Water, DNA, cell structure",
+      "Organelles and membranes",
+      "Cell respiration, photosynthesis",
+      "Systems integration and metabolism",
+      "Genetics, reproduction, evolution",
+      "Homeostasis and immunity",
+      "Sustainability and climate change"
+    ],
+    "Chemistry": [
+      "Atomic models and bonding",
+      "Classification and periodicity",
+      "Stoichiometry and reactions",
+      "Thermodynamics and equilibrium",
+      "Acid-base, redox, organic chemistry",
+      "Reaction mechanisms"
+    ],
+    "Physics": [
+      "Kinematics and dynamics",
+      "Thermal and electrical systems",
+      "Wave behavior and EM spectrum",
+      "Fields and motion",
+      "Quantum and nuclear physics",
+      "Relativity and stellar physics"
+    ],
+    "ESS": [
+      "Systems and sustainability",
+      "Ecology and biodiversity",
+      "Climate, atmosphere and water",
+      "Human population, land and resources",
+      "Environmental law and ethics"
+    ],
+    "SEHS": [
+      "Anatomy and energy systems",
+      "Biomechanics and movement analysis",
+      "Skill acquisition and training",
+      "Genetics and performance",
+      "Exercise physiology and immunity"
+    ]
+  },
+  "enhancements": {
+    "perGradeSuggestions": true,
+    "trackTopicUsage": true,
+    "markTopicComplete": true,
+    "highlightUnseenTopics": true,
+    "allowBookmarks": true
+  }
+}
