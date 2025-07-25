@@ -36,7 +36,7 @@ class TutorRepository @Inject constructor(
         subject: OfflineRAG.Subject,
         sessionType: TutorSessionType,
         topic: String
-    ): String {
+    ): Pair<String, String> {
         val sessionId = UUID.randomUUID().toString()
 
         // Create tutor session
@@ -51,11 +51,11 @@ class TutorRepository @Inject constructor(
         )
         tutorDao.insertSession(session)
 
-        // Create corresponding chat session
+        // Create corresponding chat session and capture ID
         val chatTitle = "${subject.name} - $topic"
-        chatRepository.createNewSession(chatTitle)
+        val chatSessionId = chatRepository.createNewSession(chatTitle)
 
-        return sessionId
+        return sessionId to chatSessionId
     }
 
     suspend fun updateConceptMastery(
