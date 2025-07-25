@@ -10,6 +10,7 @@ import com.example.mygemma3n.feature.caption.SpeechRecognitionService
 import com.example.mygemma3n.feature.quiz.Difficulty
 import com.example.mygemma3n.service.AudioCaptureService
 import com.example.mygemma3n.shared_utilities.OfflineRAG
+import com.example.mygemma3n.feature.chat.ChatMessage
 import com.google.firebase.crashlytics.buildtools.reloc.com.google.common.reflect.TypeToken
 import com.google.gson.Gson
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -52,6 +53,7 @@ class TutorViewModel @Inject constructor(
 
     private var currentStudent: StudentProfileEntity? = null
     private var currentSessionId: String? = null
+    private var currentChatSessionId: String? = null
     private var conversationContext = mutableListOf<ConversationEntry>()
     private var attemptCount = mutableMapOf<String, Int>() // Track attempts per concept
 
@@ -783,6 +785,11 @@ class TutorViewModel @Inject constructor(
         _state.update { currentState ->
             currentState.copy(messages = currentState.messages + message)
         }
+
+        currentChatSessionId?.let { sid ->
+            val chatMsg = if (isUser) ChatMessage.User(content) else ChatMessage.AI(content)
+            viewModelScope.launch { chatRepository.addMessage(sid, chatMsg) }
+        }
     }
 
     private fun analyzeStudentInput(input: String): StudentNeed {
@@ -989,12 +996,14 @@ class TutorViewModel @Inject constructor(
             Timber.d("Starting tutor session for subject: $subject, grade: ${student.gradeLevel}")
 
             // Use startTutorSession instead of startSession
-            currentSessionId = tutorRepository.startTutorSession(
+            val (tutorId, chatId) = tutorRepository.startTutorSession(
                 studentId = student.id,
                 subject = subject,
                 sessionType = sessionType,
                 topic = topic
             )
+            currentSessionId = tutorId
+            currentChatSessionId = chatId
 
             // Clear previous context
             conversationContext.clear()
