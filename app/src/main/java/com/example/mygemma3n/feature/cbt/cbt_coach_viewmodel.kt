@@ -43,6 +43,43 @@ class CBTCoachViewModel @Inject constructor(
     private val audioBuffer = mutableListOf<FloatArray>()
     private var isModelInitialized = false
 
+    // Pre-crafted responses for common scenarios
+    private val FALLBACK_RESPONSES = mapOf(
+        "relax" to """I understand relaxation can be challenging. Let's try a simple technique:
+
+Take a deep breath in for 4 counts, hold for 4, and exhale for 6. This activates your body's relaxation response.
+
+Would you like to try the 5-4-3-2-1 grounding technique next?""",
+
+        "panic" to """I hear you're experiencing panic attacks. You're not alone, and this is manageable.
+
+Right now, let's focus on your breathing: breathe in slowly through your nose, hold briefly, then exhale longer through your mouth.
+
+Can you tell me what usually triggers these attacks?""",
+
+        "anxious" to """Anxiety can feel overwhelming. Let's work through this together.
+
+First, notice where you feel tension in your body. Try to soften those areas while taking slow, deep breaths.
+
+What specific worries are on your mind right now?""",
+
+        "sad" to """I'm here to support you through these difficult feelings.
+
+It's okay to feel sad. Sometimes acknowledging these emotions is the first step toward healing.
+
+Would you like to talk about what's been weighing on you?""",
+
+        "angry" to """I can sense you're feeling frustrated or angry. These are valid emotions.
+
+Let's try to understand what's behind this anger. Often it's protecting us from other feelings.
+
+What situation triggered these feelings?""",
+
+        "default" to """Thank you for sharing. I'm here to help you work through this.
+
+Let's explore what you're experiencing together. Can you tell me more about what's on your mind?"""
+    )
+
     init {
         viewModelScope.launch {
             try {
@@ -60,13 +97,11 @@ class CBTCoachViewModel @Inject constructor(
     }
 
     private suspend fun initializeModel() {
-        // 1. Re‑use the already‑loaded engine
         if (gemmaService.isInitialized()) {
             isModelInitialized = true
             return
         }
 
-        // 2. Ignore expected cancellation when user leaves the screen
         try {
             withContext(Dispatchers.IO) { gemmaService.initializeBestAvailable() }
             isModelInitialized = true
@@ -78,17 +113,21 @@ class CBTCoachViewModel @Inject constructor(
     suspend fun startSession() {
         if (!isModelInitialized) {
             initializeModel()
-            _sessionState.update {
-                it.copy(error = "Model not initialized. Please wait...")
+            if (!isModelInitialized) {
+                _sessionState.update {
+                    it.copy(error = "Model initialization in progress. Please wait...")
+                }
+                return
             }
-            return
         }
 
         currentSessionId = UUID.randomUUID().toString()
         _sessionState.update {
             it.copy(
                 isActive = true,
-                conversation = emptyList(),
+                conversation = listOf(
+                    Message.AI("Hello! I'm here to support you. How are you feeling today?")
+                ),
                 currentEmotion = null,
                 suggestedTechnique = null,
                 thoughtRecord = null,
@@ -212,7 +251,7 @@ class CBTCoachViewModel @Inject constructor(
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // MAIN FIX: Simplified text processing for faster responses
+    // MAIN FIX: Better text processing with fallbacks
     // ═══════════════════════════════════════════════════════════════
 
     suspend fun processTextInput(userInput: String) {
@@ -234,40 +273,62 @@ class CBTCoachViewModel @Inject constructor(
                 it.copy(conversation = it.conversation + Message.User(userInput))
             }
 
-            // Generate response with timeout to prevent hanging
-            val response = withTimeoutOrNull(30_000) { // 30 second timeout
-                generateSimpleCBTResponse(userInput)
-            }
+            // First, try to match with fallback responses
+            val fallbackResponse = getFallbackResponse(userInput)
 
-            if (response != null) {
+            if (fallbackResponse != null) {
+                // Use fallback response immediately
                 _sessionState.update {
                     it.copy(
-                        conversation = it.conversation + Message.AI(response)
+                        conversation = it.conversation + Message.AI(fallbackResponse)
                     )
                 }
 
-                // Save progress in background (don't block UI)
-                saveSessionProgress()
+                // Try to detect emotion in background
+                viewModelScope.launch {
+                    try {
+                        val emotion = emotionDetector.detectFromText(userInput)
+                        _sessionState.update { it.copy(currentEmotion = emotion) }
+
+                        // Suggest appropriate technique
+                        val technique = cbtTechniques.getRecommendedTechnique(emotion)
+                        _sessionState.update { it.copy(suggestedTechnique = technique) }
+                    } catch (e: Exception) {
+                        Timber.e(e, "Error detecting emotion")
+                    }
+                }
             } else {
-                // Timeout occurred
-                _sessionState.update {
-                    it.copy(
-                        conversation = it.conversation + Message.AI(
-                            "I apologize for the delay. Let me try to help you with a simpler approach. What specific issue would you like to work on right now?"
-                        ),
-                        error = "Response timeout - please try again with a shorter question"
-                    )
+                // Try to generate response with very short prompt
+                val response = withTimeoutOrNull(15_000) { // Reduced timeout
+                    generateOptimizedCBTResponse(userInput)
+                }
+
+                if (response != null && response.isNotBlank()) {
+                    _sessionState.update {
+                        it.copy(
+                            conversation = it.conversation + Message.AI(response)
+                        )
+                    }
+                } else {
+                    // Use generic fallback
+                    _sessionState.update {
+                        it.copy(
+                            conversation = it.conversation + Message.AI(FALLBACK_RESPONSES["default"]!!)
+                        )
+                    }
                 }
             }
+
+            // Save progress in background
+            saveSessionProgress()
 
         } catch (e: Exception) {
             Timber.e(e, "Error processing text input")
+            // Use appropriate fallback based on input
+            val fallback = getFallbackResponse(userInput) ?: FALLBACK_RESPONSES["default"]!!
             _sessionState.update {
                 it.copy(
-                    conversation = it.conversation + Message.AI(
-                        "I'm having trouble processing that right now. Could you please try rephrasing your question more simply?"
-                    ),
-                    error = "Processing error: ${e.message}"
+                    conversation = it.conversation + Message.AI(fallback)
                 )
             }
         } finally {
@@ -275,28 +336,48 @@ class CBTCoachViewModel @Inject constructor(
         }
     }
 
-    // Simplified response generation for faster performance
-    private suspend fun generateSimpleCBTResponse(userInput: String): String {
-        // Much shorter, focused prompt to reduce processing time
-        val prompt = buildString {
-            appendLine("You are a CBT coach. User says: $userInput")
-            appendLine()
-            appendLine("Provide a brief, helpful CBT response (under 100 words) that:")
-            appendLine("1. Validates their feelings")
-            appendLine("2. Offers one practical CBT technique or insight")
-            appendLine("3. Asks a simple follow-up question")
-        }
+    // Helper function to match user input with fallback responses
+    private fun getFallbackResponse(userInput: String): String? {
+        val lowerInput = userInput.lowercase()
 
-        return gemmaService.generateTextAsync(
-            prompt,
-            UnifiedGemmaService.GenerationConfig(
-                maxTokens = 100,  // Reduced from 200
-                temperature = 0.6f  // Slightly lower for more focused responses
-            )
-        )
+        return when {
+            lowerInput.contains("relax") || lowerInput.contains("calm") -> FALLBACK_RESPONSES["relax"]
+            lowerInput.contains("panic") || lowerInput.contains("attack") -> FALLBACK_RESPONSES["panic"]
+            lowerInput.contains("anxious") || lowerInput.contains("anxiety") || lowerInput.contains("worried") -> FALLBACK_RESPONSES["anxious"]
+            lowerInput.contains("sad") || lowerInput.contains("depressed") || lowerInput.contains("down") -> FALLBACK_RESPONSES["sad"]
+            lowerInput.contains("angry") || lowerInput.contains("mad") || lowerInput.contains("frustrated") -> FALLBACK_RESPONSES["angry"]
+            else -> null
+        }
     }
 
-    // Keep the complex processing for voice input only when needed
+    // Optimized response generation for Gemma's constraints
+    private suspend fun generateOptimizedCBTResponse(userInput: String): String {
+        // Check token limit
+        if (gemmaService.wouldExceedLimit(userInput)) {
+            Timber.w("Input too long, using fallback")
+            return getFallbackResponse(userInput) ?: FALLBACK_RESPONSES["default"]!!
+        }
+
+        // Very short, focused prompt optimized for token limits
+        val prompt = """User: ${userInput.take(100)}
+
+Respond as a CBT therapist in under 50 words. Be empathetic and helpful."""
+
+        return try {
+            gemmaService.generateTextAsync(
+                prompt,
+                UnifiedGemmaService.GenerationConfig(
+                    maxTokens = 80,  // Very conservative
+                    temperature = 0.6f
+                )
+            )
+        } catch (e: Exception) {
+            Timber.e(e, "Generation failed, using fallback")
+            getFallbackResponse(userInput) ?: FALLBACK_RESPONSES["default"]!!
+        }
+    }
+
+    // Keep voice processing separate as it can afford more time
     suspend fun processVoiceInput(audioData: FloatArray) {
         _isLoading.value = true
 
@@ -310,50 +391,8 @@ class CBTCoachViewModel @Inject constructor(
                 return
             }
 
-            // For voice input, we can afford more complex processing
-            // since users expect it to take a bit longer
-            val emotionResult = emotionDetector.detectFromMultimodal(
-                audioData = audioData,
-                text = transcribedText
-            )
-
-            _sessionState.update {
-                it.copy(currentEmotion = emotionResult.emotion)
-            }
-
-            _sessionState.update {
-                it.copy(
-                    conversation = it.conversation + Message.User(
-                        content = transcribedText,
-                        audioData = audioData
-                    )
-                )
-            }
-
-            val relevantContent = sessionManager.findRelevantContent(
-                userInput = transcribedText,
-                emotion = emotionResult.emotion
-            )
-
-            val response = generateCBTResponseWithContext(
-                transcribedText,
-                emotionResult,
-                relevantContent
-            )
-
-            val recommendedTechnique = cbtTechniques.getRecommendedTechnique(emotionResult.emotion)
-
-            _sessionState.update {
-                it.copy(
-                    conversation = it.conversation + Message.AI(
-                        content     = response,
-                        techniqueId = recommendedTechnique.id
-                    ),
-                    suggestedTechnique = recommendedTechnique
-                )
-            }
-
-            saveSessionProgress()
+            // For voice input, use the same optimized processing
+            processTextInput(transcribedText)
 
         } catch (e: Exception) {
             Timber.e(e, "Error processing voice input")
@@ -363,32 +402,6 @@ class CBTCoachViewModel @Inject constructor(
         } finally {
             _isLoading.value = false
         }
-    }
-
-
-    private suspend fun generateCBTResponseWithContext(
-        userInput: String,
-        emotionResult: EmotionDetector.EmotionDetectionResult,
-        relevantContent: List<CBTSessionManager.RelevantContent>
-    ): String {
-        val technique = cbtTechniques.getRecommendedTechnique(emotionResult.emotion)
-
-        val prompt = buildString {
-            appendLine("CBT coach response for ${emotionResult.emotion.name.lowercase()} user:")
-            appendLine("User: $userInput")
-            appendLine("Technique: ${technique.name}")
-            appendLine("Provide supportive response under 120 words.")
-        }
-
-        return withTimeoutOrNull(20_000) {
-            gemmaService.generateTextAsync(
-                prompt,
-                UnifiedGemmaService.GenerationConfig(
-                    maxTokens = 150,
-                    temperature = 0.7f
-                )
-            )
-        } ?: "I understand you're feeling ${emotionResult.emotion.name.lowercase()}. Let's try the ${technique.name} technique. ${technique.description}"
     }
 
     private suspend fun transcribeAudio(audioData: FloatArray): String {
@@ -448,7 +461,7 @@ class CBTCoachViewModel @Inject constructor(
             try {
                 val emotion = _sessionState.value.currentEmotion ?: Emotion.NEUTRAL
 
-                // Simplified thought record creation
+                // Create thought record immediately with pre-crafted guidance
                 val thoughtRecord = ThoughtRecord(
                     id = UUID.randomUUID().toString(),
                     timestamp = System.currentTimeMillis(),
@@ -456,13 +469,26 @@ class CBTCoachViewModel @Inject constructor(
                     automaticThought = automaticThought,
                     emotion = emotion,
                     emotionIntensity = emotionIntensity,
-                    evidenceFor = listOf("Consider evidence supporting this thought"),
-                    evidenceAgainst = listOf("Consider evidence against this thought"),
-                    balancedThought = "Let's explore a more balanced perspective",
+                    evidenceFor = listOf("What facts support this thought?"),
+                    evidenceAgainst = listOf("What facts contradict this thought?"),
+                    balancedThought = "Consider: Is there another way to look at this situation?",
                     newEmotionIntensity = emotionIntensity * 0.7f
                 )
 
                 _sessionState.update { it.copy(thoughtRecord = thoughtRecord) }
+
+                // Add helpful message
+                val message = """Great job creating a thought record! 
+
+Let's examine the evidence for and against your thought: "$automaticThought"
+
+This helps us find a more balanced perspective."""
+
+                _sessionState.update {
+                    it.copy(
+                        conversation = it.conversation + Message.AI(message)
+                    )
+                }
 
             } catch (e: Exception) {
                 Timber.e(e, "Error creating thought record")
@@ -481,7 +507,11 @@ class CBTCoachViewModel @Inject constructor(
 
             viewModelScope.launch {
                 try {
-                    val response = "Let's move to step ${nextStep + 1}: ${currentTechnique.steps[nextStep]}"
+                    val response = """Excellent! Let's move to step ${nextStep + 1}:
+
+${currentTechnique.steps[nextStep]}
+
+Take your time with this step. How does it feel?"""
 
                     _sessionState.update {
                         it.copy(
@@ -494,6 +524,20 @@ class CBTCoachViewModel @Inject constructor(
                 } catch (e: Exception) {
                     Timber.e(e, "Error progressing to next step")
                 }
+            }
+        } else {
+            // Completed all steps
+            val completionMessage = """Wonderful! You've completed all steps of the ${currentTechnique.name} technique.
+
+How are you feeling now compared to when we started? Remember, practice makes these techniques more effective."""
+
+            _sessionState.update {
+                it.copy(
+                    conversation = it.conversation + Message.AI(
+                        content = completionMessage,
+                        techniqueId = currentTechnique.id
+                    )
+                )
             }
         }
     }
@@ -521,20 +565,20 @@ class CBTCoachViewModel @Inject constructor(
         super.onCleared()
     }
 
-    // Simplified versions of complex methods for better performance
+    // Simplified recommendation function
     fun getPersonalizedRecommendations(currentIssue: String) {
         viewModelScope.launch {
             try {
                 val emotion = _sessionState.value.currentEmotion ?: Emotion.NEUTRAL
                 val technique = cbtTechniques.getRecommendedTechnique(emotion)
 
-                val message = """
-                    Based on your ${emotion.name.lowercase()} feelings about "$currentIssue":
+                val message = """Based on what you've shared, I recommend trying the ${technique.name} technique.
 
-                    I recommend the ${technique.name} technique. ${technique.description}
+${technique.description}
 
-                    Would you like to try this together?
-                """.trimIndent()
+This technique typically takes ${technique.duration} minutes and can be very effective for ${emotion.name.lowercase()} feelings.
+
+Would you like to start with the first step?"""
 
                 _sessionState.update {
                     it.copy(
@@ -556,22 +600,27 @@ class CBTCoachViewModel @Inject constructor(
         if (state.conversation.isEmpty()) return
 
         try {
-            val summary = "Session completed. You worked on ${state.currentEmotion?.name?.lowercase() ?: "your concerns"} using ${state.suggestedTechnique?.name ?: "CBT techniques"}."
+            val techniqueUsed = state.suggestedTechnique?.name ?: "general CBT techniques"
+            val emotionText = state.currentEmotion?.name?.lowercase() ?: "your concerns"
+
+            val summary = "You've made progress today working on $emotionText using $techniqueUsed. Remember, healing is a journey, not a destination."
 
             _sessionState.update {
                 it.copy(
                     sessionInsights = CBTSessionManager.SessionInsights(
                         summary = summary,
                         keyInsights = listOf(
-                            "You engaged well with the process",
-                            "Continue practicing these techniques"
+                            "You showed courage in sharing your feelings",
+                            "You engaged with therapeutic techniques",
+                            "You're building emotional awareness"
                         ),
-                        progress = "Completed a full session using ${state.suggestedTechnique?.name ?: "CBT"}",
+                        progress = "Today's session focused on understanding and managing $emotionText",
                         homework = listOf(
-                            "Practice the technique once daily",
-                            "Journal how you feel before and after"
+                            "Practice the $techniqueUsed technique once daily",
+                            "Notice and write down moments when you feel $emotionText",
+                            "Use deep breathing when feeling overwhelmed"
                         ),
-                        nextSteps = "Review progress and adjust technique in the next session"
+                        nextSteps = "Continue practicing these techniques and notice any patterns in your emotional responses"
                     )
                 )
             }
@@ -585,10 +634,13 @@ class CBTCoachViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val currentEmotion = _sessionState.value.currentEmotion
-                val message = if (currentEmotion != null) {
-                    "I notice you're feeling ${currentEmotion.name.lowercase()}. That's completely normal. Let's work through this together."
-                } else {
-                    "How are you feeling right now? Understanding your emotions is the first step in CBT."
+                val message = when (currentEmotion) {
+                    Emotion.ANXIOUS -> "I notice you're feeling anxious. That's completely understandable. Let's work on some calming techniques together."
+                    Emotion.SAD -> "It sounds like you're experiencing sadness. It's okay to feel this way. I'm here to support you."
+                    Emotion.ANGRY -> "I can sense some frustration or anger. These are valid emotions. Let's explore what's behind them."
+                    Emotion.FEARFUL -> "Fear can be overwhelming. You're safe here. Let's work through this together."
+                    Emotion.HAPPY -> "It's wonderful that you're feeling positive! Let's build on this momentum."
+                    else -> "Let's take a moment to check in with how you're feeling right now. What emotions are you experiencing?"
                 }
 
                 _sessionState.update {
