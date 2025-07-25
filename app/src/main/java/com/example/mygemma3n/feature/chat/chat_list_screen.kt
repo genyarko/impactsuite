@@ -33,13 +33,35 @@ import java.util.*
 private fun getSessionType(title: String): SessionType {
     return when {
         title.startsWith("Live caption") -> SessionType.LIVE_CAPTION
+        // Check for AI Tutor patterns - more flexible matching
+        title.contains("Science-General", ignoreCase = true) ||
+                title.contains("Math", ignoreCase = true) ||
+                title.contains("Mathematics", ignoreCase = true) ||
+                title.contains("History", ignoreCase = true) ||
+                title.contains("English", ignoreCase = true) ||
+                title.contains("Physics", ignoreCase = true) ||
+                title.contains("Chemistry", ignoreCase = true) ||
+                title.contains("Biology", ignoreCase = true) ||
+                title.contains("Geography", ignoreCase = true) ||
+                title.contains("Literature", ignoreCase = true) ||
+                // Additional patterns for tutor sessions
+                title.contains("AI Tutor", ignoreCase = true) ||
+                title.contains("Tutor", ignoreCase = true) ||
+                title.contains("homework", ignoreCase = true) ||
+                title.contains("practice", ignoreCase = true) ||
+                title.contains("exam prep", ignoreCase = true) ||
+                // Check for OfflineRAG.Subject enum names
+                title.contains("SCIENCE", ignoreCase = true) ||
+                title.contains("MATHEMATICS", ignoreCase = true) ||
+                title.contains("ENGLISH", ignoreCase = true) -> SessionType.AI_TUTOR
         else -> SessionType.CHAT
     }
 }
 
 private enum class SessionType {
     CHAT,
-    LIVE_CAPTION
+    LIVE_CAPTION,
+    AI_TUTOR
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -149,7 +171,7 @@ private fun EmptyStateView(modifier: Modifier = Modifier) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                text = "Start a new chat or live caption session",
+                text = "Start a new chat, live caption, or AI tutor session",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             )
@@ -171,12 +193,21 @@ private fun ChatSessionItem(
     val colors = when (sessionType) {
         SessionType.LIVE_CAPTION -> LiveCaptionColors
         SessionType.CHAT -> ChatColors
+        SessionType.AI_TUTOR -> AITutorColors
     }
 
     if (showDeleteDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
-            title = { Text("Delete ${if (sessionType == SessionType.LIVE_CAPTION) "Live Caption" else "Chat"}?") },
+            title = {
+                Text("Delete ${
+                    when (sessionType) {
+                        SessionType.LIVE_CAPTION -> "Live Caption"
+                        SessionType.AI_TUTOR -> "AI Tutor Session"
+                        SessionType.CHAT -> "Chat"
+                    }
+                }?")
+            },
             text = { Text("This action cannot be undone.") },
             confirmButton = {
                 TextButton(
@@ -276,7 +307,11 @@ private fun ChatSessionItem(
                             modifier = Modifier.height(20.dp)
                         ) {
                             Text(
-                                text = if (sessionType == SessionType.LIVE_CAPTION) "LIVE" else "CHAT",
+                                text = when (sessionType) {
+                                    SessionType.LIVE_CAPTION -> "LIVE"
+                                    SessionType.AI_TUTOR -> "TUTOR"
+                                    SessionType.CHAT -> "CHAT"
+                                },
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = colors.primary,
@@ -354,6 +389,13 @@ private val LiveCaptionColors = SessionColors(
     icon = Icons.Default.Mic
 )
 
+private val AITutorColors = SessionColors(
+    primary = Color(0xFF8E24AA), // Purple color for AI Tutor
+    background = Color(0xFF8E24AA).copy(alpha = 0.08f),
+    iconBackground = Color(0xFF8E24AA).copy(alpha = 0.12f),
+    icon = Icons.Default.School
+)
+
 private fun formatTitle(title: String, type: SessionType): String {
     return when (type) {
         SessionType.LIVE_CAPTION -> {
@@ -372,6 +414,33 @@ private fun formatTitle(title: String, type: SessionType): String {
                 }
             } else {
                 "Live Caption Session"
+            }
+        }
+        SessionType.AI_TUTOR -> {
+            // Clean up AI Tutor titles with more flexible patterns
+            when {
+                title.contains("Science-General", ignoreCase = true) -> "AI Tutor - Science"
+                title.contains("Math", ignoreCase = true) -> "AI Tutor - Math"
+                title.contains("Mathematics", ignoreCase = true) -> "AI Tutor - Mathematics"
+                title.contains("History", ignoreCase = true) -> "AI Tutor - History"
+                title.contains("English", ignoreCase = true) -> "AI Tutor - English"
+                title.contains("Physics", ignoreCase = true) -> "AI Tutor - Physics"
+                title.contains("Chemistry", ignoreCase = true) -> "AI Tutor - Chemistry"
+                title.contains("Biology", ignoreCase = true) -> "AI Tutor - Biology"
+                title.contains("Geography", ignoreCase = true) -> "AI Tutor - Geography"
+                title.contains("Literature", ignoreCase = true) -> "AI Tutor - Literature"
+                // Handle cases where the title already contains "AI Tutor"
+                title.contains("AI Tutor", ignoreCase = true) -> title
+                // Handle enum-style subject names
+                title.contains("SCIENCE", ignoreCase = true) -> "AI Tutor - Science"
+                title.contains("MATHEMATICS", ignoreCase = true) -> "AI Tutor - Mathematics"
+                title.contains("ENGLISH", ignoreCase = true) -> "AI Tutor - English"
+                // Handle session types
+                title.contains("homework", ignoreCase = true) -> "AI Tutor - Homework Help"
+                title.contains("practice", ignoreCase = true) -> "AI Tutor - Practice"
+                title.contains("exam prep", ignoreCase = true) -> "AI Tutor - Exam Prep"
+                title.contains("Tutor", ignoreCase = true) -> title
+                else -> "AI Tutor Session"
             }
         }
         SessionType.CHAT -> title
