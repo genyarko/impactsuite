@@ -1,27 +1,14 @@
 package com.example.mygemma3n.feature.tutor
 
-
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.StartOffset
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -35,27 +22,34 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.draw.clip
-
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalAccessibilityManager
+import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.mygemma3n.data.StudentProfileEntity
 import com.example.mygemma3n.data.TutorSessionType
 import com.example.mygemma3n.shared_utilities.OfflineRAG
-import com.example.mygemma3n.feature.tutor.FloatingTopicBubbles
-// feature/tutor/TutorScreen.kt
+import com.example.mygemma3n.components.*
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun TutorScreen(
@@ -64,8 +58,22 @@ fun TutorScreen(
     viewModel: TutorViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val scrollState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+    val accessibilityManager = LocalAccessibilityManager.current
 
-    var showSubjectSelector by remember { mutableStateOf(false) }
+    // Handle system back button
+    BackHandler(enabled = state.currentSubject != null) {
+        viewModel.clearCurrentSubject()
+    }
+
+    // Save state when navigating away
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.saveConversationState()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -74,10 +82,8 @@ fun TutorScreen(
                 subject = state.currentSubject,
                 onBackClick = {
                     if (state.currentSubject != null) {
-                        // If in a subject session, go back to subject selection
                         viewModel.clearCurrentSubject()
                     } else {
-                        // If in subject selection, go back to main
                         onNavigateBack()
                     }
                 },
@@ -87,22 +93,39 @@ fun TutorScreen(
         },
         bottomBar = {
             if (state.currentSubject != null) {
-                TutorInputBar(
-                    onSendMessage = { viewModel.processUserInput(it) },
-                    onVoiceInput = {
-                        if (state.isRecording) {
-                            viewModel.stopRecording()
-                        } else {
-                            viewModel.startRecording()
-                        }
-                    },
-                    onToggleTopics = { viewModel.toggleFloatingTopics() },
-                    isLoading = state.isLoading,
-                    isRecording = state.isRecording,
-                    isTranscribing = state.isTranscribing,
-                    showFloatingTopics = state.showFloatingTopics,
-                    hasSuggestedTopics = state.suggestedTopics.isNotEmpty()
-                )
+                Column {
+                    // Auto-speak controls
+                    AnimatedVisibility(
+                        visible = state.autoSpeak,
+                        enter = slideInVertically { it } + fadeIn(),
+                        exit = slideOutVertically { it } + fadeOut()
+                    ) {
+                        AutoSpeakControls(
+                            speechRate = state.speechRate,
+                            onSpeechRateChange = viewModel::setSpeechRate,
+                            onClose = { viewModel.toggleAutoSpeak() }
+                        )
+                    }
+
+                    TutorInputBar(
+                        onSendMessage = { viewModel.processUserInput(it) },
+                        onVoiceInput = {
+                            if (state.isRecording) {
+                                viewModel.stopRecording()
+                            } else {
+                                viewModel.startRecording()
+                            }
+                        },
+                        onToggleTopics = { viewModel.toggleFloatingTopics() },
+                        onToggleAutoSpeak = { viewModel.toggleAutoSpeak() },
+                        isLoading = state.isLoading,
+                        isRecording = state.isRecording,
+                        isTranscribing = state.isTranscribing,
+                        showFloatingTopics = state.showFloatingTopics,
+                        hasSuggestedTopics = state.suggestedTopics.isNotEmpty(),
+                        autoSpeakEnabled = state.autoSpeak
+                    )
+                }
             }
         }
     ) { paddingValues ->
@@ -131,12 +154,38 @@ fun TutorScreen(
                         conceptMastery = state.conceptMastery,
                         suggestedTopics = state.suggestedTopics,
                         showFloatingTopics = state.showFloatingTopics,
+                        scrollState = scrollState,
                         onMessageDoubleTap = { viewModel.speakText(it) },
                         onTopicSelected = { topic ->
                             viewModel.selectTopic(topic)
+                        },
+                        onBookmarkMessage = { messageId ->
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.bookmarkMessage(messageId)
                         }
                     )
                 }
+            }
+
+            // Error snackbar
+            state.error?.let { error ->
+                Snackbar(
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                    action = {
+                        TextButton(onClick = { viewModel.clearError() }) {
+                            Text("Dismiss")
+                        }
+                    }
+                ) {
+                    Text(error)
+                }
+            }
+        }
+
+        // Auto-scroll to bottom when new message arrives
+        LaunchedEffect(state.messages.size) {
+            if (state.messages.isNotEmpty()) {
+                scrollState.animateScrollToItem(0)
             }
         }
     }
@@ -150,6 +199,140 @@ fun TutorScreen(
                 viewModel.initializeStudent(name, grade)
             }
         )
+    }
+}
+
+@Composable
+private fun TutorChatInterface(
+    messages: List<TutorViewModel.TutorMessage>,
+    isLoading: Boolean,
+    conceptMastery: Map<String, Float>,
+    suggestedTopics: List<String>,
+    showFloatingTopics: Boolean,
+    scrollState: LazyListState,
+    onMessageDoubleTap: (String) -> Unit,
+    onTopicSelected: (String) -> Unit,
+    onBookmarkMessage: (String) -> Unit
+) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Concept mastery indicator
+            AnimatedVisibility(
+                visible = conceptMastery.isNotEmpty(),
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column {
+                    ConceptMasterySection(conceptMastery)
+                    HorizontalDivider()
+                }
+            }
+
+            // Messages with skeleton loading
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                state = scrollState,
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                reverseLayout = true
+            ) {
+                if (isLoading) {
+                    item {
+                        TutorTypingIndicator()
+                    }
+                }
+
+                items(
+                    items = messages.reversed(),
+                    key = { it.id }
+                ) { message ->
+                    TutorMessageBubble(
+                        message = message,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .animateItem(), // Updated from animateItemPlacement()
+                        onDoubleTap = onMessageDoubleTap,
+                        onBookmark = { onBookmarkMessage(message.id) }
+                    )
+                }
+
+                if (showFloatingTopics && messages.isEmpty()) {
+                    item {
+                        Spacer(modifier = Modifier.height(200.dp))
+                    }
+                }
+            }
+        }
+
+        // Floating topic bubbles
+        AnimatedVisibility(
+            visible = showFloatingTopics && suggestedTopics.isNotEmpty(),
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 16.dp)
+        ) {
+            FloatingTopicBubbles(
+                topics = suggestedTopics,
+                onTopicSelected = onTopicSelected
+            )
+        }
+    }
+}
+
+@Composable
+private fun ConceptMasterySection(
+    conceptMastery: Map<String, Float>
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Your Progress",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Text(
+                    text = "${(conceptMastery.values.average() * 100).toInt()}% Average",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            conceptMastery.entries.take(3).forEach { (concept, mastery) ->
+                LabeledProgressBar(
+                    progress = mastery,
+                    label = concept,
+                    modifier = Modifier.padding(vertical = 4.dp),
+                    showPercentage = true,
+                    color = when {
+                        mastery >= 0.8f -> Color(0xFF4CAF50)
+                        mastery >= 0.6f -> Color(0xFFFFC107)
+                        else -> Color(0xFFFF5252)
+                    }
+                )
+            }
+        }
     }
 }
 
@@ -260,17 +443,17 @@ private fun SubjectSelectionCard(
     onClick: () -> Unit
 ) {
     var isExpanded by remember { mutableStateOf(false) }
-    
+
     Card(
-        onClick = { 
+        onClick = {
             isExpanded = !isExpanded
         },
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = if (isExpanded) 8.dp else 4.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isExpanded) 
-                subjectCard.color.copy(alpha = 0.05f) 
-            else 
+            containerColor = if (isExpanded)
+                subjectCard.color.copy(alpha = 0.05f)
+            else
                 MaterialTheme.colorScheme.surface
         )
     ) {
@@ -322,7 +505,7 @@ private fun SubjectSelectionCard(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            
+
             // Expanded preview content
             AnimatedVisibility(
                 visible = isExpanded,
@@ -333,18 +516,18 @@ private fun SubjectSelectionCard(
                     modifier = Modifier.padding(top = 16.dp)
                 ) {
                     HorizontalDivider(color = subjectCard.color.copy(alpha = 0.2f))
-                    
+
                     Spacer(modifier = Modifier.height(12.dp))
-                    
+
                     Text(
                         text = "Sample Topics:",
                         style = MaterialTheme.typography.labelLarge,
                         color = subjectCard.color,
                         fontWeight = FontWeight.Medium
                     )
-                    
+
                     Spacer(modifier = Modifier.height(8.dp))
-                    
+
                     // Sample topics based on subject
                     getSampleTopics(subjectCard.subject).take(3).forEach { topic ->
                         Row(
@@ -365,9 +548,9 @@ private fun SubjectSelectionCard(
                             )
                         }
                     }
-                    
+
                     Spacer(modifier = Modifier.height(12.dp))
-                    
+
                     // Start learning button
                     Button(
                         onClick = onClick,
@@ -390,113 +573,44 @@ private fun SubjectSelectionCard(
     }
 }
 
-@Composable
-private fun TutorChatInterface(
-    messages: List<TutorViewModel.TutorMessage>,
-    isLoading: Boolean,
-    conceptMastery: Map<String, Float>,
-    suggestedTopics: List<String>,
-    showFloatingTopics: Boolean,
-    onMessageDoubleTap: (String) -> Unit,
-    onTopicSelected: (String) -> Unit
-) {
-    Box(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // Concept mastery indicator
-            if (conceptMastery.isNotEmpty()) {
-                ConceptMasteryBar(conceptMastery)
-                HorizontalDivider()
-            }
-
-            // Messages
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                reverseLayout = true
-            ) {
-                if (isLoading) {
-                    item {
-                        TutorTypingIndicator()
-                    }
-                }
-
-                items(messages.reversed()) { message ->
-                    TutorMessageBubble(
-                        message = message,
-                        modifier = Modifier.fillMaxWidth(),
-                        onDoubleTap = onMessageDoubleTap
-                    )
-                }
-
-                // Add space at the top for floating topics
-                if (showFloatingTopics && messages.isEmpty()) {
-                    item {
-                        Spacer(modifier = Modifier.height(200.dp))
-                    }
-                }
-            }
-        }
-
-        // Floating topic bubbles
-        if (showFloatingTopics && suggestedTopics.isNotEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 16.dp) // Above the input bar
-            ) {
-                FloatingTopicBubbles(
-                    topics = suggestedTopics,
-                    onTopicSelected = onTopicSelected
-                )
-            }
-        }
-    }
-}
-@Composable
-fun SuggestedTopicsSection(topics: List<String>) {
-    if (topics.isNotEmpty()) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = "Suggested Topics",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 120.dp),
-                contentPadding = PaddingValues(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(topics) { topic ->
-                    AssistChip(
-                        onClick = { /* Handle topic click */ },
-                        label = { Text(topic) }
-                    )
-                }
-            }
-        }
-    }
-}
-
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TutorMessageBubble(
     message: TutorViewModel.TutorMessage,
     modifier: Modifier = Modifier,
-    onDoubleTap: (String) -> Unit = {}
+    onDoubleTap: (String) -> Unit = {},
+    onBookmark: () -> Unit = {}
 ) {
+    val haptic = LocalHapticFeedback.current
+
     Row(
-        modifier = modifier.combinedClickable(
-            onClick = { /* consume single tap – no TTS */ },
-            onDoubleClick = {
-                if (!message.isUser) onDoubleTap(message.content)
+        modifier = modifier
+            .semantics {
+                contentDescription = buildString {
+                    append(if (message.isUser) "You said: " else "Tutor said: ")
+                    append(message.content)
+                    if (!message.isUser) {
+                        append(". Double tap to hear this message.")
+                    }
+                }
             }
-        ),
+            .combinedClickable(
+                onClick = { },
+                onDoubleClick = {
+                    if (!message.isUser) {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onDoubleTap(message.content)
+                    }
+                },
+                onLongClick = {
+                    if (!message.isUser) {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onBookmark()
+                    }
+                }
+            ),
         horizontalArrangement = if (message.isUser) Arrangement.End else Arrangement.Start
-    ){
+    ) {
         if (!message.isUser) {
             Icon(
                 Icons.Default.SmartToy,
@@ -514,11 +628,10 @@ private fun TutorMessageBubble(
         Card(
             modifier = Modifier.widthIn(max = 280.dp),
             colors = CardDefaults.cardColors(
-                containerColor = if (message.isUser) {
+                containerColor = if (message.isUser)
                     MaterialTheme.colorScheme.primary
-                } else {
+                else
                     MaterialTheme.colorScheme.surfaceVariant
-                }
             ),
             shape = RoundedCornerShape(
                 topStart = if (message.isUser) 16.dp else 4.dp,
@@ -528,57 +641,61 @@ private fun TutorMessageBubble(
             )
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
+                // Bookmark indicator
+                if (message.isBookmarked) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Icon(
+                            Icons.Default.Bookmark,
+                            contentDescription = "Bookmarked",
+                            modifier = Modifier.size(16.dp),
+                            tint = if (message.isUser) {
+                                MaterialTheme.colorScheme.onPrimary
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            }
+                        )
+                    }
+                }
+
                 Text(
                     text = message.content,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = if (message.isUser) {
+                    color = if (message.isUser)
                         MaterialTheme.colorScheme.onPrimary
-                    } else {
+                    else
                         MaterialTheme.colorScheme.onSurfaceVariant
-                    }
                 )
 
-                // Message metadata chips
+                // Metadata and timestamp
                 message.metadata?.let { metadata ->
                     Spacer(modifier = Modifier.height(4.dp))
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         metadata.concept?.let {
-                            AssistChip(
-                                onClick = { },
-                                label = { Text(it, style = MaterialTheme.typography.labelSmall) },
+                            TagChip(
+                                text = it,
                                 modifier = Modifier.height(24.dp)
-                            )
-                        }
-                        
-                        metadata.responseTime?.let { responseTime ->
-                            AssistChip(
-                                onClick = { },
-                                label = { Text("${responseTime}ms", style = MaterialTheme.typography.labelSmall) },
-                                modifier = Modifier.height(24.dp),
-                                colors = AssistChipDefaults.assistChipColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                                )
                             )
                         }
                     }
                 }
 
-                // Timestamp and status row
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = if (message.isUser) Arrangement.End else Arrangement.Start,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Message status icon
                     if (message.isUser) {
                         MessageStatusIcon(status = message.status)
                         Spacer(modifier = Modifier.width(4.dp))
                     }
-                    
-                    // Timestamp
+
                     Text(
                         text = formatTimestamp(message.timestamp),
                         style = MaterialTheme.typography.labelSmall,
@@ -609,15 +726,73 @@ private fun TutorMessageBubble(
 }
 
 @Composable
+private fun AutoSpeakControls(
+    speechRate: Float,
+    onSpeechRateChange: (Float) -> Unit,
+    onClose: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        tonalElevation = 8.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.VolumeUp,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp)
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            Text(
+                text = "Speech Rate",
+                style = MaterialTheme.typography.labelLarge
+            )
+
+            Slider(
+                value = speechRate,
+                onValueChange = onSpeechRateChange,
+                valueRange = 0.5f..2.0f,
+                steps = 5,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 8.dp)
+            )
+
+            Text(
+                text = "${(speechRate * 100).toInt()}%",
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.width(40.dp)
+            )
+
+            IconButton(onClick = onClose) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "Close speech controls"
+                )
+            }
+        }
+    }
+}
+
+
+@Composable
 private fun TutorInputBar(
     onSendMessage: (String) -> Unit,
     onVoiceInput: () -> Unit,
-    onToggleTopics: () -> Unit,  // Add this parameter
+    onToggleTopics: () -> Unit,
+    onToggleAutoSpeak: () -> Unit,
     isLoading: Boolean,
     isRecording: Boolean = false,
     isTranscribing: Boolean = false,
-    showFloatingTopics: Boolean = false,  // Add this parameter
-    hasSuggestedTopics: Boolean = false   // Add this parameter
+    showFloatingTopics: Boolean = false,
+    hasSuggestedTopics: Boolean = false,
+    autoSpeakEnabled: Boolean = false
 ) {
     var textInput by remember { mutableStateOf("") }
 
@@ -646,6 +821,20 @@ private fun TutorInputBar(
                 enabled = !isLoading && !isRecording && !isTranscribing,
                 trailingIcon = {
                     Row {
+                        // Auto-speak toggle
+                        IconButton(
+                            onClick = onToggleAutoSpeak,
+                            enabled = !isLoading
+                        ) {
+                            Icon(
+                                if (autoSpeakEnabled) Icons.AutoMirrored.Filled.VolumeUp else Icons.AutoMirrored.Filled.VolumeOff,
+                                contentDescription = if (autoSpeakEnabled) "Disable auto-speak" else "Enable auto-speak",
+                                tint = if (autoSpeakEnabled)
+                                    MaterialTheme.colorScheme.primary
+                                else LocalContentColor.current
+                            )
+                        }
+                        
                         // Topics button
                         if (hasSuggestedTopics) {
                             IconButton(
@@ -670,7 +859,9 @@ private fun TutorInputBar(
                             Icon(
                                 if (isRecording) Icons.Default.Stop else Icons.Default.Mic,
                                 contentDescription = if (isRecording) "Stop recording" else "Voice input",
-                                tint = if (isRecording) MaterialTheme.colorScheme.error else LocalContentColor.current
+                                tint = if (isRecording) 
+                                    MaterialTheme.colorScheme.error 
+                                else LocalContentColor.current
                             )
                         }
                     }
@@ -690,36 +881,6 @@ private fun TutorInputBar(
             ) {
                 Icon(Icons.AutoMirrored.Filled.Send, "Send")
             }
-        }
-    }
-}
-
-@Composable
-private fun ConceptMasteryBar(conceptMastery: Map<String, Float>) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        conceptMastery.entries.take(3).forEach { (concept, mastery) ->
-            val bg = when {
-                mastery < 0.4f -> MaterialTheme.colorScheme.errorContainer
-                mastery < 0.7f -> MaterialTheme.colorScheme.secondaryContainer
-                else -> MaterialTheme.colorScheme.primaryContainer
-            }
-
-            SuggestionChip(
-                onClick = { /* no-op or show details */ },
-                label = {
-                    Text(
-                        text = "$concept ${(mastery * 100).toInt()}%",
-                        style = MaterialTheme.typography.labelSmall
-                    )
-                },
-                modifier = Modifier.height(32.dp),
-                colors = SuggestionChipDefaults.suggestionChipColors(containerColor = bg)
-            )
         }
     }
 }
@@ -752,173 +913,6 @@ private fun TutorTypingIndicator() {
                     )
             )
         }
-    }
-}
-
-// Helper data classes
-data class SubjectCard(
-    val subject: OfflineRAG.Subject,
-    val displayName: String,
-    val description: String,
-    val icon: ImageVector,
-    val color: Color,
-    val defaultSessionType: TutorSessionType
-)
-
-private fun getSubjectCards() = listOf(
-    SubjectCard(
-        subject = OfflineRAG.Subject.MATHEMATICS,
-        displayName = "Mathematics",
-        description = "Algebra, Geometry, Calculus, and more",
-        icon = Icons.Default.Calculate,
-        color = Color(0xFF2196F3),
-        defaultSessionType = TutorSessionType.PRACTICE_PROBLEMS
-    ),
-    SubjectCard(
-        subject = OfflineRAG.Subject.SCIENCE,
-        displayName = "Science",
-        description = "Physics, Chemistry, Biology",
-        icon = Icons.Default.Science,
-        color = Color(0xFF4CAF50),
-        defaultSessionType = TutorSessionType.CONCEPT_EXPLANATION
-    ),
-    SubjectCard(
-        subject = OfflineRAG.Subject.ENGLISH,
-        displayName = "English",
-        description = "Grammar, Writing, Literature",
-        icon = Icons.AutoMirrored.Filled.MenuBook,
-        color = Color(0xFFFF9800),
-        defaultSessionType = TutorSessionType.HOMEWORK_HELP
-    ),
-    SubjectCard(
-        subject = OfflineRAG.Subject.HISTORY,
-        displayName = "History",
-        description = "World History, Ancient civilizations, Modern history",
-        icon = Icons.Default.HistoryEdu,
-        color = Color(0xFF9C27B0),
-        defaultSessionType = TutorSessionType.CONCEPT_EXPLANATION
-    ),
-    SubjectCard(
-        subject = OfflineRAG.Subject.GEOGRAPHY,
-        displayName = "Geography",
-        description = "Physical geography, Human geography, Maps",
-        icon = Icons.Default.Public,
-        color = Color(0xFF00BCD4),
-        defaultSessionType = TutorSessionType.CONCEPT_EXPLANATION
-    ),
-    SubjectCard(
-        subject = OfflineRAG.Subject.ECONOMICS,
-        displayName = "Economics",
-        description = "Microeconomics, Macroeconomics, Markets",
-        icon = Icons.Default.TrendingUp,
-        color = Color(0xFF795548),
-        defaultSessionType = TutorSessionType.CONCEPT_EXPLANATION
-    )
-)
-
-@Composable
-private fun TutorInputBar(
-    onSendMessage: (String) -> Unit,
-    onVoiceInput: () -> Unit,
-    isLoading: Boolean,
-    isRecording: Boolean = false,  // Add this parameter
-    isTranscribing: Boolean = false  // Add this parameter
-) {
-    var textInput by remember { mutableStateOf("") }
-
-    Surface(
-        tonalElevation = 3.dp,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp),
-            verticalAlignment = Alignment.Bottom
-        ) {
-            OutlinedTextField(
-                value = textInput,
-                onValueChange = { textInput = it },
-                modifier = Modifier.weight(1f),
-                placeholder = {
-                    Text(when {
-                        isTranscribing -> "Transcribing..."
-                        isRecording -> "Listening..."
-                        else -> "Ask your tutor..."
-                    })
-                },
-                maxLines = 4,
-                enabled = !isLoading && !isRecording && !isTranscribing,
-                trailingIcon = {
-                    IconButton(
-                        onClick = onVoiceInput,
-                        enabled = !isLoading && !isTranscribing
-                    ) {
-                        Icon(
-                            if (isRecording) Icons.Default.Stop else Icons.Default.Mic,
-                            contentDescription = if (isRecording) "Stop recording" else "Voice input",
-                            tint = if (isRecording) MaterialTheme.colorScheme.error else LocalContentColor.current
-                        )
-                    }
-                }
-            )
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            FilledIconButton(
-                onClick = {
-                    if (textInput.isNotBlank()) {
-                        onSendMessage(textInput)
-                        textInput = ""
-                    }
-                },
-                enabled = textInput.isNotBlank() && !isLoading && !isRecording && !isTranscribing
-            ) {
-                Icon(Icons.AutoMirrored.Filled.Send, "Send")
-            }
-        }
-    }
-}
-
-private fun getSampleTopics(subject: OfflineRAG.Subject): List<String> {
-    return when (subject) {
-        OfflineRAG.Subject.MATHEMATICS -> listOf(
-            "Linear equations and functions",
-            "Geometric shapes and angles",
-            "Probability and statistics",
-            "Calculus fundamentals"
-        )
-        OfflineRAG.Subject.SCIENCE -> listOf(
-            "Forces and motion",
-            "Chemical reactions",
-            "Cell biology and genetics",
-            "Energy and waves"
-        )
-        OfflineRAG.Subject.ENGLISH -> listOf(
-            "Grammar and sentence structure",
-            "Poetry analysis and writing",
-            "Literature comprehension",
-            "Essay writing techniques"
-        )
-        OfflineRAG.Subject.HISTORY -> listOf(
-            "Ancient civilizations",
-            "World wars and conflicts",
-            "Cultural revolutions",
-            "Modern democracy"
-        )
-        OfflineRAG.Subject.GEOGRAPHY -> listOf(
-            "Climate and weather patterns",
-            "Physical landscapes",
-            "Population and urbanization",
-            "Natural resources"
-        )
-        OfflineRAG.Subject.ECONOMICS -> listOf(
-            "Supply and demand",
-            "Market structures",
-            "Government policies",
-            "International trade"
-        )
-        else -> listOf("General topics", "Basic concepts", "Fundamentals")
     }
 }
 
@@ -998,16 +992,118 @@ private fun MessageStatusIcon(status: TutorViewModel.TutorMessage.MessageStatus)
     )
 }
 
+// Helper data classes
+data class SubjectCard(
+    val subject: OfflineRAG.Subject,
+    val displayName: String,
+    val description: String,
+    val icon: ImageVector,
+    val color: Color,
+    val defaultSessionType: TutorSessionType
+)
+
+private fun getSubjectCards() = listOf(
+    SubjectCard(
+        subject = OfflineRAG.Subject.MATHEMATICS,
+        displayName = "Mathematics",
+        description = "Algebra, Geometry, Calculus, and more",
+        icon = Icons.Default.Calculate,
+        color = Color(0xFF2196F3),
+        defaultSessionType = TutorSessionType.PRACTICE_PROBLEMS
+    ),
+    SubjectCard(
+        subject = OfflineRAG.Subject.SCIENCE,
+        displayName = "Science",
+        description = "Physics, Chemistry, Biology",
+        icon = Icons.Default.Science,
+        color = Color(0xFF4CAF50),
+        defaultSessionType = TutorSessionType.CONCEPT_EXPLANATION
+    ),
+    SubjectCard(
+        subject = OfflineRAG.Subject.ENGLISH,
+        displayName = "English",
+        description = "Grammar, Writing, Literature",
+        icon = Icons.AutoMirrored.Filled.MenuBook,
+        color = Color(0xFFFF9800),
+        defaultSessionType = TutorSessionType.HOMEWORK_HELP
+    ),
+    SubjectCard(
+        subject = OfflineRAG.Subject.HISTORY,
+        displayName = "History",
+        description = "World History, Ancient civilizations, Modern history",
+        icon = Icons.Default.HistoryEdu,
+        color = Color(0xFF9C27B0),
+        defaultSessionType = TutorSessionType.CONCEPT_EXPLANATION
+    ),
+    SubjectCard(
+        subject = OfflineRAG.Subject.GEOGRAPHY,
+        displayName = "Geography",
+        description = "Physical geography, Human geography, Maps",
+        icon = Icons.Default.Public,
+        color = Color(0xFF00BCD4),
+        defaultSessionType = TutorSessionType.CONCEPT_EXPLANATION
+    ),
+    SubjectCard(
+        subject = OfflineRAG.Subject.ECONOMICS,
+        displayName = "Economics",
+        description = "Microeconomics, Macroeconomics, Markets",
+        icon = Icons.AutoMirrored.Filled.TrendingUp,
+        color = Color(0xFF795548),
+        defaultSessionType = TutorSessionType.CONCEPT_EXPLANATION
+    )
+)
+
+private fun getSampleTopics(subject: OfflineRAG.Subject): List<String> {
+    return when (subject) {
+        OfflineRAG.Subject.MATHEMATICS -> listOf(
+            "Linear equations and functions",
+            "Geometric shapes and angles",
+            "Probability and statistics",
+            "Calculus fundamentals"
+        )
+        OfflineRAG.Subject.SCIENCE -> listOf(
+            "Forces and motion",
+            "Chemical reactions",
+            "Cell biology and genetics",
+            "Energy and waves"
+        )
+        OfflineRAG.Subject.ENGLISH -> listOf(
+            "Grammar and sentence structure",
+            "Poetry analysis and writing",
+            "Literature comprehension",
+            "Essay writing techniques"
+        )
+        OfflineRAG.Subject.HISTORY -> listOf(
+            "Ancient civilizations",
+            "World wars and conflicts",
+            "Cultural revolutions",
+            "Modern democracy"
+        )
+        OfflineRAG.Subject.GEOGRAPHY -> listOf(
+            "Climate and weather patterns",
+            "Physical landscapes",
+            "Population and urbanization",
+            "Natural resources"
+        )
+        OfflineRAG.Subject.ECONOMICS -> listOf(
+            "Supply and demand",
+            "Market structures",
+            "Government policies",
+            "International trade"
+        )
+        else -> listOf("General topics", "Basic concepts", "Fundamentals")
+    }
+}
+
 private fun formatTimestamp(timestamp: Long): String {
     val now = System.currentTimeMillis()
     val diff = now - timestamp
     
     return when {
-        diff < 60000 -> "now" // Less than 1 minute
-        diff < 3600000 -> "${diff / 60000}m" // Less than 1 hour, show minutes
-        diff < 86400000 -> "${diff / 3600000}h" // Less than 1 day, show hours
+        diff < 60000 -> "now"
+        diff < 3600000 -> "${diff / 60000}m"
+        diff < 86400000 -> "${diff / 3600000}h"
         else -> {
-            // More than 1 day, show date
             val formatter = SimpleDateFormat("MMM d", Locale.getDefault())
             formatter.format(Date(timestamp))
         }
