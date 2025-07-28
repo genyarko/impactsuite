@@ -7,6 +7,11 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -41,44 +46,43 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.mygemma3n.data.StudentProfileEntity
 import com.example.mygemma3n.data.TutorSessionType
 import com.example.mygemma3n.shared_utilities.OfflineRAG
-import com.example.mygemma3n.shared_utilities.TextToSpeechManager
 import com.example.mygemma3n.feature.tutor.FloatingTopicBubbles
 // feature/tutor/TutorScreen.kt
 
 @Composable
 fun TutorScreen(
     onNavigateBack: () -> Unit = {},
+    onNavigateToChatList: () -> Unit = {},
     viewModel: TutorViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    val ttsManager = remember { TextToSpeechManager(context) }
-    DisposableEffect(Unit) {
-        onDispose { ttsManager.shutdown() }
-    }
 
-    var showProfileDialog by remember { mutableStateOf(false) }
     var showSubjectSelector by remember { mutableStateOf(false) }
-
-    // Check if student profile exists
-    LaunchedEffect(Unit) {
-        if (state.studentProfile == null) {
-            showProfileDialog = true
-        }
-    }
 
     Scaffold(
         topBar = {
             TutorTopBar(
                 studentName = state.studentProfile?.name ?: "Student",
                 subject = state.currentSubject,
-                onBackClick = onNavigateBack,
-                onProfileClick = { showProfileDialog = true }
+                onBackClick = {
+                    if (state.currentSubject != null) {
+                        // If in a subject session, go back to subject selection
+                        viewModel.clearCurrentSubject()
+                    } else {
+                        // If in subject selection, go back to main
+                        onNavigateBack()
+                    }
+                },
+                onProfileClick = { viewModel.showStudentProfileDialog() },
+                onChatListClick = onNavigateToChatList
             )
         },
         bottomBar = {
@@ -127,7 +131,7 @@ fun TutorScreen(
                         conceptMastery = state.conceptMastery,
                         suggestedTopics = state.suggestedTopics,
                         showFloatingTopics = state.showFloatingTopics,
-                        onMessageDoubleTap = { ttsManager.speak(it) },
+                        onMessageDoubleTap = { viewModel.speakText(it) },
                         onTopicSelected = { topic ->
                             viewModel.selectTopic(topic)
                         }
@@ -138,13 +142,12 @@ fun TutorScreen(
     }
 
     // Dialogs
-    if (showProfileDialog) {
+    if (state.showStudentDialog) {
         StudentProfileDialog(
             existingProfile = state.studentProfile,
-            onDismiss = { showProfileDialog = false },
+            onDismiss = { viewModel.dismissStudentDialog() },
             onConfirm = { name, grade ->
                 viewModel.initializeStudent(name, grade)
-                showProfileDialog = false
             }
         )
     }
@@ -156,7 +159,8 @@ private fun TutorTopBar(
     studentName: String,
     subject: OfflineRAG.Subject?,
     onBackClick: () -> Unit,
-    onProfileClick: () -> Unit
+    onProfileClick: () -> Unit,
+    onChatListClick: () -> Unit
 ) {
     TopAppBar(
         title = {
@@ -180,6 +184,9 @@ private fun TutorTopBar(
             }
         },
         actions = {
+            IconButton(onClick = onChatListClick) {
+                Icon(Icons.AutoMirrored.Filled.MenuBook, "Chat List")
+            }
             IconButton(onClick = onProfileClick) {
                 Icon(Icons.Default.Person, "Profile")
             }
@@ -252,54 +259,133 @@ private fun SubjectSelectionCard(
     subjectCard: SubjectCard,
     onClick: () -> Unit
 ) {
+    var isExpanded by remember { mutableStateOf(false) }
+    
     Card(
-        onClick = onClick,
+        onClick = { 
+            isExpanded = !isExpanded
+        },
         modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isExpanded) 8.dp else 4.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isExpanded) 
+                subjectCard.color.copy(alpha = 0.05f) 
+            else 
+                MaterialTheme.colorScheme.surface
+        )
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(16.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(56.dp)
-                    .background(
-                        color = subjectCard.color.copy(alpha = 0.1f),
-                        shape = CircleShape
-                    ),
-                contentAlignment = Alignment.Center
+            // Main content row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .background(
+                            color = subjectCard.color.copy(alpha = 0.1f),
+                            shape = CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = subjectCard.icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(32.dp),
+                        tint = subjectCard.color
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = subjectCard.displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = subjectCard.description,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
                 Icon(
-                    imageVector = subjectCard.icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(32.dp),
-                    tint = subjectCard.color
+                    if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = if (isExpanded) "Collapse" else "Expand",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-
-            Spacer(modifier = Modifier.width(16.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = subjectCard.displayName,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Medium
-                )
-                Text(
-                    text = subjectCard.description,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            
+            // Expanded preview content
+            AnimatedVisibility(
+                visible = isExpanded,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Column(
+                    modifier = Modifier.padding(top = 16.dp)
+                ) {
+                    HorizontalDivider(color = subjectCard.color.copy(alpha = 0.2f))
+                    
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    Text(
+                        text = "Sample Topics:",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = subjectCard.color,
+                        fontWeight = FontWeight.Medium
+                    )
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    // Sample topics based on subject
+                    getSampleTopics(subjectCard.subject).take(3).forEach { topic ->
+                        Row(
+                            modifier = Modifier.padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Circle,
+                                contentDescription = null,
+                                modifier = Modifier.size(6.dp),
+                                tint = subjectCard.color.copy(alpha = 0.6f)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = topic,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    // Start learning button
+                    Button(
+                        onClick = onClick,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = subjectCard.color
+                        )
+                    ) {
+                        Icon(
+                            Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Start Learning ${subjectCard.displayName}")
+                    }
+                }
             }
-
-            Icon(
-                Icons.AutoMirrored.Filled.ArrowForward,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }
@@ -452,6 +538,7 @@ private fun TutorMessageBubble(
                     }
                 )
 
+                // Message metadata chips
                 message.metadata?.let { metadata ->
                     Spacer(modifier = Modifier.height(4.dp))
                     Row(
@@ -464,7 +551,43 @@ private fun TutorMessageBubble(
                                 modifier = Modifier.height(24.dp)
                             )
                         }
+                        
+                        metadata.responseTime?.let { responseTime ->
+                            AssistChip(
+                                onClick = { },
+                                label = { Text("${responseTime}ms", style = MaterialTheme.typography.labelSmall) },
+                                modifier = Modifier.height(24.dp),
+                                colors = AssistChipDefaults.assistChipColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                )
+                            )
+                        }
                     }
+                }
+
+                // Timestamp and status row
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = if (message.isUser) Arrangement.End else Arrangement.Start,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Message status icon
+                    if (message.isUser) {
+                        MessageStatusIcon(status = message.status)
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
+                    
+                    // Timestamp
+                    Text(
+                        text = formatTimestamp(message.timestamp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (message.isUser) {
+                            MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        }
+                    )
                 }
             }
         }
@@ -666,6 +789,30 @@ private fun getSubjectCards() = listOf(
         icon = Icons.AutoMirrored.Filled.MenuBook,
         color = Color(0xFFFF9800),
         defaultSessionType = TutorSessionType.HOMEWORK_HELP
+    ),
+    SubjectCard(
+        subject = OfflineRAG.Subject.HISTORY,
+        displayName = "History",
+        description = "World History, Ancient civilizations, Modern history",
+        icon = Icons.Default.HistoryEdu,
+        color = Color(0xFF9C27B0),
+        defaultSessionType = TutorSessionType.CONCEPT_EXPLANATION
+    ),
+    SubjectCard(
+        subject = OfflineRAG.Subject.GEOGRAPHY,
+        displayName = "Geography",
+        description = "Physical geography, Human geography, Maps",
+        icon = Icons.Default.Public,
+        color = Color(0xFF00BCD4),
+        defaultSessionType = TutorSessionType.CONCEPT_EXPLANATION
+    ),
+    SubjectCard(
+        subject = OfflineRAG.Subject.ECONOMICS,
+        displayName = "Economics",
+        description = "Microeconomics, Macroeconomics, Markets",
+        icon = Icons.Default.TrendingUp,
+        color = Color(0xFF795548),
+        defaultSessionType = TutorSessionType.CONCEPT_EXPLANATION
     )
 )
 
@@ -732,6 +879,49 @@ private fun TutorInputBar(
         }
     }
 }
+
+private fun getSampleTopics(subject: OfflineRAG.Subject): List<String> {
+    return when (subject) {
+        OfflineRAG.Subject.MATHEMATICS -> listOf(
+            "Linear equations and functions",
+            "Geometric shapes and angles",
+            "Probability and statistics",
+            "Calculus fundamentals"
+        )
+        OfflineRAG.Subject.SCIENCE -> listOf(
+            "Forces and motion",
+            "Chemical reactions",
+            "Cell biology and genetics",
+            "Energy and waves"
+        )
+        OfflineRAG.Subject.ENGLISH -> listOf(
+            "Grammar and sentence structure",
+            "Poetry analysis and writing",
+            "Literature comprehension",
+            "Essay writing techniques"
+        )
+        OfflineRAG.Subject.HISTORY -> listOf(
+            "Ancient civilizations",
+            "World wars and conflicts",
+            "Cultural revolutions",
+            "Modern democracy"
+        )
+        OfflineRAG.Subject.GEOGRAPHY -> listOf(
+            "Climate and weather patterns",
+            "Physical landscapes",
+            "Population and urbanization",
+            "Natural resources"
+        )
+        OfflineRAG.Subject.ECONOMICS -> listOf(
+            "Supply and demand",
+            "Market structures",
+            "Government policies",
+            "International trade"
+        )
+        else -> listOf("General topics", "Basic concepts", "Fundamentals")
+    }
+}
+
 @Composable
 private fun StudentProfileDialog(
     existingProfile: StudentProfileEntity?,
@@ -783,4 +973,43 @@ private fun StudentProfileDialog(
             }
         }
     )
+}
+
+@Composable
+private fun MessageStatusIcon(status: TutorViewModel.TutorMessage.MessageStatus) {
+    val (icon, tint) = when (status) {
+        TutorViewModel.TutorMessage.MessageStatus.SENDING -> 
+            Icons.Default.Schedule to MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.6f)
+        TutorViewModel.TutorMessage.MessageStatus.SENT -> 
+            Icons.Default.Check to MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.6f)
+        TutorViewModel.TutorMessage.MessageStatus.DELIVERED -> 
+            Icons.Default.DoneAll to MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
+        TutorViewModel.TutorMessage.MessageStatus.FAILED -> 
+            Icons.Default.Error to MaterialTheme.colorScheme.error
+        TutorViewModel.TutorMessage.MessageStatus.TYPING -> 
+            Icons.Default.MoreHoriz to MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.6f)
+    }
+    
+    Icon(
+        imageVector = icon,
+        contentDescription = status.name,
+        modifier = Modifier.size(12.dp),
+        tint = tint
+    )
+}
+
+private fun formatTimestamp(timestamp: Long): String {
+    val now = System.currentTimeMillis()
+    val diff = now - timestamp
+    
+    return when {
+        diff < 60000 -> "now" // Less than 1 minute
+        diff < 3600000 -> "${diff / 60000}m" // Less than 1 hour, show minutes
+        diff < 86400000 -> "${diff / 3600000}h" // Less than 1 day, show hours
+        else -> {
+            // More than 1 day, show date
+            val formatter = SimpleDateFormat("MMM d", Locale.getDefault())
+            formatter.format(Date(timestamp))
+        }
+    }
 }

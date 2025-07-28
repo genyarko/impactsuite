@@ -2,8 +2,10 @@ package com.example.mygemma3n.data
 
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
+import com.example.mygemma3n.feature.quiz.QuestionSession
 import kotlinx.coroutines.flow.Flow
 import com.example.mygemma3n.feature.quiz.QuizEntity
 
@@ -64,4 +66,42 @@ interface QuizDao {
         """
     )
     suspend fun getAverageScore(subject: String): Float?
+
+    @Dao
+    interface QuestionSessionDao {
+
+        @Insert(onConflict = OnConflictStrategy.REPLACE)
+        suspend fun insertSession(session: QuestionSession)
+
+        @Query("""
+        SELECT * FROM question_sessions 
+        WHERE questionHash = :questionHash 
+        ORDER BY attemptedAt DESC 
+        LIMIT 1
+    """)
+        suspend fun getLatestSession(questionHash: Int): QuestionSession?
+
+        @Query("""
+        SELECT * FROM question_sessions 
+        WHERE questionHash = :questionHash 
+        ORDER BY attemptedAt DESC 
+        LIMIT :limit
+    """)
+        suspend fun getRecentSessions(questionHash: Int, limit: Int): List<QuestionSession>
+
+        @Query("""
+        SELECT * FROM question_sessions 
+        WHERE questionHash = :questionHash 
+        AND lastSessionNumber <= :currentSession - cooldownSessions
+        ORDER BY attemptedAt DESC 
+        LIMIT 1
+    """)
+        suspend fun getAvailableForReuse(questionHash: Int, currentSession: Int): QuestionSession?
+
+        @Query("""
+        SELECT COUNT(*) FROM question_sessions 
+        WHERE questionHash = :questionHash
+    """)
+        suspend fun getSessionCount(questionHash: Int): Int
+    }
 }

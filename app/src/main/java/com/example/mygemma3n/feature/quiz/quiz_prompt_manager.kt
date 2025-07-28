@@ -25,14 +25,14 @@ class EnhancedPromptManager @Inject constructor(
     data class QuizPromptData(
         val questionTypes: Map<String, QuestionTypeData>,
         val fallbackQuestions: Map<String, Map<String, QuestionExample>>,
-        val questionStems: Map<String, List<String>>?,
-        val conceptVariations: Map<String, List<String>>?
+        val questionStems: Map<String, List<String>>? = null,
+        val conceptVariations: Map<String, List<String>>? = null
     )
 
     data class QuestionTypeData(
         val instructions: String,
-        val examples: Map<String, List<QuestionExample>>, // Changed to List for multiple examples
-        val promptVariations: List<String>? // Different ways to ask for the same type
+        val examples: Map<String, QuestionExample>, // Fixed: Single example per subject, not List
+        val promptVariations: List<String>? = null
     )
 
     data class QuestionExample(
@@ -59,20 +59,6 @@ class EnhancedPromptManager @Inject constructor(
         )
     }
 
-    private fun loadPromptData() {
-        try {
-            val jsonString = context.assets.open("quiz_prompts.json").bufferedReader().use { it.readText() }
-            promptData = gson.fromJson(jsonString, QuizPromptData::class.java)
-            Timber.d("Loaded quiz prompts from assets")
-        } catch (e: Exception) {
-            Timber.w(e, "Failed to load quiz prompts from assets, using enhanced defaults")
-            promptData = createEnhancedDefaultPromptData()
-        }
-    }
-
-    /**
-     * Get varied instructions for question generation
-     */
     fun getVariedQuestionPrompt(
         questionType: QuestionType,
         subject: Subject,
@@ -83,18 +69,11 @@ class EnhancedPromptManager @Inject constructor(
         val data = promptData ?: createEnhancedDefaultPromptData()
         val typeData = data.questionTypes[questionType.name] ?: return getEmbeddedInstructions(questionType)
 
-        // Get subject-specific examples (now returns multiple)
+        // Get subject-specific example (now returns single example)
         val subjectName = if (subject == Subject.LANGUAGE_ARTS) "ENGLISH" else subject.name
-        val examples = typeData.examples[subjectName]
+        val example = typeData.examples[subjectName]
             ?: typeData.examples["SCIENCE"]
-            ?: listOf()
-
-        // Select a random example if multiple exist
-        val selectedExample = if (examples.isNotEmpty()) {
-            examples[(attemptNumber + Random.nextInt(100)) % examples.size]
-        } else {
-            return getEmbeddedInstructions(questionType)
-        }
+            ?: return getEmbeddedInstructions(questionType)
 
         // Get varied instructions
         val baseInstructions = typeData.instructions
@@ -122,7 +101,7 @@ class EnhancedPromptManager @Inject constructor(
             Variation hint #${attemptNumber + 1}: ${getVariationHint(questionType, attemptNumber)}
         """.trimIndent()
 
-        val exampleJson = gson.toJson(selectedExample)
+        val exampleJson = gson.toJson(example)
 
         // Track this prompt to avoid repetition
         val promptHash = (enhancedInstructions + topic + difficulty).hashCode()
@@ -130,6 +109,19 @@ class EnhancedPromptManager @Inject constructor(
 
         return Pair(enhancedInstructions, exampleJson)
     }
+
+    private fun loadPromptData() {
+        try {
+            val jsonString = context.assets.open("quiz_prompts.json").bufferedReader().use { it.readText() }
+            promptData = gson.fromJson(jsonString, QuizPromptData::class.java)
+            Timber.d("Loaded quiz prompts from assets")
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to load quiz prompts from assets, using enhanced defaults")
+            promptData = createEnhancedDefaultPromptData()
+        }
+    }
+
+
 
     /**
      * Generate dynamic elements to add variety
@@ -341,41 +333,61 @@ class EnhancedPromptManager @Inject constructor(
                 "MULTIPLE_CHOICE" to QuestionTypeData(
                     instructions = "Create a multiple choice question with 4 distinct options.",
                     examples = mapOf(
-                        "SCIENCE" to listOf(
-                            QuestionExample(
-                                question = "What is the powerhouse of the cell?",
-                                options = listOf("Nucleus", "Mitochondria", "Ribosome", "Cell membrane"),
-                                correctAnswer = "Mitochondria",
-                                explanation = "Mitochondria produce ATP through cellular respiration.",
-                                hint = "This organelle is involved in energy production.",
-                                conceptsCovered = listOf("cell-biology", "organelles")
-                            ),
-                            QuestionExample(
-                                question = "Which process converts light energy into chemical energy?",
-                                options = listOf("Respiration", "Photosynthesis", "Fermentation", "Digestion"),
-                                correctAnswer = "Photosynthesis",
-                                explanation = "Photosynthesis occurs in chloroplasts and produces glucose.",
-                                hint = "This process occurs in green plants.",
-                                conceptsCovered = listOf("photosynthesis", "energy-conversion")
-                            ),
-                            QuestionExample(
-                                question = "What type of rock forms from cooled magma?",
-                                options = listOf("Sedimentary", "Metamorphic", "Igneous", "Limestone"),
-                                correctAnswer = "Igneous",
-                                explanation = "Igneous rocks form when molten rock cools and solidifies.",
-                                hint = "Think about volcanic activity.",
-                                conceptsCovered = listOf("geology", "rock-cycle")
-                            )
+                        "SCIENCE" to QuestionExample(
+                            question = "What is the powerhouse of the cell?",
+                            options = listOf("Nucleus", "Mitochondria", "Ribosome", "Cell membrane"),
+                            correctAnswer = "Mitochondria",
+                            explanation = "Mitochondria produce ATP through cellular respiration.",
+                            hint = "This organelle is involved in energy production.",
+                            conceptsCovered = listOf("cell-biology", "organelles")
                         ),
-                        "MATHEMATICS" to listOf(
-                            QuestionExample(
-                                question = "What is the slope of a horizontal line?",
-                                options = listOf("1", "0", "Undefined", "-1"),
-                                correctAnswer = "0",
-                                explanation = "Horizontal lines have no vertical change, so slope = 0.",
-                                hint = "Think about rise over run.",
-                                conceptsCovered = listOf("linear-equations", "slope")
-                            )
+                        "MATHEMATICS" to QuestionExample(
+                            question = "What is the slope of a horizontal line?",
+                            options = listOf("1", "0", "Undefined", "-1"),
+                            correctAnswer = "0",
+                            explanation = "Horizontal lines have no vertical change, so slope = 0.",
+                            hint = "Think about rise over run.",
+                            conceptsCovered = listOf("linear-equations", "slope")
+                        ),
+                        "ENGLISH" to QuestionExample(
+                            question = "Which literary device involves giving human qualities to non-human things?",
+                            options = listOf("Metaphor", "Simile", "Personification", "Alliteration"),
+                            correctAnswer = "Personification",
+                            explanation = "Personification attributes human characteristics to non-human entities.",
+                            hint = "Think about when we say 'the wind whispered' or 'the sun smiled'.",
+                            conceptsCovered = listOf("literary-devices", "figurative-language")
+                        ),
+                        "HISTORY" to QuestionExample(
+                            question = "Which event started World War I?",
+                            options = listOf("Assassination of Archduke Franz Ferdinand", "Bombing of Pearl Harbor", "Invasion of Poland", "Russian Revolution"),
+                            correctAnswer = "Assassination of Archduke Franz Ferdinand",
+                            explanation = "The assassination in Sarajevo on June 28, 1914, triggered WWI.",
+                            hint = "This event happened in Sarajevo in 1914.",
+                            conceptsCovered = listOf("world-war-1", "european-history")
+                        ),
+                        "GEOGRAPHY" to QuestionExample(
+                            question = "Which is the longest river in the world?",
+                            options = listOf("Amazon River", "Nile River", "Yangtze River", "Mississippi River"),
+                            correctAnswer = "Nile River",
+                            explanation = "The Nile River in Africa is approximately 6,650 kilometers long.",
+                            hint = "This river flows through northeastern Africa.",
+                            conceptsCovered = listOf("rivers", "physical-geography")
+                        ),
+                        "LANGUAGE_ARTS" to QuestionExample(
+                            question = "What is the main purpose of a persuasive essay?",
+                            options = listOf("To entertain readers", "To convince readers of a viewpoint", "To provide instructions", "To describe a scene"),
+                            correctAnswer = "To convince readers of a viewpoint",
+                            explanation = "Persuasive essays aim to convince readers to accept an opinion.",
+                            hint = "Think about what 'persuade' means.",
+                            conceptsCovered = listOf("essay-types", "writing-purposes")
+                        ),
+                        "GENERAL" to QuestionExample(
+                            question = "What is the smallest unit of matter?",
+                            options = listOf("Molecule", "Atom", "Cell", "Particle"),
+                            correctAnswer = "Atom",
+                            explanation = "Atoms are the basic building blocks of matter.",
+                            hint = "This unit makes up all elements.",
+                            conceptsCovered = listOf("chemistry", "matter")
                         )
                     ),
                     promptVariations = listOf(
@@ -385,9 +397,73 @@ class EnhancedPromptManager @Inject constructor(
                         "Frame this as a problem-solving question.",
                         "Use a real-world context for this question."
                     )
+                ),
+                "TRUE_FALSE" to QuestionTypeData(
+                    instructions = "Create a TRUE/FALSE statement that is clearly true or false.",
+                    examples = mapOf(
+                        "SCIENCE" to QuestionExample(
+                            question = "All mammals lay eggs.",
+                            options = listOf("True", "False"),
+                            correctAnswer = "False",
+                            explanation = "Most mammals give birth to live young. Only monotremes lay eggs.",
+                            hint = "Think about how most mammals reproduce.",
+                            conceptsCovered = listOf("mammal-reproduction", "animal-classification")
+                        ),
+                        "GENERAL" to QuestionExample(
+                            question = "The Earth is flat.",
+                            options = listOf("True", "False"),
+                            correctAnswer = "False",
+                            explanation = "The Earth is a sphere, as proven by science.",
+                            conceptsCovered = listOf("earth-science")
+                        )
+                    ),
+                    promptVariations = listOf(
+                        "Test a common misconception.",
+                        "Create a statement with subtle complexity.",
+                        "Focus on exceptions to general rules."
+                    )
+                ),
+                "FILL_IN_BLANK" to QuestionTypeData(
+                    instructions = "Create a sentence with ONE blank indicated by _____.",
+                    examples = mapOf(
+                        "SCIENCE" to QuestionExample(
+                            question = "The process of water changing from liquid to gas is called _____.",
+                            options = emptyList(),
+                            correctAnswer = "evaporation",
+                            explanation = "Evaporation occurs when water gains energy to become vapor.",
+                            hint = "This happens when water is heated.",
+                            conceptsCovered = listOf("states-of-matter", "water-cycle")
+                        ),
+                        "GENERAL" to QuestionExample(
+                            question = "The capital of France is _____.",
+                            options = emptyList(),
+                            correctAnswer = "Paris",
+                            explanation = "Paris is the capital and largest city of France.",
+                            conceptsCovered = listOf("geography")
+                        )
+                    )
+                ),
+                "SHORT_ANSWER" to QuestionTypeData(
+                    instructions = "Create an open-ended question requiring a brief explanation.",
+                    examples = mapOf(
+                        "SCIENCE" to QuestionExample(
+                            question = "Describe the water cycle.",
+                            options = emptyList(),
+                            correctAnswer = "The water cycle is the continuous movement of water through evaporation, condensation, and precipitation",
+                            explanation = "Water moves between Earth's surface and atmosphere continuously.",
+                            conceptsCovered = listOf("water-cycle", "earth-science")
+                        ),
+                        "GENERAL" to QuestionExample(
+                            question = "What is gravity?",
+                            options = emptyList(),
+                            correctAnswer = "Gravity is the force that attracts objects with mass toward each other",
+                            explanation = "This force keeps us on Earth's surface.",
+                            conceptsCovered = listOf("physics")
+                        )
+                    )
                 )
             ),
-            fallbackQuestions = mapOf(),
+            fallbackQuestions = createFallbackQuestions(),
             questionStems = mapOf(
                 "MULTIPLE_CHOICE" to listOf(
                     "Which of the following best describes...",
@@ -400,6 +476,45 @@ class EnhancedPromptManager @Inject constructor(
                 )
             ),
             conceptVariations = mapOf()
+        )
+    }
+
+    private fun createFallbackQuestions(): Map<String, Map<String, QuestionExample>> {
+        return mapOf(
+            "MULTIPLE_CHOICE" to mapOf(
+                "SCIENCE" to QuestionExample(
+                    question = "Which planet is closest to the Sun?",
+                    options = listOf("Venus", "Mercury", "Earth", "Mars"),
+                    correctAnswer = "Mercury",
+                    conceptsCovered = listOf("solar-system")
+                ),
+                "MATHEMATICS" to QuestionExample(
+                    question = "What is 15 + 27?",
+                    options = listOf("40", "41", "42", "43"),
+                    correctAnswer = "42",
+                    conceptsCovered = listOf("addition")
+                ),
+                "GENERAL" to QuestionExample(
+                    question = "How many days are in a week?",
+                    options = listOf("5", "6", "7", "8"),
+                    correctAnswer = "7",
+                    conceptsCovered = listOf("time")
+                )
+            ),
+            "TRUE_FALSE" to mapOf(
+                "SCIENCE" to QuestionExample(
+                    question = "The Earth revolves around the Sun.",
+                    options = listOf("True", "False"),
+                    correctAnswer = "True",
+                    conceptsCovered = listOf("solar-system")
+                ),
+                "GENERAL" to QuestionExample(
+                    question = "Water freezes at 0 degrees Celsius.",
+                    options = listOf("True", "False"),
+                    correctAnswer = "True",
+                    conceptsCovered = listOf("temperature")
+                )
+            )
         )
     }
 

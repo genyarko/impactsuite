@@ -28,6 +28,9 @@ interface TutorDao {
     @Query("UPDATE student_profiles SET lastActiveAt = :timestamp WHERE id = :studentId")
     suspend fun updateLastActive(studentId: String, timestamp: Long)
 
+    @Query("SELECT * FROM student_profiles ORDER BY lastActiveAt DESC")
+    suspend fun getAllStudents(): List<StudentProfileEntity>
+
     // Tutor Session operations
     @Insert
     suspend fun insertSession(session: TutorSessionEntity)

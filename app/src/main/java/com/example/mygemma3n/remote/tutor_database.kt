@@ -26,7 +26,7 @@ import com.example.mygemma3n.data.TutorSessionEntity
         LearningPreferenceEntity::class,
         ConceptMasteryEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(TutorConverters::class)

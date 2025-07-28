@@ -1,12 +1,21 @@
 package com.example.mygemma3n.data
 
 import androidx.room.Entity
+import androidx.room.Index
+import androidx.room.ForeignKey
 import com.example.mygemma3n.shared_utilities.OfflineRAG
 import java.util.UUID
 import androidx.room.PrimaryKey
 
 
-@Entity(tableName = "student_profiles")
+@Entity(
+    tableName = "student_profiles",
+    indices = [
+        Index(value = ["gradeLevel"]),
+        Index(value = ["lastActiveAt"]),
+        Index(value = ["createdAt"])
+    ]
+)
 data class StudentProfileEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
     val name: String,
@@ -16,7 +25,25 @@ data class StudentProfileEntity(
     val lastActiveAt: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "tutor_sessions")
+@Entity(
+    tableName = "tutor_sessions",
+    foreignKeys = [
+        ForeignKey(
+            entity = StudentProfileEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["studentId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [
+        Index(value = ["studentId"]),
+        Index(value = ["subject"]),
+        Index(value = ["startedAt"]),
+        Index(value = ["endedAt"]),
+        Index(value = ["studentId", "subject"]),
+        Index(value = ["studentId", "startedAt"])
+    ]
+)
 data class TutorSessionEntity(
     @PrimaryKey val id: String,
     val studentId: String,
@@ -30,7 +57,22 @@ data class TutorSessionEntity(
     val understandingLevel: Float? = null // 0-1 scale
 )
 
-@Entity(tableName = "learning_preferences")
+@Entity(
+    tableName = "learning_preferences",
+    foreignKeys = [
+        ForeignKey(
+            entity = StudentProfileEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["studentId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [
+        Index(value = ["studentId"]),
+        Index(value = ["subject"]),
+        Index(value = ["studentId", "subject"], unique = true)
+    ]
+)
 data class LearningPreferenceEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val studentId: String,
@@ -41,7 +83,28 @@ data class LearningPreferenceEntity(
     val visualAidsPreference: Boolean = false
 )
 
-@Entity(tableName = "concept_mastery")
+@Entity(
+    tableName = "concept_mastery",
+    foreignKeys = [
+        ForeignKey(
+            entity = StudentProfileEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["studentId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [
+        Index(value = ["studentId"]),
+        Index(value = ["subject"]),
+        Index(value = ["concept"]),
+        Index(value = ["gradeLevel"]),
+        Index(value = ["lastReviewedAt"]),
+        Index(value = ["masteryLevel"]),
+        Index(value = ["studentId", "subject"]),
+        Index(value = ["studentId", "concept"], unique = true),
+        Index(value = ["subject", "gradeLevel"])
+    ]
+)
 data class ConceptMasteryEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val studentId: String,

@@ -327,7 +327,7 @@ object AppModule {
             TutorDatabase::class.java,
             "tutor_database"
         )
-            .fallbackToDestructiveMigration(false)
+            .fallbackToDestructiveMigration()
             .build()
     }
 

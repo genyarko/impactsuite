@@ -8,6 +8,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -16,6 +17,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.cos
@@ -137,6 +140,9 @@ private fun TopicChip(
     text: String,
     onClick: () -> Unit
 ) {
+    val hapticFeedback = LocalHapticFeedback.current
+    val interactionSource = remember { MutableInteractionSource() }
+    
     val colors = listOf(
         MaterialTheme.colorScheme.primaryContainer,
         MaterialTheme.colorScheme.secondaryContainer,
@@ -144,6 +150,16 @@ private fun TopicChip(
     )
 
     val backgroundColor = remember { colors.random() }
+    
+    // Scale animation on press
+    val scale by animateFloatAsState(
+        targetValue = 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessHigh
+        ),
+        label = "chipScale"
+    )
 
     Surface(
         modifier = Modifier
@@ -152,7 +168,13 @@ private fun TopicChip(
                 shape = RoundedCornerShape(20.dp),
                 spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
             )
-            .clickable { onClick() },
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null // Using Surface's built-in Material3 ripple
+            ) {
+                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                onClick()
+            },
         shape = RoundedCornerShape(20.dp),
         color = backgroundColor,
         tonalElevation = 2.dp
