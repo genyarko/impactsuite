@@ -139,6 +139,7 @@ dependencies {
     implementation(libs.litert.gpu)
     implementation(libs.play.services.mlkit.subject.segmentation)
     implementation(libs.firebase.crashlytics.buildtools)
+    implementation(libs.androidx.ui.test.android)
     ksp(libs.androidx.room.compiler)
 
 // WorkManager

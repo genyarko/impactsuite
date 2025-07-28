@@ -74,6 +74,7 @@ pdfbox = "3.0.5"
 poi = "5.4.1"
 firebase-perf = "21.0.2"
 firebaseCrashlyticsBuildtools = "3.0.5"
+uiTestAndroid = "1.8.3"
 
 [libraries]
 accompanist-permissions = { module = "com.google.accompanist:accompanist-permissions", version.ref = "accompanistPermissions" }
@@ -164,6 +165,7 @@ poi-ooxml = { module = "org.apache.poi:poi-ooxml", version.ref = "poi" }
 firebase-perf = { module = "com.google.firebase:firebase-perf", version.ref = "firebase-perf" }
 tom_roush-pdfbox-android = { module = "com.tom_roush:pdfbox-android", version.ref = "pdfboxAndroidVersion" }
 firebase-crashlytics-buildtools = { group = "com.google.firebase", name = "firebase-crashlytics-buildtools", version.ref = "firebaseCrashlyticsBuildtools" }
+androidx-ui-test-android = { group = "androidx.compose.ui", name = "ui-test-android", version.ref = "uiTestAndroid" }
 
 
 [plugins]

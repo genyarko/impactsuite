@@ -1,0 +1,541 @@
+package com.example.mygemma3n.feature.analytics
+
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import timber.log.Timber
+import java.util.*
+import java.util.concurrent.TimeUnit
+import javax.inject.Inject
+import javax.inject.Singleton
+import kotlin.math.*
+
+@Singleton
+class LearningAnalyticsRepository @Inject constructor(
+    private val interactionDao: LearningInteractionDao,
+    private val progressDao: SubjectProgressDao,
+    private val masteryDao: TopicMasteryDao,
+    private val sessionDao: LearningSessionDao,
+    private val gapDao: KnowledgeGapDao,
+    private val recommendationDao: StudyRecommendationDao,
+    private val computationDao: AnalyticsComputationDao,
+    private val knowledgeGapAnalyzer: KnowledgeGapAnalyzer
+) {
+
+    /**
+     * Record a learning interaction (question asked, topic explored, etc.)
+     */
+    suspend fun recordInteraction(
+        studentId: String,
+        subject: String,
+        topic: String,
+        concept: String,
+        interactionType: InteractionType,
+        sessionDurationMs: Long,
+        responseQuality: Float? = null,
+        difficultyLevel: String = "MEDIUM",
+        wasCorrect: Boolean? = null,
+        attemptsNeeded: Int = 1,
+        helpRequested: Boolean = false,
+        followUpQuestions: Int = 0
+    ) {
+        try {
+            val interaction = LearningInteractionEntity(
+                id = UUID.randomUUID().toString(),
+                studentId = studentId,
+                subject = subject,
+                topic = topic,
+                concept = concept,
+                interactionType = interactionType,
+                sessionDurationMs = sessionDurationMs,
+                responseQuality = responseQuality,
+                difficultyLevel = difficultyLevel,
+                wasCorrect = wasCorrect,
+                attemptsNeeded = attemptsNeeded,
+                helpRequested = helpRequested,
+                followUpQuestions = followUpQuestions
+            )
+            
+            interactionDao.insertInteraction(interaction)
+            
+            // Update aggregated data
+            updateSubjectProgress(studentId, subject)
+            updateTopicMastery(studentId, subject, topic, concept, responseQuality, wasCorrect)
+            
+            // Analyze for knowledge gaps
+            analyzeForKnowledgeGaps(studentId, subject, topic, concept, interaction)
+            
+            // Run comprehensive knowledge gap analysis periodically
+            if (shouldRunComprehensiveAnalysis(studentId)) {
+                knowledgeGapAnalyzer.analyzeKnowledgeGaps(studentId)
+            }
+            
+            Timber.d("Recorded learning interaction: $subject/$topic/$concept")
+            
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to record learning interaction")
+        }
+    }
+
+    /**
+     * Get comprehensive learning analytics for a student
+     */
+    fun getLearningAnalytics(studentId: String): Flow<LearningAnalytics> {
+        return combine(
+            progressDao.getProgressForStudent(studentId),
+            gapDao.getActiveGapsForStudent(studentId),
+            recommendationDao.getActiveRecommendationsForStudent(studentId)
+        ) { progress, gaps, recommendations ->
+            
+            val subjectAnalytics = progress.associate { subjectProgress ->
+                subjectProgress.subject to SubjectAnalytics(
+                    subject = subjectProgress.subject,
+                    masteryScore = subjectProgress.masteryScore,
+                    timeSpent = subjectProgress.totalTimeSpentMs,
+                    topicsExplored = subjectProgress.topicsExplored,
+                    totalTopics = getTotalTopicsForSubject(subjectProgress.subject),
+                    accuracy = subjectProgress.averageAccuracy,
+                    currentStreak = subjectProgress.currentStreak,
+                    needsAttention = extractNeedsAttention(subjectProgress.knowledgeGaps),
+                    strongAreas = getStrongAreas(studentId, subjectProgress.subject)
+                )
+            }
+            
+            LearningAnalytics(
+                studentId = studentId,
+                overallProgress = calculateOverallProgress(progress),
+                subjectProgress = subjectAnalytics,
+                knowledgeGaps = gaps,
+                recommendations = recommendations,
+                weeklyStats = getWeeklyStats(studentId),
+                trends = calculateLearningTrends(studentId)
+            )
+        }
+    }
+
+    /**
+     * Start a new learning session
+     */
+    suspend fun startLearningSession(studentId: String, sessionType: String = "MIXED"): String {
+        val sessionId = UUID.randomUUID().toString()
+        val session = LearningSessionEntity(
+            id = sessionId,
+            studentId = studentId,
+            startTime = System.currentTimeMillis(),
+            sessionType = sessionType
+        )
+        sessionDao.insertSession(session)
+        return sessionId
+    }
+
+    /**
+     * End a learning session
+     */
+    suspend fun endLearningSession(sessionId: String, performance: Float, focusScore: Float) {
+        try {
+            val session = sessionDao.getCurrentSession(sessionId) ?: return
+            val endTime = System.currentTimeMillis()
+            
+            val updatedSession = session.copy(
+                endTime = endTime,
+                totalDurationMs = endTime - session.startTime,
+                overallPerformance = performance,
+                focusScore = focusScore
+            )
+            
+            sessionDao.updateSession(updatedSession)
+            
+            // Generate recommendations based on session performance
+            generateSessionRecommendations(session.studentId, updatedSession)
+            
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to end learning session")
+        }
+    }
+
+    /**
+     * Generate personalized study recommendations
+     */
+    suspend fun generateRecommendations(studentId: String): List<StudyRecommendationEntity> {
+        try {
+            val gaps = gapDao.getActiveGapsForSubject(studentId, "")
+            val masteryData = masteryDao.getTopicsNeedingReview(studentId)
+            val weakAreas = identifyWeakAreas(studentId)
+            
+            val recommendations = mutableListOf<StudyRecommendationEntity>()
+            
+            // Recommendations based on knowledge gaps
+            gaps.take(3).forEach { gap ->
+                recommendations.add(createGapRecommendation(studentId, gap))
+            }
+            
+            // Recommendations for topics needing review
+            masteryData.take(2).forEach { mastery ->
+                recommendations.add(createReviewRecommendation(studentId, mastery))
+            }
+            
+            // Challenge recommendations for strong areas
+            val strongAreas = identifyStrongAreas(studentId)
+            strongAreas.take(1).forEach { subject ->
+                recommendations.add(createChallengeRecommendation(studentId, subject))
+            }
+            
+            // Insert recommendations
+            recommendationDao.insertRecommendations(recommendations)
+            
+            return recommendations
+            
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to generate recommendations")
+            return emptyList()
+        }
+    }
+
+    /**
+     * Identify knowledge gaps using analytics
+     */
+    private suspend fun analyzeForKnowledgeGaps(
+        studentId: String,
+        subject: String,
+        topic: String,
+        concept: String,
+        interaction: LearningInteractionEntity
+    ) {
+        try {
+            val existingGaps = gapDao.getActiveGapsForSubject(studentId, subject)
+            
+            // Check for declining performance
+            if (interaction.responseQuality != null && interaction.responseQuality < 0.6f) {
+                val gapId = UUID.randomUUID().toString()
+                val gap = KnowledgeGapEntity(
+                    id = gapId,
+                    studentId = studentId,
+                    subject = subject,
+                    topic = topic,
+                    concept = concept,
+                    gapType = GapType.CONCEPTUAL_MISUNDERSTANDING,
+                    priority = determineGapPriority(interaction.responseQuality),
+                    description = "Student showing difficulty with $concept in $topic"
+                )
+                
+                gapDao.insertGap(gap)
+            }
+            
+            // Check for excessive attempts
+            if (interaction.attemptsNeeded > 3) {
+                val gapId = UUID.randomUUID().toString()
+                val gap = KnowledgeGapEntity(
+                    id = gapId,
+                    studentId = studentId,
+                    subject = subject,
+                    topic = topic,
+                    concept = concept,
+                    gapType = GapType.PROCEDURAL_ERROR,
+                    priority = GapPriority.MEDIUM,
+                    description = "Student required multiple attempts for $concept"
+                )
+                
+                gapDao.insertGap(gap)
+            }
+            
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to analyze knowledge gaps")
+        }
+    }
+
+    /**
+     * Update subject-level progress aggregations
+     */
+    private suspend fun updateSubjectProgress(studentId: String, subject: String) {
+        try {
+            val existing = progressDao.getProgressForSubject(studentId, subject)
+            val interactionCount = interactionDao.getInteractionCount(studentId, subject)
+            val avgQuality = interactionDao.getAverageResponseQuality(studentId, subject) ?: 0.5f
+            
+            val progress = existing?.copy(
+                totalInteractions = interactionCount,
+                masteryScore = avgQuality,
+                lastInteraction = System.currentTimeMillis()
+            ) ?: SubjectProgressEntity(
+                id = UUID.randomUUID().toString(),
+                studentId = studentId,
+                subject = subject,
+                totalInteractions = interactionCount,
+                masteryScore = avgQuality,
+                lastInteraction = System.currentTimeMillis()
+            )
+            
+            progressDao.insertOrUpdateProgress(progress)
+            
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to update subject progress")
+        }
+    }
+
+    /**
+     * Update topic-level mastery tracking
+     */
+    private suspend fun updateTopicMastery(
+        studentId: String,
+        subject: String,
+        topic: String,
+        concept: String,
+        responseQuality: Float?,
+        wasCorrect: Boolean?
+    ) {
+        try {
+            val masteryId = "$studentId-$subject-$topic"
+            val existing = masteryDao.getTopicsByMasteryLevel(studentId, MasteryLevel.values().toList())
+                .find { it.topic == topic && it.subject == subject }
+            
+            val practiceCount = (existing?.practiceCount ?: 0) + 1
+            val correctResponses = (existing?.correctResponses ?: 0) + if (wasCorrect == true) 1 else 0
+            val newConfidence = calculateConfidenceScore(responseQuality, practiceCount, correctResponses)
+            val masteryLevel = determineMasteryLevel(newConfidence, practiceCount)
+            
+            val mastery = existing?.copy(
+                practiceCount = practiceCount,
+                correctResponses = correctResponses,
+                confidenceScore = newConfidence,
+                masteryLevel = masteryLevel,
+                lastPracticed = System.currentTimeMillis(),
+                needsReview = newConfidence < 0.6f
+            ) ?: TopicMasteryEntity(
+                id = masteryId,
+                studentId = studentId,
+                subject = subject,
+                topic = topic,
+                masteryLevel = masteryLevel,
+                confidenceScore = newConfidence,
+                practiceCount = practiceCount,
+                correctResponses = correctResponses,
+                lastPracticed = System.currentTimeMillis(),
+                needsReview = newConfidence < 0.6f
+            )
+            
+            masteryDao.insertOrUpdateMastery(mastery)
+            
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to update topic mastery")
+        }
+    }
+
+    // Helper methods
+
+    private fun calculateOverallProgress(progress: List<SubjectProgressEntity>): Float {
+        if (progress.isEmpty()) return 0f
+        return progress.map { it.masteryScore }.average().toFloat()
+    }
+
+    private fun getTotalTopicsForSubject(subject: String): Int {
+        // This would be populated from curriculum data
+        return when (subject.uppercase()) {
+            "MATHEMATICS" -> 45
+            "SCIENCE" -> 38
+            "ENGLISH" -> 32
+            "HISTORY" -> 28
+            "GEOGRAPHY" -> 25
+            "ECONOMICS" -> 22
+            else -> 30
+        }
+    }
+
+    private fun extractNeedsAttention(knowledgeGapsJson: String): List<String> {
+        // Parse JSON array of struggling topics
+        return try {
+            // Simplified - in real implementation, parse JSON
+            listOf()
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private suspend fun getStrongAreas(studentId: String, subject: String): List<String> {
+        return try {
+            masteryDao.getMasteryForSubject(studentId, subject)
+                .first() // Get first emission from Flow
+                .filter { it.masteryLevel in listOf(MasteryLevel.ADVANCED, MasteryLevel.MASTERED) }
+                .map { it.topic }
+                .take(3) // Take only first 3 topics
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private suspend fun getWeeklyStats(studentId: String): WeeklyStats {
+        val weekStart = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(7)
+        val stats = computationDao.getWeeklySessionStats(studentId, weekStart)
+        
+        return WeeklyStats(
+            totalTimeSpent = stats?.totalTime ?: 0L,
+            sessionsCompleted = stats?.sessionCount ?: 0,
+            topicsExplored = 0, // Would calculate from interactions
+            averageSessionDuration = stats?.avgDuration ?: 0L,
+            mostActiveSubject = "MATHEMATICS", // Would calculate from data
+            improvementAreas = listOf()
+        )
+    }
+
+    private suspend fun calculateLearningTrends(studentId: String): LearningTrends {
+        val thirtyDaysAgo = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(30)
+        val performanceData = computationDao.getPerformanceTrend(studentId, thirtyDaysAgo)
+        
+        return LearningTrends(
+            masteryTrend = analyzeTrend(performanceData.map { it.avgQuality }),
+            engagementTrend = TrendDirection.STABLE,
+            accuracyTrend = TrendDirection.STABLE,
+            focusTrend = TrendDirection.STABLE,
+            consistencyScore = 0.75f
+        )
+    }
+
+    private fun analyzeTrend(values: List<Float>): TrendDirection {
+        if (values.size < 3) return TrendDirection.INSUFFICIENT_DATA
+        
+        val firstHalf = values.take(values.size / 2).average()
+        val secondHalf = values.drop(values.size / 2).average()
+        
+        return when {
+            secondHalf > firstHalf * 1.1 -> TrendDirection.IMPROVING
+            secondHalf < firstHalf * 0.9 -> TrendDirection.DECLINING
+            else -> TrendDirection.STABLE
+        }
+    }
+
+    private fun calculateConfidenceScore(
+        responseQuality: Float?,
+        practiceCount: Int,
+        correctResponses: Int
+    ): Float {
+        val accuracyScore = if (practiceCount > 0) correctResponses.toFloat() / practiceCount else 0f
+        val qualityScore = responseQuality ?: 0.5f
+        val practiceBonus = min(practiceCount.toFloat() / 10f, 0.2f)
+        
+        return min((accuracyScore * 0.5f + qualityScore * 0.4f + practiceBonus), 1.0f)
+    }
+
+    private fun determineMasteryLevel(confidence: Float, practiceCount: Int): MasteryLevel {
+        return when {
+            practiceCount == 0 -> MasteryLevel.NOT_STARTED
+            confidence < 0.25f -> MasteryLevel.INTRODUCED
+            confidence < 0.5f -> MasteryLevel.DEVELOPING
+            confidence < 0.75f -> MasteryLevel.PROFICIENT
+            confidence < 0.9f -> MasteryLevel.ADVANCED
+            else -> MasteryLevel.MASTERED
+        }
+    }
+
+    private fun determineGapPriority(responseQuality: Float): GapPriority {
+        return when {
+            responseQuality < 0.3f -> GapPriority.CRITICAL
+            responseQuality < 0.5f -> GapPriority.HIGH
+            responseQuality < 0.7f -> GapPriority.MEDIUM
+            else -> GapPriority.LOW
+        }
+    }
+
+    private suspend fun generateSessionRecommendations(
+        studentId: String,
+        session: LearningSessionEntity
+    ) {
+        // Generate recommendations based on session performance
+        if (session.overallPerformance < 0.6f) {
+            val recommendation = StudyRecommendationEntity(
+                id = UUID.randomUUID().toString(),
+                studentId = studentId,
+                title = "Review Recent Topics",
+                description = "Your recent session showed some challenges. Consider reviewing the topics you covered.",
+                subject = "GENERAL",
+                topic = "Review",
+                recommendationType = RecommendationType.REVIEW_TOPIC,
+                priority = 3,
+                estimatedTimeMinutes = 15
+            )
+            recommendationDao.insertRecommendation(recommendation)
+        }
+    }
+
+    private fun createGapRecommendation(studentId: String, gap: KnowledgeGapEntity): StudyRecommendationEntity {
+        return StudyRecommendationEntity(
+            id = UUID.randomUUID().toString(),
+            studentId = studentId,
+            title = "Address Knowledge Gap",
+            description = "Focus on ${gap.concept} in ${gap.topic}",
+            subject = gap.subject,
+            topic = gap.topic,
+            recommendationType = RecommendationType.REVIEW_TOPIC,
+            priority = when (gap.priority) {
+                GapPriority.CRITICAL -> 5
+                GapPriority.HIGH -> 4
+                GapPriority.MEDIUM -> 3
+                GapPriority.LOW -> 2
+            },
+            estimatedTimeMinutes = 20
+        )
+    }
+
+    private fun createReviewRecommendation(studentId: String, mastery: TopicMasteryEntity): StudyRecommendationEntity {
+        return StudyRecommendationEntity(
+            id = UUID.randomUUID().toString(),
+            studentId = studentId,
+            title = "Review ${mastery.topic}",
+            description = "This topic needs some review to maintain your understanding",
+            subject = mastery.subject,
+            topic = mastery.topic,
+            recommendationType = RecommendationType.REVIEW_TOPIC,
+            priority = 3,
+            estimatedTimeMinutes = 15
+        )
+    }
+
+    private fun createChallengeRecommendation(studentId: String, subject: String): StudyRecommendationEntity {
+        return StudyRecommendationEntity(
+            id = UUID.randomUUID().toString(),
+            studentId = studentId,
+            title = "Challenge Yourself",
+            description = "You're doing great in $subject! Try some advanced topics.",
+            subject = subject,
+            topic = "Advanced",
+            recommendationType = RecommendationType.CHALLENGE_YOURSELF,
+            priority = 2,
+            estimatedTimeMinutes = 25
+        )
+    }
+
+    private suspend fun identifyWeakAreas(studentId: String): List<String> {
+        return try {
+            val progress = progressDao.getProgressForStudent(studentId)
+            progress.first() // Get first emission from Flow
+                .filter { it.masteryScore < 0.6f } // Filter the list
+                .map { it.subject } // Map to subject names
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private suspend fun identifyStrongAreas(studentId: String): List<String> {
+        return try {
+            val progress = progressDao.getProgressForStudent(studentId)
+            progress.first() // Get first emission from Flow
+                .filter { it.masteryScore > 0.8f } // Filter the list
+                .map { it.subject } // Map to subject names
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
+     * Determines if comprehensive knowledge gap analysis should run
+     * Runs every 10 interactions or when specific patterns are detected
+     */
+    private suspend fun shouldRunComprehensiveAnalysis(studentId: String): Boolean {
+        return try {
+            val totalInteractions = interactionDao.getTotalInteractionCount(studentId)
+            // Run comprehensive analysis every 10 interactions
+            totalInteractions > 0 && totalInteractions % 10 == 0
+        } catch (e: Exception) {
+            false
+        }
+    }
+}

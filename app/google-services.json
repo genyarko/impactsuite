@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "133278522931",
+    "project_id": "gemma3n-f8c94",
+    "storage_bucket": "gemma3n-f8c94.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:133278522931:android:84486dc176f2b5df6e0d46",
+        "android_client_info": {
+          "package_name": "com.example.mygemma3n"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB-m6u_BtIapqJos1aCB0oRrCrzkQp0WOY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
