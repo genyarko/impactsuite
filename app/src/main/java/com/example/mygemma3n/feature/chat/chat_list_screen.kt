@@ -79,7 +79,7 @@ fun ChatListScreen(
             TopAppBar(
                 title = {
                     Text(
-                        "Chats",
+                        "CHAT HISTORY",
                         fontWeight = FontWeight.Bold
                     )
                 },

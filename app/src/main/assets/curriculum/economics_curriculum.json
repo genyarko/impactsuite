@@ -1,0 +1,100 @@
+{
+  "PYP": {
+    "Phase 1 (KG)": [
+      "Roles & responsibilities in groups (home/school)",
+      "Sharing limited resources fairly",
+      "Basic needs versus wants"
+    ],
+    "Phase 2 (Grades 1–2)": [
+      "Goods, services & community helpers",
+      "Cooperation and simple exchange (barter/money)",
+      "Rules and routines that organise economic activity"
+    ],
+    "Phase 3 (Grades 3–4)": [
+      "Production, trade & interdependence",
+      "Supply, demand & price in everyday contexts",
+      "Ethical consumer choices (reuse–reduce–recycle)"
+    ],
+    "Phase 4 (Grades 5–6)": [
+      "Market systems & resource allocation",
+      "Impact of technology on production and jobs",
+      "Equity, sustainability & consumer responsibility",
+      "Entrepreneurship and budgeting basics"
+    ]
+  },
+
+  "MYP": {
+    "MYP 1 (Grade 6)": [
+      "What is Economics? Scarcity, choice & opportunity cost",
+      "Factors of production & basic economic questions",
+      "Simple demand–supply diagrams"
+    ],
+    "MYP 2 (Grade 7)": [
+      "Market systems & price mechanisms",
+      "Economic agents: consumers, producers, government, banks",
+      "Circular flow of income & local business case studies"
+    ],
+    "MYP 3 (Grade 8)": [
+      "Business cycle & unemployment/inflation basics",
+      "Government objectives & policy tools",
+      "Poverty, inequality & development indicators",
+      "Globalisation and fair trade"
+    ],
+    "MYP 4–5 (Grades 9–10)": {
+      "Topics": [
+        "Scarcity, demand & supply analysis",
+        "Market structures & market failure",
+        "Circular flow, GDP & business cycle",
+        "Government economic & social objectives",
+        "Poverty, inequality & redistribution policies",
+        "Economic growth vs. sustainable development",
+        "Local production & ethical/fair trade",
+        "Global production, trade & economic integration",
+        "Conflicts & ethical issues in economics",
+        "Development levels (LEDCs, MEDCs, emerging economies)",
+        "Indicators: GDP, HDI, Gini coefficient"
+      ]
+    }
+  },
+
+  "DP": {
+    "Unit 1: Introduction to Economics": [
+      "Economics as a social science",
+      "Scarcity, choice, efficiency, equity & sustainability",
+      "Factors of production, PPC & economic systems"
+    ],
+    "Unit 2: Microeconomics": [
+      "Demand, supply & elasticities",
+      "Competitive market equilibrium",
+      "Government intervention (taxes, subsidies, price controls)",
+      "Market failure: externalities, public goods, information asymmetry, market power",
+      "Equity & income redistribution"
+    ],
+    "Unit 3: Macroeconomics": [
+      "Measuring economic activity (GDP, GNI, CPI, unemployment)",
+      "Aggregate demand & supply; macro objectives",
+      "Inflation, unemployment & economic growth",
+      "Demand‑side (fiscal/monetary) & supply‑side policies",
+      "Inequality & poverty"
+    ],
+    "Unit 4: The Global Economy": [
+      "Benefits & costs of international trade",
+      "Trade protection & arguments for/against",
+      "Economic integration & trade blocs",
+      "Exchange rates & balance of payments",
+      "Economic growth vs. development; sustainable development goals",
+      "Strategies for growth & development"
+    ],
+    "Internal Assessment": [
+      "Portfolio of three commentaries applying economic theory to current news (one each from Units 2–4)"
+    ]
+  },
+
+  "enhancements": {
+    "perGradeSuggestions": true,
+    "trackTopicUsage": true,
+    "markTopicComplete": true,
+    "highlightUnseenTopics": true,
+    "allowBookmarks": true
+  }
+}

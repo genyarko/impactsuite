@@ -1,0 +1,117 @@
+{
+  "PYP": {
+    "Phase 1 (KG)": [
+      "Personal history and memory",
+      "Family and community roles",
+      "Celebrations and traditions",
+      "Rules and routines",
+      "Understanding change over time"
+    ],
+    "Phase 2 (Grades 1-2)": [
+      "Local community history",
+      "Connections between people and places",
+      "How time and change affect people",
+      "Celebrations across cultures",
+      "Roles and responsibilities in communities"
+    ],
+    "Phase 3 (Grades 3-4)": [
+      "Cultural influences in society",
+      "Systems and organization in ancient communities",
+      "Early forms of technology",
+      "Human impact on environment",
+      "Comparing past and present communities"
+    ],
+    "Phase 4 (Grade 5)": [
+      "Beliefs and values shaping behavior",
+      "Causes and effects of migration",
+      "Historical evidence and interpretation",
+      "Recording and remembering history",
+      "Rights, responsibilities, and governance"
+    ]
+  },
+  "MYP": {
+    "MYP 1 (Grade 6)": [
+      "Early humans and prehistory",
+      "Mesopotamia and early systems",
+      "Ancient Egypt and the Nile",
+      "Ancient India and Hinduism",
+      "Ancient China and Confucianism",
+      "Ancient Greece and democracy",
+      "Roman Republic and Empire",
+      "Spread of Christianity and Islam"
+    ],
+    "MYP 2 (Grade 7)": [
+      "Forms of government",
+      "The Constitution and rights",
+      "Legislative processes",
+      "Executive leadership",
+      "Judiciary and landmark cases",
+      "Citizenship and civic responsibility",
+      "Economic systems and governance"
+    ],
+    "MYP 3 (Grade 8)": [
+      "Native societies before colonization",
+      "European colonization and exchange",
+      "American independence movement",
+      "Revolutionary War",
+      "The Constitution and republic",
+      "Westward expansion and Manifest Destiny",
+      "Civil War and Reconstruction"
+    ],
+    "MYP 4–5 (Grades 9–10)": {
+      "Year 4 Topics": [
+        "French and Haitian revolutions",
+        "Industrial Revolution",
+        "Political ideologies (liberalism, socialism, nationalism)",
+        "Revolutions of 1848"
+      ],
+      "Year 5 Topics": [
+        "World War I and its aftermath",
+        "Origins of World War II",
+        "The Cold War",
+        "20th-century societal changes"
+      ]
+    }
+  },
+  "DP": {
+    "Prescribed Subjects": [
+      "Military leaders",
+      "Conquest and its impact",
+      "The move to global war",
+      "Rights and protest",
+      "Conflict and intervention"
+    ],
+    "World History Topics": [
+      "Society and economy (750–1400)",
+      "Causes and effects of medieval wars",
+      "Dynasties and rulers",
+      "Societies in transition (1400–1700)",
+      "Early modern states (1450–1789)",
+      "Industrialization (1750–2005)",
+      "Independence movements (1800–2000)",
+      "Development of democratic states",
+      "Authoritarian states (20th century)",
+      "Causes and effects of 20th-century wars",
+      "Cold War – tensions and rivalries"
+    ],
+    "Higher Level Options": [
+      "History of Africa and the Middle East",
+      "History of the Americas",
+      "History of Asia and Oceania",
+      "History of Europe"
+    ],
+    "Internal Assessment": [
+      "Historical investigation",
+      "Source evaluation and reflection"
+    ]
+  },
+  "enhancements": {
+    "perGradeSuggestions": true,
+    "trackTopicUsage": true,
+    "markTopicComplete": true,
+    "highlightUnseenTopics": true,
+    "allowBookmarks": true
+  }
+}
+
+

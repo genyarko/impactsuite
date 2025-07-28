@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Quiz
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Summarize
+import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material3.*
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.*
@@ -87,6 +88,7 @@ import javax.inject.Inject
 import com.example.mygemma3n.di.GemmaServiceEntryPoint
 import com.example.mygemma3n.feature.chat.ChatListScreen
 import com.example.mygemma3n.feature.tutor.TutorScreen
+import com.example.mygemma3n.feature.analytics.AnalyticsDashboardScreen
 import com.example.mygemma3n.ui.components.InitializationScreen
 import com.example.mygemma3n.ui.settings.QuizSettingsScreen
 import kotlinx.coroutines.async
@@ -382,6 +384,12 @@ fun Gemma3nNavigation(
         }
         composable("tutor") {
             TutorScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToChatList = { navController.navigate("chat_list") }
+            )
+        }
+        composable("analytics") {
+            AnalyticsDashboardScreen(
                 onNavigateBack = { navController.popBackStack() }
             )
         }
@@ -718,6 +726,12 @@ private fun getFeatureItems(isGemmaInitialized: Boolean, isModelReady: Boolean) 
         route = "crisis_handbook",
         icon = Icons.Default.LocalHospital,
         enabled = isGemmaInitialized
+    ),
+    FeatureItem(
+        title = "Learning Analytics",
+        route = "analytics",
+        icon = Icons.Default.Analytics,
+        enabled = true // Analytics works independently of Gemma models
     )
 )
 

@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.*
 import com.example.mygemma3n.data.local.ChatDao
 import com.example.mygemma3n.data.local.dao.SubjectDao
+import com.example.mygemma3n.data.TutorDao
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -13,6 +14,10 @@ import kotlin.math.sqrt
 import com.example.mygemma3n.data.local.entities.SubjectEntity
 import com.example.mygemma3n.data.local.entities.ChatSessionEntity
 import com.example.mygemma3n.data.local.entities.ChatMessageEntity
+import com.example.mygemma3n.data.StudentProfileEntity
+import com.example.mygemma3n.data.TutorSessionEntity
+import com.example.mygemma3n.data.LearningPreferenceEntity
+import com.example.mygemma3n.data.ConceptMasteryEntity
 
 
 // Room Entity for vector storage
@@ -91,10 +96,14 @@ interface VectorDao {
     entities = [
         VectorEntity::class,
         SubjectEntity::class,
-        ChatSessionEntity::class,   // ✅ Add this
-        ChatMessageEntity::class    // ✅ Add this
+        ChatSessionEntity::class,
+        ChatMessageEntity::class,
+        StudentProfileEntity::class,
+        TutorSessionEntity::class,
+        LearningPreferenceEntity::class,
+        ConceptMasteryEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -102,6 +111,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
     abstract fun vectorDao(): VectorDao
     abstract fun subjectDao(): SubjectDao
+    abstract fun tutorDao(): TutorDao
 }
 
 

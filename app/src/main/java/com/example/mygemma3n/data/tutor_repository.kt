@@ -31,6 +31,10 @@ class TutorRepository @Inject constructor(
         }
     }
 
+    suspend fun getAllStudents(): List<StudentProfileEntity> {
+        return tutorDao.getAllStudents()
+    }
+
     suspend fun startTutorSession(
         studentId: String,
         subject: OfflineRAG.Subject,

@@ -16,6 +16,8 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+typealias QuizGeneratorViewModelState = QuizGeneratorViewModel.QuizState
 
 
 /* top-level screen ------------------------------------------------------- */
@@ -52,6 +55,9 @@ fun QuizScreen(
     viewModel: QuizGeneratorViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    var showStudentDialog by remember { mutableStateOf(true) }
+    var studentName by remember { mutableStateOf("") }
+    var studentGrade by remember { mutableIntStateOf(5) }
 
     // Ensure subjects are loaded
     LaunchedEffect(Unit) {
@@ -69,6 +75,14 @@ fun QuizScreen(
                         if (state.learnerProfile != null) {
                             Text(
                                 "Streak: ${state.learnerProfile!!.streakDays} days | Total: ${state.learnerProfile!!.totalQuestionsAnswered} questions",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                            )
+                        }
+                        // Show student info if available
+                        state.studentName?.let { name ->
+                            Text(
+                                "Student: $name (Grade ${state.studentGrade})",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                             )
@@ -108,6 +122,8 @@ fun QuizScreen(
                         learnerProfile = state.learnerProfile,
                         mode = state.mode,
                         reviewAvailable = state.reviewQuestionsAvailable,
+                        state = state,
+                        viewModel = viewModel,
                         onModeChange = viewModel::setQuizMode,
                         onGenerateQuiz = { s, t, c ->
                             viewModel.generateAdaptiveQuiz(s, t, c)
@@ -128,6 +144,102 @@ fun QuizScreen(
                         onQuizComplete = viewModel::completeQuiz
                     )
                 }
+            }
+
+            // Student information dialog
+            if (showStudentDialog && state.studentName == null) {
+                AlertDialog(
+                    onDismissRequest = { },
+                    title = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.School,
+                                contentDescription = null,
+                                modifier = Modifier.size(24.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Welcome to Quiz!")
+                        }
+                    },
+                    text = {
+                        Column {
+                            Text(
+                                "Please enter student information to get personalized quizzes:",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            OutlinedTextField(
+                                value = studentName,
+                                onValueChange = { studentName = it },
+                                label = { Text("Student Name") },
+                                placeholder = { Text("Enter your name") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Person, contentDescription = null)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(
+                                    capitalization = KeyboardCapitalization.Words
+                                )
+                            )
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            Text(
+                                "Grade Level: $studentGrade",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Slider(
+                                value = studentGrade.toFloat(),
+                                onValueChange = { studentGrade = it.toInt() },
+                                valueRange = 1f..12f,
+                                steps = 10,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            // Grade level indicator
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Grade 1", style = MaterialTheme.typography.labelSmall)
+                                Text("Grade 12", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                if (studentName.isNotBlank()) {
+                                    viewModel.initializeQuizWithStudent(studentName, studentGrade)
+                                    showStudentDialog = false
+                                }
+                            },
+                            enabled = studentName.isNotBlank()
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Start Learning")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = {
+                                // Allow to continue without student info
+                                showStudentDialog = false
+                            }
+                        ) {
+                            Text("Skip")
+                        }
+                    }
+                )
             }
 
             // Error snackbar with proper dismissal
@@ -172,6 +284,8 @@ fun EnhancedQuizSetupScreen(
     learnerProfile: LearnerProfile?,
     mode: QuizMode,
     reviewAvailable: Int,
+    state: QuizGeneratorViewModelState,
+    viewModel: QuizGeneratorViewModel,
     onModeChange: (QuizMode) -> Unit,
     onGenerateQuiz: (Subject, String, Int) -> Unit,
     modifier: Modifier = Modifier
@@ -189,6 +303,40 @@ fun EnhancedQuizSetupScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text("Create a new adaptive quiz", style = MaterialTheme.typography.headlineSmall)
+
+        // Student info card
+        state.studentName?.let { name ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.School,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            "Welcome, $name!",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Text(
+                            "Grade ${state.studentGrade} curriculum-aligned quizzes",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            }
+        }
 
         // Mode selector
         Card(
@@ -251,7 +399,7 @@ fun EnhancedQuizSetupScreen(
             }
         }
 
-        // Subject selector with progress - FIXED
+        // Subject selector with progress
         Card(
             modifier = Modifier.fillMaxWidth(),
             elevation = CardDefaults.cardElevation(4.dp)
@@ -314,7 +462,11 @@ fun EnhancedQuizSetupScreen(
                             onClick = {
                                 subject = s
                                 showDropdown = false
+                                state.studentGrade?.let { grade ->
+                                    viewModel.loadCurriculumTopics(grade)   // ✅ pass ONLY the grade
+                                }
                             }
+
                         )
                     }
                 }
@@ -334,342 +486,6 @@ fun EnhancedQuizSetupScreen(
         }
 
         // Topic input
-        OutlinedTextField(
-            value = topicText,
-            onValueChange = { topicText = it },
-            label = { Text("Topic (optional)") },
-            placeholder = { Text("e.g., Linear Equations") },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        // Question count slider
-        Column(Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("Number of questions: ${questionCnt.toInt()}")
-                if (mode == QuizMode.REVIEW && reviewAvailable < questionCnt) {
-                    Text(
-                        "Only $reviewAvailable available for review",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-            }
-            Slider(
-                value = questionCnt,
-                onValueChange = { questionCnt = it },
-                valueRange = 5f..20f,
-                steps = 14,
-                enabled = mode != QuizMode.REVIEW || reviewAvailable >= 5
-            )
-        }
-
-        // Generate button
-        Button(
-            onClick = {
-                subject?.let { s -> onGenerateQuiz(s, topicText.trim(), questionCnt.toInt()) }
-            },
-            enabled = subject != null && (mode != QuizMode.REVIEW || reviewAvailable >= 5),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(
-                when (mode) {
-                    QuizMode.NORMAL -> Icons.Default.PlayArrow
-                    QuizMode.REVIEW -> Icons.Default.Refresh
-                    QuizMode.ADAPTIVE -> Icons.Default.AutoAwesome
-                },
-                contentDescription = null
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                when (mode) {
-                    QuizMode.NORMAL -> "Generate Quiz"
-                    QuizMode.REVIEW -> "Start Review Session"
-                    QuizMode.ADAPTIVE -> "Start Adaptive Quiz"
-                }
-            )
-        }
-    }
-}
-
-/* Enhanced progress indicator with mode info ----------------------------------- */
-
-/* Enhanced progress indicator with mode info ----------------------------------- */
-
-@Composable
-private fun GenerationProgress(
-    done: Int,
-    mode: QuizMode,
-    modifier: Modifier = Modifier
-) {
-    val state by (hiltViewModel<QuizGeneratorViewModel>()).state.collectAsStateWithLifecycle()
-
-    // Animation states for creative loading
-    val infiniteTransition = rememberInfiniteTransition(label = "loading")
-    val bookRotation by infiniteTransition.animateFloat(
-        initialValue = -15f,
-        targetValue = 15f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "book_rotation"
-    )
-
-    val pencilOffset by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 20f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1500, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pencil_offset"
-    )
-
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 0.9f,
-        targetValue = 1.1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulse"
-    )
-
-    Column(
-        modifier = modifier
-            .verticalScroll(rememberScrollState())
-            .fillMaxSize()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        // Creative animated icon
-        Box(
-            modifier = Modifier
-                .size(120.dp)
-                .padding(16.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            // Background circle with pulse
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .scale(pulseScale)
-                    .clip(CircleShape)
-                    .background(
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                    )
-            )
-
-            // Book icon rotating
-            Icon(
-                Icons.Default.MenuBook,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(48.dp)
-                    .rotate(bookRotation)
-                    .offset(y = (-10).dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
-
-            // Pencil writing animation
-            Icon(
-                Icons.Default.Edit,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(32.dp)
-                    .offset(x = pencilOffset.dp, y = pencilOffset.dp)
-                    .rotate(-45f),
-                tint = MaterialTheme.colorScheme.secondary
-            )
-
-            // Sparkles around
-            repeat(3) { index ->
-                val sparkleRotation by infiniteTransition.animateFloat(
-                    initialValue = 0f,
-                    targetValue = 360f,
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(3000 + index * 500, easing = LinearEasing)
-                    ),
-                    label = "sparkle_$index"
-                )
-
-                Icon(
-                    Icons.Default.AutoAwesome,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(16.dp)
-                        .offset(x = 40.dp)
-                        .rotate(sparkleRotation + index * 120f),
-                    tint = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.7f)
-                )
-            }
-        }
-
-        Spacer(Modifier.height(24.dp))
-
-        // Dynamic status text with animation
-        AnimatedContent(
-            targetState = state.generationPhase,
-            transitionSpec = {
-                fadeIn() + expandVertically() togetherWith fadeOut() + shrinkVertically()
-            },
-            label = "phase"
-        ) { phase ->
-            Text(
-                text = phase,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Medium,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = 32.dp)
-            )
-        }
-
-        Spacer(Modifier.height(8.dp))
-
-        Text(
-            when (mode) {
-                QuizMode.NORMAL -> "Creating a fresh quiz just for you"
-                QuizMode.REVIEW -> "Finding questions you haven't seen in a while"
-                QuizMode.ADAPTIVE -> "Tailoring difficulty to your skill level"
-            },
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 32.dp)
-        )
-
-        Spacer(Modifier.height(24.dp))
-
-        // Progress with animated questions counter
-        Box(
-            modifier = Modifier.fillMaxWidth(),
-            contentAlignment = Alignment.Center
-        ) {
-            LinearProgressIndicator(
-                modifier = Modifier
-                    .fillMaxWidth(0.8f)
-                    .height(8.dp)
-                    .clip(RoundedCornerShape(4.dp)),
-                trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                strokeCap = ProgressIndicatorDefaults.LinearStrokeCap
-            )
-
-            // Questions counter bubble
-            if (done > 0) {
-                Card(
-                    modifier = Modifier.offset(y = 24.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primary
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onPrimary
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            "$done questions ready",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onPrimary
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-/* Empty state setup (unchanged but with mode selector) -------------------- */
-
-@Composable
-fun EmptyStateQuizSetup(
-    mode: QuizMode,
-    onModeChange: (QuizMode) -> Unit,
-    onGenerateQuiz: (Subject, String, Int) -> Unit
-) {
-    var subject by remember { mutableStateOf<Subject?>(null) }
-    var topicText by remember { mutableStateOf("") }
-    var questionCnt by remember { mutableFloatStateOf(10f) }
-
-    val subjects = remember { Subject.entries }
-
-    Column(
-        modifier = Modifier
-            .verticalScroll(rememberScrollState())
-            .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text("Create a new adaptive quiz", style = MaterialTheme.typography.headlineSmall)
-        Text(
-            "No educational content loaded. You can still create a quiz!",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
-        // Mode selector card
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.secondaryContainer
-            )
-        ) {
-            Column(Modifier.padding(16.dp)) {
-                Text("Quiz Mode", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    QuizMode.entries.forEach { qMode ->
-                        FilterChip(
-                            selected = mode == qMode,
-                            onClick = { onModeChange(qMode) },
-                            label = { Text(qMode.name) },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-            }
-        }
-
-        // Subject chooser
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(4.dp)
-        ) {
-            Column(Modifier.padding(16.dp)) {
-                Text("Select Subject:", style = MaterialTheme.typography.labelLarge)
-                Spacer(Modifier.height(8.dp))
-                subjects.forEach { s ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = subject == s,
-                            onClick = { subject = s }
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(s.name)
-                    }
-                }
-            }
-        }
-
         OutlinedTextField(
             value = topicText,
             onValueChange = { topicText = it },
@@ -876,10 +692,29 @@ fun EnhancedQuizTakingScreen(
         // Enhanced feedback card
         if (q.isAnswered && q.feedback != null) {
             Spacer(Modifier.height(16.dp))
+
+            // Determine if the answer was correct
+            val isCorrect = q.userAnswer?.let { userAns ->
+                // Normalize both answers for comparison
+                val normalizedUser = userAns.trim().lowercase()
+                    .replace(Regex("^(the|a|an)\\s+"), "")
+                    .replace(Regex("[.,!?;:'\"-]"), "")
+                    .replace(Regex("\\s+"), " ")
+                    .trim()
+
+                val normalizedCorrect = q.correctAnswer.trim().lowercase()
+                    .replace(Regex("^(the|a|an)\\s+"), "")
+                    .replace(Regex("[.,!?;:'\"-]"), "")
+                    .replace(Regex("\\s+"), " ")
+                    .trim()
+
+                normalizedUser == normalizedCorrect
+            } ?: false
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (q.userAnswer == q.correctAnswer)
+                    containerColor = if (isCorrect)
                         MaterialTheme.colorScheme.primaryContainer
                     else
                         MaterialTheme.colorScheme.errorContainer
@@ -888,22 +723,76 @@ fun EnhancedQuizTakingScreen(
                 Column(Modifier.padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            if (q.userAnswer == q.correctAnswer)
+                            if (isCorrect)
                                 Icons.Default.CheckCircle
                             else
                                 Icons.Default.Cancel,
                             null,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(24.dp),
+                            tint = if (isCorrect)
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            else
+                                MaterialTheme.colorScheme.onErrorContainer
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            if (q.userAnswer == q.correctAnswer) "Correct!" else "Incorrect",
+                            if (isCorrect) "Correct!" else "Incorrect",
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            color = if (isCorrect)
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            else
+                                MaterialTheme.colorScheme.onErrorContainer
                         )
                     }
                     Spacer(Modifier.height(8.dp))
-                    Text(q.feedback, style = MaterialTheme.typography.bodyMedium)
+
+                    // Show the feedback text
+                    Text(
+                        q.feedback,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (isCorrect)
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        else
+                            MaterialTheme.colorScheme.onErrorContainer
+                    )
+
+                    // If incorrect, clearly show the correct answer
+                    if (!isCorrect) {
+                        Spacer(Modifier.height(8.dp))
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surface
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Lightbulb,
+                                    null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        "Correct answer:",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        q.correctAnswer,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                    }
 
                     if (q.explanation.isNotEmpty()) {
                         Spacer(Modifier.height(8.dp))
@@ -918,13 +807,19 @@ fun EnhancedQuizTakingScreen(
                                 Icons.Default.Info,
                                 null,
                                 Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                                tint = if (isCorrect)
+                                    MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                                else
+                                    MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f)
                             )
                             Spacer(Modifier.width(4.dp))
                             Text(
                                 q.explanation,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                                color = if (isCorrect)
+                                    MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                                else
+                                    MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f)
                             )
                         }
                     }
@@ -933,7 +828,9 @@ fun EnhancedQuizTakingScreen(
                     if (q.conceptsCovered.isNotEmpty()) {
                         Spacer(Modifier.height(8.dp))
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
                                 Icons.Default.Tag,
@@ -944,7 +841,8 @@ fun EnhancedQuizTakingScreen(
                             Text(
                                 "Concepts: ${q.conceptsCovered.joinToString(", ")}",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.weight(1f)
                             )
                         }
                     }
@@ -1216,6 +1114,9 @@ fun EnhancedAnswerSection(
 
 /* Answer option helper (enhanced with better visual feedback) ---------------- */
 
+/* ---------------------------------------------------------------------
+ * Answer option helper
+ * -------------------------------------------------------------------*/
 @Composable
 fun AnswerOption(
     text: String,
@@ -1226,15 +1127,12 @@ fun AnswerOption(
     onClick: () -> Unit,
     prefix: String = ""
 ) {
-    val container = when {
-        isCorrect -> MaterialTheme.colorScheme.primary
-        isWrong -> MaterialTheme.colorScheme.error
-        isSelected -> MaterialTheme.colorScheme.secondaryContainer
-        else -> MaterialTheme.colorScheme.surface
-    }
-    val content = when {
-        isCorrect || isWrong -> MaterialTheme.colorScheme.onPrimary
-        else -> MaterialTheme.colorScheme.onSurface
+    // Pick colours
+    val (container, content) = when {
+        isCorrect  -> MaterialTheme.colorScheme.primary to MaterialTheme.colorScheme.onPrimary
+        isWrong    -> MaterialTheme.colorScheme.error   to MaterialTheme.colorScheme.onError
+        isSelected -> MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSurface
+        else       -> MaterialTheme.colorScheme.surface to MaterialTheme.colorScheme.onSurface
     }
 
     ElevatedButton(
@@ -1242,7 +1140,7 @@ fun AnswerOption(
         enabled = enabled,
         colors = ButtonDefaults.elevatedButtonColors(
             containerColor = container,
-            contentColor = content
+            contentColor   = content
         ),
         modifier = Modifier
             .fillMaxWidth()
@@ -1254,26 +1152,399 @@ fun AnswerOption(
             horizontalArrangement = Arrangement.Start,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (isCorrect) {
-                Icon(Icons.Default.CheckCircle, null, Modifier.size(20.dp))
-                Spacer(Modifier.width(8.dp))
-            } else if (isWrong) {
-                Icon(Icons.Default.Cancel, null, Modifier.size(20.dp))
-                Spacer(Modifier.width(8.dp))
+            // Result icon
+            when {
+                isCorrect -> Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(20.dp))
+                isWrong   -> Icon(Icons.Default.Cancel,      contentDescription = null, modifier = Modifier.size(20.dp))
+                else -> {}
+            }.also {
+                if (isCorrect || isWrong) Spacer(Modifier.width(8.dp))
             }
 
-            if (prefix.isNotEmpty()) {
+            // Optional prefix (e.g. “A. ”)
+            if (prefix.isNotBlank()) {
                 Text(
-                    prefix,
+                    text = prefix,
                     fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.bodyLarge
                 )
             }
 
+            // Option text
             Text(
-                text,
+                text = text,
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+/* Enhanced progress indicator with mode info ----------------------------------- */
+
+@Composable
+private fun GenerationProgress(
+    done: Int,
+    total: Int = 10,
+    mode: QuizMode,
+    modifier: Modifier = Modifier
+) {
+    val state by (hiltViewModel<QuizGeneratorViewModel>()).state.collectAsStateWithLifecycle()
+
+    // Animation states for creative loading
+    val infiniteTransition = rememberInfiniteTransition(label = "loading")
+    val bookRotation by infiniteTransition.animateFloat(
+        initialValue = -15f,
+        targetValue = 15f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "book_rotation"
+    )
+
+    val pencilOffset by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 20f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1500, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pencil_offset"
+    )
+
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 0.9f,
+        targetValue = 1.1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse"
+    )
+
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        // Creative animated icon
+        Box(
+            modifier = Modifier
+                .size(120.dp)
+                .padding(16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            // Background circle with pulse
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .scale(pulseScale)
+                    .clip(CircleShape)
+                    .background(
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                    )
+            )
+
+            // Book icon rotating
+            Icon(
+                Icons.Default.MenuBook,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(48.dp)
+                    .rotate(bookRotation)
+                    .offset(y = (-10).dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+
+            // Pencil writing animation
+            Icon(
+                Icons.Default.Edit,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(32.dp)
+                    .offset(x = pencilOffset.dp, y = pencilOffset.dp)
+                    .rotate(-45f),
+                tint = MaterialTheme.colorScheme.secondary
+            )
+
+            // Sparkles around
+            repeat(3) { index ->
+                val sparkleRotation by infiniteTransition.animateFloat(
+                    initialValue = 0f,
+                    targetValue = 360f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(3000 + index * 500, easing = LinearEasing)
+                    ),
+                    label = "sparkle_$index"
+                )
+
+                Icon(
+                    Icons.Default.AutoAwesome,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(16.dp)
+                        .offset(x = 40.dp)
+                        .rotate(sparkleRotation + index * 120f),
+                    tint = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.7f)
+                )
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        // Dynamic status text with animation
+        AnimatedContent(
+            targetState = state.generationPhase,
+            transitionSpec = {
+                fadeIn() + expandVertically() togetherWith fadeOut() + shrinkVertically()
+            },
+            label = "phase"
+        ) { phase ->
+            Text(
+                text = phase,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 32.dp)
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // Show question count progress
+        if (done > 0) {
+            Text(
+                text = "$done of $total questions generated",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+
+        Text(
+            when (mode) {
+                QuizMode.NORMAL -> "Creating a fresh quiz just for you"
+                QuizMode.REVIEW -> "Finding questions you haven't seen in a while"
+                QuizMode.ADAPTIVE -> "Tailoring difficulty to your skill level"
+            },
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 32.dp)
+        )
+
+        Spacer(Modifier.height(24.dp))
+
+        // Progress with animated questions counter
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth(0.8f)
+                    .height(8.dp)
+                    .clip(RoundedCornerShape(4.dp)),
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                strokeCap = ProgressIndicatorDefaults.LinearStrokeCap
+            )
+
+            // Questions counter bubble
+            if (done > 0) {
+                Card(
+                    modifier = Modifier.offset(y = 24.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "$done questions ready",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/* Empty state setup (unchanged but with mode selector) -------------------- */
+
+@Composable
+fun EmptyStateQuizSetup(
+    mode: QuizMode,
+    studentName: String?,            // ← new
+    studentGrade: Int?,              // ← new
+    curriculumTopics: List<String>,  // ← new
+
+    onModeChange: (QuizMode) -> Unit,
+    onGenerateQuiz: (Subject, String, Int) -> Unit,
+) {
+    var subject    by remember { mutableStateOf<Subject?>(null) }
+    var topicText  by remember { mutableStateOf("") }
+    var questionCnt by remember { mutableFloatStateOf(10f) }
+
+    val subjects = remember { Subject.entries }
+
+    Column(
+        modifier = Modifier
+            .verticalScroll(rememberScrollState())
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text("Create a new adaptive quiz", style = MaterialTheme.typography.headlineSmall)
+        Text(
+            "No educational content loaded. You can still create a quiz!",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        /* ─── Mode selector ──────────────────────────────────────── */
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors   = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer
+            )
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Quiz Mode", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    QuizMode.entries.forEach { qMode ->
+                        FilterChip(
+                            selected = mode == qMode,
+                            onClick  = { onModeChange(qMode) },
+                            label    = { Text(qMode.name) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+        }
+
+        /* ─── Subject chooser ────────────────────────────────────── */
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(4.dp)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Select Subject:", style = MaterialTheme.typography.labelLarge)
+                Spacer(Modifier.height(8.dp))
+                subjects.forEach { s ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = subject == s,
+                            onClick  = { subject = s }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(s.name)
+                    }
+                }
+            }
+        }
+
+        /* ─── Topic input ────────────────────────────────────────── */
+        OutlinedTextField(
+            value = topicText,
+            onValueChange = { topicText = it },
+            label = { Text("Topic (optional)") },
+            placeholder = { Text("e.g., Linear Equations") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+
+        /* ─── Grade‑aligned topic suggestions ───────────────────── */
+        if (curriculumTopics.isNotEmpty()) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                )
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(
+                        "Suggested Topics for Grade ${studentGrade ?: "-"}:",
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(curriculumTopics) { topic ->
+                            SuggestionChip(
+                                onClick = { topicText = topic },
+                                label   = { Text(topic) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        /* ─── Question count slider ──────────────────────────────── */
+        Column(Modifier.fillMaxWidth()) {
+            Text("Number of questions: ${questionCnt.toInt()}")
+            Slider(
+                value = questionCnt,
+                onValueChange = { questionCnt = it },
+                valueRange = 5f..20f,
+                steps = 14
+            )
+        }
+
+        /* ─── Generate button ────────────────────────────────────── */
+        Button(
+            onClick = {
+                subject?.let { s ->
+                    onGenerateQuiz(s, topicText.trim(), questionCnt.toInt())
+                }
+            },
+            enabled  = subject != null && studentName != null,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(
+                when (mode) {
+                    QuizMode.NORMAL   -> Icons.Default.PlayArrow
+                    QuizMode.REVIEW   -> Icons.Default.Refresh
+                    QuizMode.ADAPTIVE -> Icons.Default.AutoAwesome
+                },
+                contentDescription = null
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                when (mode) {
+                    QuizMode.NORMAL   -> "Generate Grade ${studentGrade ?: ""} Quiz"
+                    QuizMode.REVIEW   -> "Start Review Session"
+                    QuizMode.ADAPTIVE -> "Start Adaptive Quiz"
+                }
             )
         }
     }

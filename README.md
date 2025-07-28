@@ -1,19 +1,29 @@
-# ImpactSuite
+# G3N
 
-ImpactSuite is an Android application showcasing how on‑device generative AI models can power helpful
+G3N is an Android application showcasing how on‑device generative AI models can power helpful
 experiences entirely offline.  The app is written in Kotlin using Jetpack Compose and leverages
 Google's **Gemma 3n** models via Google AI Edge LiteRT and MediaPipe.
 
 ## Features
-
+- **AI Tutor** – intelligent tutoring system with context-aware responses, adaptive learning paths, and grade-specific curriculum content.
 - **Live Caption & Translation** – streams microphone audio into a lightweight Gemma model to produce captions with optional translation.
 - **Offline Quiz Generator** – generates multiple choice quizzes from a topic using Gemma and stores results in Room.
 - **Voice CBT Coach** – records audio, detects emotion and suggests Cognitive Behavioural Therapy techniques while maintaining a local conversation history.
 - **Document Summarizer** – extracts text from PDFs, DOCX or TXT files and produces a short summary with review questions.
+- **Chat** – open‑ended conversation with on‑device generative AI.
 - **Image Classification** – uses CameraX with a TensorFlow Lite classifier for on‑device image recognition.
 - **Crisis Handbook** – answers safety questions and links to local resources using function calling.
 
 The app is a single module project (`:app`) with an additional dynamic asset pack (`:gemma3n_assetpack`) used for delivering large AI models on demand.
+
+### AI Tutor Highlights
+
+The AI Tutor feature includes advanced educational capabilities:
+- **Context Memory** – maintains conversation context for natural follow-up questions
+- **Response Completion** – automatically ensures complete, well-formed responses
+- **Continuation Support** – allows users to request extended explanations with "continue" or "more"
+- **Grade-Adaptive Content** – curriculum topics and response complexity adjust to student grade level (K-12)
+- **Smart Navigation** – seamless navigation between subject selection and chat sessions
 
 ## Building
 

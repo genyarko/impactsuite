@@ -21,6 +21,8 @@ class TutorPromptManager @Inject constructor(
 
     init {
         loadPromptTemplates()
+        // Clear any cached prompts to ensure fresh instructions
+        promptCache.clear()
     }
 
     data class EducatorConfig(
@@ -89,6 +91,9 @@ class TutorPromptManager @Inject constructor(
         attemptNumber: Int,
         previousResponses: List<String> = emptyList()
     ): String {
+        // Clear cache to ensure fresh prompts with updated instructions
+        promptCache.clear()
+        
         // Cache key for performance
         val cacheKey = "$subject-$concept-$studentGrade-$attemptNumber"
 
@@ -183,7 +188,14 @@ class TutorPromptManager @Inject constructor(
             $styleGuide
             $depthGuide
             
-            CRITICAL: Keep response under $maxWords words.
+            !!MANDATORY!! RESPONSE MUST START WITH: "[Topic] is..." or "[Topic] means..."
+            
+            !!FORBIDDEN OPENINGS!! "Okay!", "Great!", "Well", "So", "Let's", "Here's", "To give you", "fascinating", "complex"
+            
+            WRONG EXAMPLE: "Okay! Great! Executive Leadership is a fascinating topic. To give you the best information..."
+            RIGHT EXAMPLE: "Executive leadership is the practice of guiding and making decisions for organizations..."
+            
+            Total response: around $maxWords words. Be factual like a textbook definition.
             
             ${getGradeSpecificInstructions(studentGrade)}
         """.trimIndent()
@@ -286,31 +298,39 @@ class TutorPromptManager @Inject constructor(
     private fun getGradeSpecificInstructions(grade: Int): String {
         return when (grade) {
             in 1..3 -> """
-                For young students:
-                - Use familiar objects in examples
-                - Keep sentences under 10 words
-                - Use "fun" and "cool" language
+                GRADES 1-3 (Elementary Early):
+                - MUST START: "[Topic] is..." - NO other opening
+                - Use familiar objects and simple words (under 6 letters when possible)
+                - Structure: Direct answer → Simple explanation → One concrete example from their world
+                - NO follow-up questions - just clear information
+                - Example: "A dog is an animal that lives with people. Dogs are pets that bark and wag their tails. You might see dogs at the park."
             """.trimIndent()
 
             in 4..6 -> """
-                For elementary students:
-                - Use relatable school examples
-                - Simple sentences, max 15 words
-                - Include "Let's explore" language
+                GRADES 4-6 (Elementary Late):
+                - MUST START: "[Topic] is..." - NO other opening
+                - Structure: Direct answer → Clear explanation with 2 key points → One simple real-world example
+                - NO critical thinking questions - be factual like a textbook
+                - Use clear vocabulary that 4th-6th graders understand
+                - Example: "Forms of government are different ways countries organize their political systems. There are democracies where people vote, and monarchies where kings or queens rule. The United States is a democracy."
             """.trimIndent()
 
-            in 7..9 -> """
-                For middle school:
-                - Can handle technical terms with explanation
-                - Connect to their interests
-                - Moderate complexity OK
+            in 7..8 -> """
+                GRADES 7-8 (Middle School):
+                - MUST START: "[Topic] is..." - NO other opening
+                - Structure: Direct answer → Structured explanation with 2-3 key points → One example with connection → ONE simple follow-up question
+                - Can use some technical terms with brief explanations
+                - Connect to their world and interests
+                - Example question: "How might this apply to situations you've seen?"
             """.trimIndent()
 
             else -> """
-                For high school:
-                - Full technical vocabulary
-                - Can handle complex concepts
-                - Prepare for standardized tests
+                GRADES 9-12 (High School):
+                - MUST START: "[Topic] is..." - NO other opening
+                - Structure: Direct answer → Comprehensive explanation with multiple aspects → Real-world applications → 1-2 analytical questions
+                - Use full academic vocabulary
+                - Encourage critical thinking and analysis
+                - Example questions: "What factors might influence this?" "How do you think this concept applies to current events?"
             """.trimIndent()
         }
     }
@@ -343,25 +363,40 @@ class TutorPromptManager @Inject constructor(
 
     private fun getMaxWordsForGrade(grade: Int): Int {
         return when (grade) {
-            in 1..3 -> 30
-            in 4..6 -> 50
-            in 7..9 -> 75
-            else -> 100
+            in 1..3 -> 40   // Elementary Early: simple responses
+            in 4..6 -> 60   // Elementary Late: clear explanations
+            in 7..8 -> 80   // Middle School: structured with follow-up
+            else -> 120     // High School: comprehensive with critical thinking
         }
     }
 
     companion object {
         // Fallback templates
         private const val DEFAULT_SOCRATIC = """
-            You are a tutor using the Socratic method.
-            Ask guiding questions to help the student discover the answer.
-            Never give the answer directly.
+            !!CRITICAL!! ALL GRADES: START WITH "[Topic] is..." or "[Topic] means..."
+            
+            !!FORBIDDEN!! "Okay!", "Great!", "Well", "So", "Let's", "Here's", "I can definitely help"
+            
+            Grade-appropriate approach:
+            - Grades 1-6: Direct answer + explanation, NO questions back
+            - Grades 7-8: Direct answer + explanation + ONE simple follow-up question  
+            - Grades 9-12: Direct answer + explanation + 1-2 analytical questions
+            
+            Always be factual and direct like a textbook definition.
         """
 
         private const val DEFAULT_EXPLANATION = """
-            You are explaining a concept to a student.
-            Use clear, age-appropriate language.
-            Provide examples and check understanding.
+            !!CRITICAL!! ALL GRADES: START WITH "[Topic] is..." or "[Topic] means..."
+            
+            !!FORBIDDEN!! "Okay!", "Great!", "Well", "So", "Let's", "Here's", "To give you"
+            
+            Grade-scaled structure:
+            - Grades 1-3: Direct answer → Simple explanation → Concrete example
+            - Grades 4-6: Direct answer → Clear explanation (2 points) → Real-world example
+            - Grades 7-8: Direct answer → Structured explanation → Example → One follow-up question
+            - Grades 9-12: Direct answer → Comprehensive explanation → Applications → Analytical questions
+            
+            Be factual like a textbook, scaled to grade level.
         """
 
         private const val DEFAULT_PROBLEM_SOLVING = """

@@ -1,0 +1,130 @@
+{
+  "PYP": {
+    "Phase 1 (KG)": [
+      "Sense of place & personal histories",
+      "Family and cultural background",
+      "Basic spatial awareness (classroom ↔ home ↔ community)"
+    ],
+    "Phase 2 (Grades 1–2)": [
+      "Earth’s resources & sustainability (reuse–reduce–recycle)",
+      "Local environments and caring for surroundings",
+      "Simple map symbols, directions and scales"
+    ],
+    "Phase 3 (Grades 3–4)": [
+      "Representing place (maps, globes, atlases)",
+      "Relationships between locations (distance, scale, region)",
+      "Global perspectives & recording the past"
+    ],
+    "Phase 4 (Grades 5–6)": [
+      "Human diversity, migration & settlement",
+      "Rights, responsibilities & stewardship",
+      "Interdependence of economic / environmental systems",
+      "Sustainable resource use"
+    ]
+  },
+
+  "MYP": {
+    "MYP 1 (Grade 6)": [
+      "What is Geography? (physical vs human)",
+      "Types of maps & projections",
+      "Latitude, longitude & orientation",
+      "Five themes of geography (location, place, HEI, movement, region)"
+    ],
+    "MYP 2 (Grade 7)": [
+      "Natural & human environments",
+      "Climate systems and climate change",
+      "Biomes & ecosystems",
+      "Settlement patterns & urbanisation",
+      "Sustainability debates and environmental protection"
+    ],
+    "MYP 3 (Grade 8)": [
+      "Population dynamics & migration",
+      "Resource management (water, energy, food)",
+      "Globalisation & interdependence",
+      "Natural hazards & risk management",
+      "River and coastal processes"
+    ],
+    "MYP 4–5 (Grades 9–10)": {
+      "Topics": [
+        "Changing population structure & policies",
+        "Urban systems & sustainable cities",
+        "Trade, aid & global flows",
+        "Natural‑resource use & scarcity",
+        "Tourism impacts & management",
+        "River/coastal landforms & hazards",
+        "Global climate‑change vulnerability & resilience",
+        "Disaster preparedness & response",
+        "Tectonic hazards & management strategies",
+        "Biome conservation & sustainable use",
+        "GIS applications in geographic inquiry"
+      ]
+    }
+  },
+
+  "DP": {
+    "Core": [
+      "Population distribution – changing population",
+      "Global climate – vulnerability & resilience",
+      "Resource consumption & security"
+    ],
+    "Optional Themes": {
+      "Freshwater": [
+        "Hydrological cycle",
+        "Flood & drought hazards",
+        "Water security & management"
+      ],
+      "Oceans & Coastal Margins": [
+        "Ocean currents & marine ecosystems",
+        "Coastal hazards & sea‑level rise",
+        "Integrated coastal‑zone management"
+      ],
+      "Extreme Environments": [
+        "Arid & polar processes",
+        "Human challenges & adaptation",
+        "Risk & management"
+      ],
+      "Geophysical Hazards": [
+        "Earthquakes & volcanoes",
+        "Mass movements",
+        "Hazard mitigation"
+      ],
+      "Leisure, Tourism & Sport": [
+        "Spatial distribution of leisure activities",
+        "Tourism impacts (economic, environmental, cultural)",
+        "Sport and sustainable development"
+      ],
+      "Food & Health": [
+        "Food systems & security",
+        "Nutrition transition",
+        "Disease diffusion & health management"
+      ],
+      "Urban Environments": [
+        "Urbanisation & city structure",
+        "Urban challenges (pollution, inequality)",
+        "Sustainable urban planning"
+      ]
+    },
+    "HL Extension": {
+      "Power, Places & Networks": [
+        "Global flows of goods, capital & information",
+        "Economic and political power dynamics"
+      ],
+      "Human Development & Diversity": [
+        "Cultural diffusion & hybridity",
+        "Development processes & quality of life"
+      ],
+      "Global Risks & Resilience": [
+        "Global hazards & vulnerabilities",
+        "Building resilience and adaptive capacity"
+      ]
+    }
+  },
+
+  "enhancements": {
+    "perGradeSuggestions": true,
+    "trackTopicUsage": true,
+    "markTopicComplete": true,
+    "highlightUnseenTopics": true,
+    "allowBookmarks": true
+  }
+}

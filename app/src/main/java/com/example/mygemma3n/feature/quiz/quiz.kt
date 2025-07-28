@@ -12,7 +12,7 @@ import com.example.mygemma3n.data.QuizDao   // add this
 
 /* ─────────────────────── Core enums ─────────────────────── */
 
-enum class Subject { MATHEMATICS, SCIENCE, HISTORY, LANGUAGE_ARTS, GEOGRAPHY, ENGLISH, GENERAL }
+enum class Subject { MATHEMATICS, SCIENCE, HISTORY, LANGUAGE_ARTS, GEOGRAPHY, ENGLISH, GENERAL, ECONOMICS }
 enum class Difficulty { EASY, MEDIUM, HARD, ADAPTIVE }
 
 enum class QuestionType { MULTIPLE_CHOICE, TRUE_FALSE, FILL_IN_BLANK, SHORT_ANSWER, MATCHING }
@@ -127,6 +127,17 @@ data class WrongAnswer(
     val correctAnswer: String,
     val conceptsTested: String, // JSON array
     val attemptedAt: Long
+)
+
+@Entity(tableName = "question_sessions")
+data class QuestionSession(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val questionHash: Int, // Hash of the question text for efficient lookup
+    val questionText: String,
+    val lastSessionNumber: Int,
+    val wasCorrect: Boolean,
+    val cooldownSessions: Int, // Number of sessions before reuse
+    val attemptedAt: Long = System.currentTimeMillis()
 )
 
 data class SubjectAccuracy(val subject: Subject, val accuracy: Float)
@@ -258,9 +269,10 @@ interface WrongAnswerDao {
         QuizEntity::class,
         UserProgress::class,
         QuestionHistory::class,
-        WrongAnswer::class
+        WrongAnswer::class,
+        QuestionSession::class
     ],
-    version = 3,
+    version = 4,  // Increment version number
     exportSchema = false
 )
 @TypeConverters(QuizConverters::class)
@@ -270,6 +282,8 @@ abstract class QuizDatabase : RoomDatabase() {
     abstract fun progressDao(): UserProgressDao
     abstract fun questionHistoryDao(): QuestionHistoryDao
     abstract fun wrongAnswerDao(): WrongAnswerDao
+    abstract fun questionSessionDao(): QuizDao.QuestionSessionDao  // Add this line
+
 }
 
 /* ─────────────────────── Repository layers ─────────────────────── */

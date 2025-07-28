@@ -243,6 +243,9 @@ dependencies {
     //implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     implementation(libs.text.recognition)
 
+    //Lifecycle
+    implementation("androidx.lifecycle:lifecycle-process:2.9.2")
+
 //    // Coqui STT (formerly Mozilla DeepSpeech)
 //    implementation("ai.coqui.stt:libstt:1.4.0")
 //// Java facade
