@@ -19,15 +19,20 @@ import com.example.mygemma3n.data.VectorDatabase
 import com.example.mygemma3n.data.local.*
 import com.example.mygemma3n.data.local.dao.SubjectDao
 import com.example.mygemma3n.dataStore
+import com.example.mygemma3n.feature.analytics.LearningAnalyticsRepository
+import com.example.mygemma3n.feature.analytics.LearningInteractionDao
+import com.example.mygemma3n.feature.analytics.TopicMasteryDao
 import com.example.mygemma3n.feature.cbt.*
 import com.example.mygemma3n.feature.crisis.EmergencyContactsRepository
 import com.example.mygemma3n.feature.crisis.OfflineMapService
 import com.example.mygemma3n.feature.plant.PlantDatabase
+import com.example.mygemma3n.feature.progress.LearningProgressTracker
 import com.example.mygemma3n.feature.quiz.EducationalContentRepository
 import com.example.mygemma3n.feature.quiz.EnhancedPromptManager
 import com.example.mygemma3n.feature.quiz.PerformanceOptimizedQuizGenerator
 import com.example.mygemma3n.feature.quiz.QuizDatabase
 import com.example.mygemma3n.feature.quiz.QuizRepository
+import com.example.mygemma3n.feature.tutor.TutorProgressIntegrationService
 import com.example.mygemma3n.feature.tutor.TutorPromptManager
 import com.example.mygemma3n.remote.EmergencyDatabase
 import com.example.mygemma3n.remote.TutorDatabase
@@ -78,6 +83,21 @@ object AppModule {
         ).fallbackToDestructiveMigration(false)
             .build()
     }
+
+    @Provides
+    @Singleton
+    fun provideTutorProgressIntegrationService(
+        progressTracker: LearningProgressTracker,
+        analyticsRepository: LearningAnalyticsRepository,
+        masteryDao: TopicMasteryDao,
+        interactionDao: LearningInteractionDao
+    ): TutorProgressIntegrationService = TutorProgressIntegrationService(
+        progressTracker,
+        analyticsRepository,
+        masteryDao,
+        interactionDao
+    )
+
 
     @Provides
     @Singleton

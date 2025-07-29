@@ -46,6 +46,9 @@ import com.example.mygemma3n.data.StudentProfileEntity
 import com.example.mygemma3n.data.TutorSessionType
 import com.example.mygemma3n.shared_utilities.OfflineRAG
 import com.example.mygemma3n.components.*
+import com.example.mygemma3n.feature.tutor.TutorProgressDisplay
+import com.example.mygemma3n.feature.tutor.FloatingProgressSummary
+import com.example.mygemma3n.feature.tutor.TutorProgressIntegrationService
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -155,6 +158,12 @@ fun TutorScreen(
                         suggestedTopics = state.suggestedTopics,
                         showFloatingTopics = state.showFloatingTopics,
                         scrollState = scrollState,
+                        currentProgress = state.currentProgress,
+                        currentStreak = state.currentStreak,
+                        weeklyGoalProgress = state.weeklyGoalProgress,
+                        showFloatingProgressSummary = state.showFloatingProgressSummary,
+                        showConceptMasteryCard = state.showConceptMasteryCard,
+                        showTutorProgressDisplay = state.showTutorProgressDisplay,
                         onMessageDoubleTap = { viewModel.speakText(it) },
                         onTopicSelected = { topic ->
                             viewModel.selectTopic(topic)
@@ -162,7 +171,23 @@ fun TutorScreen(
                         onBookmarkMessage = { messageId ->
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             viewModel.bookmarkMessage(messageId)
-                        }
+                        },
+                        onViewProgressDetails = {
+                            viewModel.showFloatingProgressSummary()
+                        },
+                        onDismissProgressSummary = {
+                            viewModel.hideFloatingProgressSummary()
+                        },
+                        onSelectConceptFromProgress = { concept ->
+                            viewModel.selectConceptFromProgress(concept)
+                        },
+                        onToggleConceptMasteryCard = {
+                            viewModel.toggleConceptMasteryCard()
+                        },
+                        onToggleTutorProgressDisplay = {
+                            viewModel.toggleTutorProgressDisplay()
+                        },
+                        progressSummary = viewModel.getProgressSummary()
                     )
                 }
             }
@@ -210,21 +235,149 @@ private fun TutorChatInterface(
     suggestedTopics: List<String>,
     showFloatingTopics: Boolean,
     scrollState: LazyListState,
+    currentProgress: Float,
+    currentStreak: Int,
+    weeklyGoalProgress: Float,
+    showFloatingProgressSummary: Boolean,
+    showConceptMasteryCard: Boolean,
+    showTutorProgressDisplay: Boolean,
     onMessageDoubleTap: (String) -> Unit,
     onTopicSelected: (String) -> Unit,
-    onBookmarkMessage: (String) -> Unit
+    onBookmarkMessage: (String) -> Unit,
+    onViewProgressDetails: () -> Unit,
+    onDismissProgressSummary: () -> Unit,
+    onSelectConceptFromProgress: (String) -> Unit,
+    onToggleConceptMasteryCard: () -> Unit,
+    onToggleTutorProgressDisplay: () -> Unit,
+    progressSummary: TutorProgressIntegrationService.ProgressSummary?
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Concept mastery indicator
+            // Progress display
             AnimatedVisibility(
-                visible = conceptMastery.isNotEmpty(),
+                visible = (currentProgress > 0f || currentStreak > 0 || weeklyGoalProgress > 0f) && showTutorProgressDisplay,
                 enter = expandVertically() + fadeIn(),
                 exit = shrinkVertically() + fadeOut()
             ) {
                 Column {
-                    ConceptMasterySection(conceptMastery)
+                    TutorProgressDisplay(
+                        currentProgress = currentProgress,
+                        currentStreak = currentStreak,
+                        weeklyGoalProgress = weeklyGoalProgress,
+                        onViewDetails = onViewProgressDetails,
+                        onMinimize = onToggleTutorProgressDisplay,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
                     HorizontalDivider()
+                }
+            }
+            
+            // Minimized progress display
+            AnimatedVisibility(
+                visible = (currentProgress > 0f || currentStreak > 0 || weeklyGoalProgress > 0f) && !showTutorProgressDisplay,
+                enter = slideInVertically() + fadeIn(),
+                exit = slideOutVertically() + fadeOut()
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    tonalElevation = 2.dp,
+                    shape = RoundedCornerShape(8.dp),
+                    onClick = onToggleTutorProgressDisplay
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.TrendingUp,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "${(currentProgress * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Icon(
+                            Icons.Default.LocalFireDepartment,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = if (currentStreak > 0) Color(0xFFFF5722) else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "$currentStreak",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (currentStreak > 0) Color(0xFFFF5722) else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.weight(1f))
+                        Icon(
+                            Icons.Default.ExpandMore,
+                            contentDescription = "Show progress details",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+            
+            // Concept mastery indicator
+            AnimatedVisibility(
+                visible = conceptMastery.isNotEmpty() && showConceptMasteryCard,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column {
+                    ConceptMasterySection(
+                        conceptMastery = conceptMastery,
+                        onToggle = onToggleConceptMasteryCard
+                    )
+                    HorizontalDivider()
+                }
+            }
+            
+            // Show progress button when card is hidden
+            AnimatedVisibility(
+                visible = conceptMastery.isNotEmpty() && !showConceptMasteryCard,
+                enter = slideInVertically() + fadeIn(),
+                exit = slideOutVertically() + fadeOut()
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    tonalElevation = 2.dp,
+                    shape = RoundedCornerShape(8.dp),
+                    onClick = onToggleConceptMasteryCard
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.TrendingUp,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Show Progress (${(conceptMastery.values.average() * 100).toInt()}% avg)",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.weight(1f))
+                        Icon(
+                            Icons.Default.ExpandMore,
+                            contentDescription = "Show progress",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
 
@@ -281,12 +434,26 @@ private fun TutorChatInterface(
                 onTopicSelected = onTopicSelected
             )
         }
+        
+        // Floating progress summary
+        progressSummary?.let { summary ->
+            FloatingProgressSummary(
+                progressSummary = summary,
+                isVisible = showFloatingProgressSummary,
+                onDismiss = onDismissProgressSummary,
+                onSelectConcept = onSelectConceptFromProgress,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 16.dp)
+            )
+        }
     }
 }
 
 @Composable
 private fun ConceptMasterySection(
-    conceptMastery: Map<String, Float>
+    conceptMastery: Map<String, Float>,
+    onToggle: () -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -310,11 +477,28 @@ private fun ConceptMasterySection(
                     fontWeight = FontWeight.Bold
                 )
 
-                Text(
-                    text = "${(conceptMastery.values.average() * 100).toInt()}% Average",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "${(conceptMastery.values.average() * 100).toInt()}% Average",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    
+                    IconButton(
+                        onClick = onToggle,
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Hide progress card",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))

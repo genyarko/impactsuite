@@ -11,6 +11,7 @@ import org.json.JSONObject
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.math.max
 
 @Singleton
 class CurriculumAwareQuizGenerator @Inject constructor(
@@ -558,27 +559,56 @@ class CurriculumAwareQuizGenerator @Inject constructor(
         previousQuestions: List<String>,
         attemptNumber: Int
     ): Question {
+        
+        // Try multiple times with similarity checking
+        var lastError: Exception? = null
+        repeat(3) { attempt ->
+            try {
+                val prompt = createCurriculumPrompt(
+                    subject = subject,
+                    topic = topic,
+                    gradeLevel = gradeLevel,
+                    questionType = questionType,
+                    difficulty = difficulty,
+                    previousQuestions = previousQuestions,
+                    attemptNumber = attemptNumber + attempt
+                )
 
-        val prompt = createCurriculumPrompt(
-            subject = subject,
-            topic = topic,
-            gradeLevel = gradeLevel,
-            questionType = questionType,
-            difficulty = difficulty,
-            previousQuestions = previousQuestions,
-            attemptNumber = attemptNumber
-        )
+                val response = gemmaService.generateTextAsync(
+                    prompt,
+                    UnifiedGemmaService.GenerationConfig(
+                        maxTokens = 500,
+                        temperature = 0.7f + ((attemptNumber + attempt) * 0.05f),
+                        topK = 40 + (attempt * 10)
+                    )
+                )
 
-        val response = gemmaService.generateTextAsync(
-            prompt,
-            UnifiedGemmaService.GenerationConfig(
-                maxTokens = 500,
-                temperature = 0.7f + (attemptNumber * 0.05f),
-                topK = 40
-            )
-        )
-
-        return parseQuestionResponse(response, questionType, difficulty, gradeLevel)
+                val question = parseQuestionResponse(response, questionType, difficulty, gradeLevel)
+                
+                // Check similarity against previous questions
+                val similarities = previousQuestions.map { prev ->
+                    calculateSimilarity(question.questionText.lowercase(), prev.lowercase())
+                }
+                val maxSimilarity = similarities.maxOfOrNull { it } ?: 0f
+                val isTooSimilar = maxSimilarity > 0.75f
+                
+                if (!isTooSimilar) {
+                    Timber.d("Curriculum question accepted, max similarity: $maxSimilarity")
+                    return question
+                } else {
+                    Timber.w("Curriculum question too similar ($maxSimilarity), attempt ${attempt + 1}")
+                    lastError = Exception("Question too similar: $maxSimilarity")
+                }
+                
+            } catch (e: Exception) {
+                lastError = e
+                Timber.w("Curriculum question generation attempt ${attempt + 1} failed: ${e.message}")
+            }
+        }
+        
+        // If all attempts failed, use fallback
+        Timber.e(lastError, "All curriculum question attempts failed, using fallback")
+        return generateCurriculumFallback(subject, topic, gradeLevel, questionType, difficulty)
     }
 
     /**
@@ -1126,5 +1156,55 @@ class CurriculumAwareQuizGenerator @Inject constructor(
                 difficulty = Difficulty.EASY
             )
         )
+    }
+    
+    /**
+     * Calculate similarity between two question texts
+     */
+    private fun calculateSimilarity(text1: String, text2: String): Float {
+        val clean1 = text1.lowercase().replace(Regex("[^a-z0-9\\s]"), "")
+        val clean2 = text2.lowercase().replace(Regex("[^a-z0-9\\s]"), "")
+
+        // Don't compare very short strings
+        if (clean1.length < 20 || clean2.length < 20) {
+            return 0f
+        }
+
+        // Check exact substring match (very similar)
+        if (clean1.contains(clean2) || clean2.contains(clean1)) {
+            return 0.9f
+        }
+
+        // Word-based similarity
+        val words1 = clean1.split("\\s+".toRegex()).filter { it.length > 3 }.toSet()
+        val words2 = clean2.split("\\s+".toRegex()).filter { it.length > 3 }.toSet()
+
+        if (words1.isEmpty() || words2.isEmpty()) return 0f
+
+        // Jaccard similarity
+        val intersection = words1.intersect(words2).size
+        val union = words1.union(words2).size
+        val jaccard = intersection.toFloat() / union
+
+        // Trigram similarity
+        val trigrams1 = getTrigrams(clean1)
+        val trigrams2 = getTrigrams(clean2)
+
+        val trigramIntersection = trigrams1.intersect(trigrams2).size
+        val trigramUnion = trigrams1.union(trigrams2).size
+        val trigramSimilarity = if (trigramUnion > 0) {
+            trigramIntersection.toFloat() / trigramUnion
+        } else 0f
+
+        // Weighted combination
+        return (jaccard * 0.6f + trigramSimilarity * 0.4f)
+    }
+
+    private fun getTrigrams(text: String): Set<String> {
+        return if (text.length >= 3) {
+            text.windowed(3, 1).toSet()
+        } else {
+            emptySet()
+        }
     }
 }
