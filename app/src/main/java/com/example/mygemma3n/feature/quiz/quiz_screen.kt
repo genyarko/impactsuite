@@ -42,8 +42,11 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.DisposableEffect
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import android.view.WindowManager
 typealias QuizGeneratorViewModelState = QuizGeneratorViewModel.QuizState
 
 
@@ -58,6 +61,22 @@ fun QuizScreen(
     var showStudentDialog by remember { mutableStateOf(true) }
     var studentName by remember { mutableStateOf("") }
     var studentGrade by remember { mutableIntStateOf(5) }
+    
+    val context = LocalContext.current
+    
+    // Keep screen awake during quiz generation
+    DisposableEffect(state.isGenerating) {
+        if (state.isGenerating) {
+            val activity = context as? android.app.Activity
+            activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            
+            onDispose {
+                activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        } else {
+            onDispose { }
+        }
+    }
 
     // Ensure subjects are loaded
     LaunchedEffect(Unit) {

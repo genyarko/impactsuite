@@ -18,6 +18,7 @@ import com.example.mygemma3n.feature.analytics.InteractionType
 import com.example.mygemma3n.dataStore
 import com.example.mygemma3n.SPEECH_API_KEY
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.example.mygemma3n.feature.progress.LearningProgressTracker
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -43,6 +44,7 @@ class TutorViewModel @Inject constructor(
     private val variantManager: PromptVariantManager,
     private val textToSpeechManager: TextToSpeechManager,
     private val curriculumCache: CurriculumCache,
+    private val progressIntegrationService: TutorProgressIntegrationService,
     private val analyticsRepository: LearningAnalyticsRepository,
     private val savedStateHandle: SavedStateHandle?
 ) : ViewModel() {
@@ -69,6 +71,7 @@ class TutorViewModel @Inject constructor(
     private var currentChatSessionId: String? = null
     private var conversationContext = mutableListOf<ConversationEntry>()
     private var attemptCount = mutableMapOf<String, Int>()
+    private var currentProgress: LearningProgressTracker.LearningProgress? = null
 
     // Retry configuration
     private val MAX_RETRIES = 3
@@ -159,42 +162,48 @@ class TutorViewModel @Inject constructor(
         addTutorMessage(input, isUser = true)
         _state.update { it.copy(isLoading = true, error = null) }
 
-        var retryCount = 0
-        var lastError: Exception? = null
+        try {
+            var retryCount = 0
+            var lastError: Exception? = null
 
-        while (retryCount < MAX_RETRIES) {
-            try {
-                processUserInputWithRetry(input)
-                return
-            } catch (e: Exception) {
-                lastError = e
-                retryCount++
-                
-                if (retryCount < MAX_RETRIES) {
-                    _state.update { 
-                        it.copy(
-                            error = "Connection issue. Retrying... ($retryCount/$MAX_RETRIES)"
-                        )
+            while (retryCount < MAX_RETRIES) {
+                try {
+                    processUserInputWithRetry(input)
+                    return
+                } catch (e: Exception) {
+                    lastError = e
+                    retryCount++
+                    
+                    if (retryCount < MAX_RETRIES) {
+                        _state.update { 
+                            it.copy(
+                                error = "Connection issue. Retrying... ($retryCount/$MAX_RETRIES)"
+                            )
+                        }
+                        delay(RETRY_DELAY_MS * retryCount) // Exponential backoff
+                    } else {
+                        Timber.e(e, "Failed after $MAX_RETRIES retries")
                     }
-                    delay(RETRY_DELAY_MS * retryCount) // Exponential backoff
-                } else {
-                    Timber.e(e, "Failed after $MAX_RETRIES retries")
                 }
             }
-        }
 
-        _state.update { 
-            it.copy(
-                isLoading = false,
-                error = "Unable to process your request. Please try again."
-            )
+            _state.update { 
+                it.copy(
+                    isLoading = false,
+                    error = "Unable to process your request. Please try again."
+                )
+            }
+        } finally {
+            // Ensure loading is always turned off
+            _state.update { it.copy(isLoading = false) }
         }
     }
 
     private suspend fun processUserInputWithRetry(input: String) {
-        val student = currentStudent ?: throw IllegalStateException("No student profile")
-        val subject = _state.value.currentSubject ?: throw IllegalStateException("No subject selected")
-        val sessionType = _state.value.sessionType ?: throw IllegalStateException("No session type")
+        try {
+            val student = currentStudent ?: throw IllegalStateException("No student profile")
+            val subject = _state.value.currentSubject ?: throw IllegalStateException("No subject selected")
+            val sessionType = _state.value.sessionType ?: throw IllegalStateException("No session type")
 
         // Context management
         val currentTopic = _state.value.conversationTopic
@@ -337,6 +346,11 @@ class TutorViewModel @Inject constructor(
         conversationContext.add(ConversationEntry("Tutor", formattedResponse, concept, true))
 
         _state.update { it.copy(currentApproach = approach, isLoading = false) }
+        } catch (e: Exception) {
+            Timber.e(e, "Error in processUserInputWithRetry")
+            _state.update { it.copy(isLoading = false) }
+            throw e // Re-throw to be handled by the retry logic
+        }
     }
 
     private fun handleContinuationResponse(
@@ -468,7 +482,8 @@ private suspend fun generateAdaptiveResponse(
 
     } catch (e: Exception) {
         Timber.e(e, "Error generating response")
-        throw e
+        // Return a fallback response instead of throwing
+        return "I'm having trouble generating a response right now. Could you please rephrase your question or try asking about a different aspect of ${subject.name}?"
     }
 }
 
@@ -673,11 +688,11 @@ private fun ensureCompleteResponse(response: String, grade: Int): String {
         try {
             val student = currentStudent
             if (student == null) {
-                _state.update { 
+                _state.update {
                     it.copy(
-                        showStudentDialog = true, 
+                        showStudentDialog = true,
                         pendingSession = PendingSession(subject, sessionType, topic)
-                    ) 
+                    )
                 }
                 return@launch
             }
@@ -694,10 +709,25 @@ private fun ensureCompleteResponse(response: String, grade: Int): String {
             conversationContext.clear()
             attemptCount.clear()
 
+            // Initialize progress tracking
+            currentProgress = progressIntegrationService.initializeStudentProgress(
+                studentId = student.id,
+                subject = subject
+            )
+
             // Use cached topic loading
             Timber.d("Starting tutor session for ${student.name} (Grade ${student.gradeLevel}) - ${subject.name}")
             val suggestedTopics = getSuggestedTopicsWithCache(subject, student.gradeLevel)
-            Timber.d("Loaded ${suggestedTopics.size} suggested topics for session")
+
+            // Add suggestions from progress tracker
+            val progressSuggestion = progressIntegrationService.suggestNextConcept(student.id, subject)
+            val enhancedSuggestedTopics = if (progressSuggestion != null) {
+                listOf(progressSuggestion) + suggestedTopics.filterNot { it == progressSuggestion }
+            } else {
+                suggestedTopics
+            }
+
+            Timber.d("Loaded ${enhancedSuggestedTopics.size} suggested topics for session")
 
             _state.update {
                 it.copy(
@@ -706,19 +736,17 @@ private fun ensureCompleteResponse(response: String, grade: Int): String {
                     currentTopic = topic,
                     messages = emptyList(),
                     error = null,
-                    suggestedTopics = suggestedTopics,
-                    showFloatingTopics = suggestedTopics.isNotEmpty(),
-                    sessionStartTime = System.currentTimeMillis()
+                    suggestedTopics = enhancedSuggestedTopics,
+                    showFloatingTopics = enhancedSuggestedTopics.isNotEmpty(),
+                    sessionStartTime = System.currentTimeMillis(),
+                    // Add progress info to state
+                    currentProgress = currentProgress?.overallProgress ?: 0f,
+                    currentStreak = currentProgress?.streakDays ?: 0,
+                    weeklyGoalProgress = currentProgress?.weeklyGoal?.sessionProgress ?: 0f
                 )
             }
-            
-            if (suggestedTopics.isNotEmpty()) {
-                Timber.d("Floating topics enabled with ${suggestedTopics.size} topics: ${suggestedTopics.take(3).joinToString(", ")}${if (suggestedTopics.size > 3) "..." else ""}")
-            } else {
-                Timber.w("No suggested topics available - floating topics will be hidden")
-            }
 
-            val welcomeMessage = generateWelcomeMessage(student, subject, sessionType)
+            val welcomeMessage = generateEnhancedWelcomeMessage(student, subject, sessionType, currentProgress)
             addTutorMessage(welcomeMessage, isUser = false)
 
         } catch (e: Exception) {
@@ -758,7 +786,7 @@ private fun ensureCompleteResponse(response: String, grade: Int): String {
     }
 
     fun clearCurrentSubject() {
-        _state.update { 
+        _state.update {
             it.copy(
                 currentSubject = null,
                 sessionType = null,
@@ -768,13 +796,21 @@ private fun ensureCompleteResponse(response: String, grade: Int): String {
                 conceptMastery = emptyMap(),
                 suggestedTopics = emptyList(),
                 showFloatingTopics = false,
-                error = null
+                error = null,
+                currentProgress = 0f,
+                currentStreak = 0,
+                weeklyGoalProgress = 0f
             )
         }
         conversationContext.clear()
         attemptCount.clear()
         currentSessionId = null
         currentChatSessionId = null
+
+        // Clear progress cache when switching subjects
+        currentStudent?.let { student ->
+            progressIntegrationService.clearStudentCache(student.id)
+        }
     }
 
     fun dismissStudentDialog() {
@@ -842,23 +878,46 @@ private fun ensureCompleteResponse(response: String, grade: Int): String {
 
     override fun onCleared() {
         super.onCleared()
-        
+
+        // Save final progress state
+        currentStudent?.let { student ->
+            _state.value.currentSubject?.let { subject ->
+                viewModelScope.launch {
+                    try {
+                        val sessionDuration = System.currentTimeMillis() -
+                                (_state.value.sessionStartTime ?: System.currentTimeMillis())
+
+                        // Record final session duration
+                        if (sessionDuration > 60000) { // Only if session > 1 minute
+                            analyticsRepository.endLearningSession(
+                                currentSessionId ?: return@launch,
+                                performance = currentProgress?.overallProgress ?: 0.5f,
+                                focusScore = 0.8f // Could calculate based on interaction patterns
+                            )
+                        }
+                    } catch (e: Exception) {
+                        Timber.e(e, "Failed to save final session state")
+                    }
+                }
+            }
+        }
+
         // Cancel all active jobs
         activeJobs.forEach { it.cancel() }
         activeJobs.clear()
-        
+
         recordingJob?.cancel()
         transcriptionJob?.cancel()
-        
+
         // Clear audio buffer
         audioBuffer.clear()
-        
+
         // Save state
         saveConversationState()
-        
+
         // Clear caches
         topicCache.clear()
-        
+
         Timber.d("TutorViewModel cleaned up")
     }
 
@@ -899,7 +958,16 @@ private fun ensureCompleteResponse(response: String, grade: Int): String {
         val pendingSession: PendingSession? = null,
         val sessionStartTime: Long? = null,
         val autoSpeak: Boolean = false,
-        val speechRate: Float = 1.0f
+        val currentProgress: Float = 0f,
+        val currentStreak: Int = 0,
+        val weeklyGoalProgress: Float = 0f,
+        val hasNewAchievements: Boolean = false,
+        val achievementToShow: LearningProgressTracker.Achievement? = null,
+        val showAchievementDialog: Boolean = false,
+        val speechRate: Float = 1.0f,
+        val showFloatingProgressSummary: Boolean = false,
+        val showConceptMasteryCard: Boolean = true,
+        val showTutorProgressDisplay: Boolean = true
     )
 
     data class TutorMessage(
@@ -951,6 +1019,39 @@ private fun ensureCompleteResponse(response: String, grade: Int): String {
         CONCEPT_EXPLANATION,
         PRACTICE,
         ENCOURAGEMENT
+    }
+
+    fun dismissAchievementDialog() {
+        _state.update { it.copy(showAchievementDialog = false, achievementToShow = null) }
+    }
+    
+    fun showFloatingProgressSummary() {
+        _state.update { it.copy(showFloatingProgressSummary = true) }
+    }
+    
+    fun hideFloatingProgressSummary() {
+        _state.update { it.copy(showFloatingProgressSummary = false) }
+    }
+    
+    fun selectConceptFromProgress(concept: String) {
+        hideFloatingProgressSummary()
+        processUserInput("Tell me about $concept")
+    }
+    
+    fun toggleConceptMasteryCard() {
+        _state.update { it.copy(showConceptMasteryCard = !it.showConceptMasteryCard) }
+    }
+    
+    fun hideConceptMasteryCard() {
+        _state.update { it.copy(showConceptMasteryCard = false) }
+    }
+    
+    fun toggleTutorProgressDisplay() {
+        _state.update { it.copy(showTutorProgressDisplay = !it.showTutorProgressDisplay) }
+    }
+    
+    fun hideTutorProgressDisplay() {
+        _state.update { it.copy(showTutorProgressDisplay = false) }
     }
 
     // Helper method implementations
@@ -1103,20 +1204,127 @@ private fun ensureCompleteResponse(response: String, grade: Int): String {
         approach: TeachingApproach
     ) {
         try {
-            analyticsRepository.recordInteraction(
+            val sessionDuration = System.currentTimeMillis() - (_state.value.sessionStartTime ?: System.currentTimeMillis())
+
+            // Estimate response quality based on approach and attempts
+            val responseQuality = when {
+                approach == TeachingApproach.SOCRATIC && previousAttempts == 0 -> 0.9f
+                approach == TeachingApproach.EXPLANATION && previousAttempts <= 1 -> 0.8f
+                approach == TeachingApproach.PROBLEM_SOLVING -> 0.85f
+                approach == TeachingApproach.ENCOURAGEMENT -> 0.6f // Student was struggling
+                approach == TeachingApproach.CORRECTION -> 0.7f
+                else -> 0.75f
+            }
+
+            // Determine if response was correct based on context
+            val wasCorrect = when {
+                approach == TeachingApproach.CORRECTION -> false
+                approach == TeachingApproach.ENCOURAGEMENT && previousAttempts > 2 -> false
+                previousAttempts == 0 && approach == TeachingApproach.SOCRATIC -> true
+                else -> responseQuality >= 0.7f
+            }
+
+            // Use the integration service to record in both systems
+            progressIntegrationService.recordTutoringInteraction(
                 studentId = student.id,
-                subject = subject.name,
+                subject = subject,
                 topic = topic,
                 concept = concept,
-                interactionType = InteractionType.QUESTION_ASKED,
-                sessionDurationMs = System.currentTimeMillis() - (_state.value.sessionStartTime ?: System.currentTimeMillis()),
-                wasCorrect = true,
-                attemptsNeeded = previousAttempts + 1,
-                difficultyLevel = approach.name
+                responseQuality = responseQuality,
+                sessionDurationMs = sessionDuration,
+                wasCorrect = wasCorrect,
+                approach = approach,
+                studentNeed = studentNeed
             )
+
+            // Update current progress
+            currentProgress = progressIntegrationService.getCurrentProgress(student.id, subject)
+
+            // Update UI state with progress info
+            _state.update { currentState ->
+                currentState.copy(
+                    currentProgress = currentProgress?.overallProgress ?: 0f,
+                    currentStreak = currentProgress?.streakDays ?: 0,
+                    weeklyGoalProgress = currentProgress?.weeklyGoal?.sessionProgress ?: 0f,
+                    conceptMastery = currentProgress?.conceptMasteries?.mapValues {
+                        it.value.progressPercentage
+                    } ?: emptyMap(),
+                    // Check for new achievements
+                    hasNewAchievements = currentProgress?.achievements?.any { achievement ->
+                        achievement.unlockedAt > (currentState.sessionStartTime ?: 0)
+                    } ?: false
+                )
+            }
+
+            // Check if we should show achievement notification
+            currentProgress?.achievements?.filter { achievement ->
+                achievement.unlockedAt > (_state.value.sessionStartTime ?: 0)
+            }?.forEach { achievement ->
+                showAchievementNotification(achievement)
+            }
+
         } catch (e: Exception) {
             Timber.e(e, "Failed to track learning interaction")
         }
+    }
+
+    private suspend fun generateEnhancedWelcomeMessage(
+        student: StudentProfileEntity,
+        subject: OfflineRAG.Subject,
+        sessionType: TutorSessionType,
+        progress: LearningProgressTracker.LearningProgress?
+    ): String {
+        val progressInfo = progress?.let {
+            val masteredCount = it.conceptMasteries.count { mastery ->
+                mastery.value.level == LearningProgressTracker.MasteryLevel.MASTERED
+            }
+            val totalConcepts = it.conceptMasteries.size
+
+            when {
+                it.streakDays > 0 -> " Great to see you back for day ${it.streakDays} in a row!"
+                masteredCount > 0 -> " You've mastered $masteredCount out of $totalConcepts concepts so far!"
+                totalConcepts > 0 -> " You've explored $totalConcepts concepts. Keep going!"
+                else -> ""
+            }
+        } ?: ""
+
+        val prompt = """
+        Generate a warm, encouraging welcome message for ${student.name}, a grade ${student.gradeLevel} student, 
+        starting a ${sessionType.name.lowercase().replace('_', ' ')} session in ${subject.name}.
+        $progressInfo
+        Keep it brief, age-appropriate, and motivating. Ask what they'd like to learn about.
+        If they have a streak going, acknowledge it briefly.
+    """.trimIndent()
+
+        return try {
+            gemmaService.generateTextAsync(
+                prompt,
+                UnifiedGemmaService.GenerationConfig(
+                    maxTokens = 150,
+                    temperature = 0.7f
+                )
+            )
+        } catch (e: Exception) {
+            "Hello ${student.name}! ${progressInfo}I'm excited to help you learn ${subject.name} today. What would you like to explore?"
+        }
+    }
+
+    // Add method to show achievement notifications
+    private fun showAchievementNotification(achievement: LearningProgressTracker.Achievement) {
+        _state.update { currentState ->
+            currentState.copy(
+                achievementToShow = achievement,
+                showAchievementDialog = true
+            )
+        }
+    }
+
+    // Add method to get progress summary
+    fun getProgressSummary(): TutorProgressIntegrationService.ProgressSummary? {
+        val student = currentStudent ?: return null
+        val subject = _state.value.currentSubject ?: return null
+
+        return progressIntegrationService.getProgressSummary(student.id, subject)
     }
 
     private fun buildTutorPrompt(
@@ -1141,6 +1349,16 @@ private fun ensureCompleteResponse(response: String, grade: Int): String {
             TeachingApproach.CORRECTION -> "Gently correct the misconception and provide the accurate information."
         }
 
+        // Truncate relevant content to prevent prompt from being too long
+        // Reserve space for other parts of prompt (roughly 200 tokens)
+        val maxTokensForGrade = getMaxTokensForGrade(gradeLevel)
+        val maxContentChars = (maxTokensForGrade - 200) * 3 // Rough estimate: 1 token ≈ 3 chars
+        val truncatedContent = if (relevantContent.length > maxContentChars) {
+            relevantContent.take(maxContentChars) + "..."
+        } else {
+            relevantContent
+        }
+
         return """
             You are an AI tutor helping ${student.name}, a grade $gradeLevel student, with ${subject.name}.
             
@@ -1150,7 +1368,7 @@ private fun ensureCompleteResponse(response: String, grade: Int): String {
             ${if (isFollowUp) "This is a follow-up to: $originalQuestion" else ""}
             
             Relevant knowledge:
-            $relevantContent
+            $truncatedContent
             
             Instructions:
             - Keep responses appropriate for grade $gradeLevel (age ${gradeLevel + 5})

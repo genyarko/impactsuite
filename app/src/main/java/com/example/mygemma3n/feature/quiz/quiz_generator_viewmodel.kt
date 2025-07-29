@@ -516,6 +516,19 @@ class QuizGeneratorViewModel @Inject constructor(
             // Check for exact match first
             var correct = normalizedUserAnswer.equals(normalizedCorrectAnswer, ignoreCase = true)
 
+            // For multiple choice, check if user answer matches any option
+            if (!correct && q.questionType == QuestionType.MULTIPLE_CHOICE) {
+                // Check if user typed an option instead of selecting it
+                val normalizedOptions = q.options.map { normalizeAnswer(it) }
+                correct = normalizedOptions.contains(normalizedUserAnswer) && 
+                         normalizedUserAnswer == normalizedCorrectAnswer
+                
+                // If user typed something that's not an option, check if it's semantically similar to correct answer
+                if (!correct && !normalizedOptions.contains(normalizedUserAnswer)) {
+                    correct = checkAnswerVariations(normalizedUserAnswer, normalizedCorrectAnswer, q)
+                }
+            }
+            
             // For fill-in-blank and short answer, check for acceptable variations
             if (!correct && (q.questionType == QuestionType.FILL_IN_BLANK ||
                         q.questionType == QuestionType.SHORT_ANSWER)) {
@@ -618,6 +631,43 @@ class QuizGeneratorViewModel @Inject constructor(
 
     // 4. ENHANCED ANSWER VARIATIONS CHECK
     private fun checkAnswerVariations(userAnswer: String, correctAnswer: String, question: Question): Boolean {
+        // Check for compound answers with parenthetical explanations
+        val compoundAnswerPattern = """(.+?)\s*\([^)]*\)\s*(or|and)\s*(.+?)\s*\([^)]*\)""".toRegex()
+        val singleAnswerPattern = """(.+?)\s*\([^)]*\)""".toRegex()
+        
+        // Extract main terms from compound answers
+        val correctAnswerParts = when {
+            compoundAnswerPattern.containsMatchIn(correctAnswer) -> {
+                // Handle "term1 (explanation) or term2 (explanation)" format
+                compoundAnswerPattern.find(correctAnswer)?.let { match ->
+                    listOf(
+                        normalizeAnswer(match.groupValues[1].trim()),
+                        normalizeAnswer(match.groupValues[3].trim())
+                    )
+                } ?: listOf(normalizeAnswer(correctAnswer))
+            }
+            singleAnswerPattern.containsMatchIn(correctAnswer) -> {
+                // Handle "term (explanation)" format
+                singleAnswerPattern.find(correctAnswer)?.let { match ->
+                    listOf(normalizeAnswer(match.groupValues[1].trim()))
+                } ?: listOf(normalizeAnswer(correctAnswer))
+            }
+            correctAnswer.contains(" or ") -> {
+                // Handle simple "term1 or term2" format
+                correctAnswer.split(" or ").map { normalizeAnswer(it.trim()) }
+            }
+            correctAnswer.contains(" and ") -> {
+                // Handle simple "term1 and term2" format
+                correctAnswer.split(" and ").map { normalizeAnswer(it.trim()) }
+            }
+            else -> listOf(normalizeAnswer(correctAnswer))
+        }
+        
+        // Check if user answer matches any of the acceptable parts
+        if (correctAnswerParts.any { it == userAnswer || it.contains(userAnswer) || userAnswer.contains(it) }) {
+            return true
+        }
+
         // Direct variations mapping
         val answerVariations = mapOf(
             "industrial revolution" to listOf(
@@ -644,33 +694,77 @@ class QuizGeneratorViewModel @Inject constructor(
                 "mitochondrion",
                 "the mitochondria",
                 "mitochondrial"
+            ),
+            "karma" to listOf(
+                "karma",
+                "good deeds and bad deeds",
+                "actions and consequences",
+                "law of karma"
+            ),
+            "dharma" to listOf(
+                "dharma",
+                "righteous duty",
+                "moral law",
+                "religious duty"
             )
         )
 
-        // Check if the correct answer has known variations
-        val variations = answerVariations[correctAnswer] ?: emptyList()
-        if (variations.any { normalizeAnswer(it) == userAnswer }) {
-            return true
+        // Check if the user answer or any correct answer part has known variations
+        val allAnswerParts = correctAnswerParts + listOf(normalizeAnswer(correctAnswer))
+        for (answerPart in allAnswerParts) {
+            val variations = answerVariations[answerPart] ?: emptyList()
+            if (variations.any { normalizeAnswer(it) == userAnswer }) {
+                return true
+            }
         }
 
-        // Check for partial matches (80% similarity)
+        // Enhanced semantic matching for better coverage
         val userWords = userAnswer.split(" ").filter { it.length > 2 }
-        val correctWords = correctAnswer.split(" ").filter { it.length > 2 }
+        val correctWords = correctAnswerParts.flatMap { it.split(" ").filter { word -> word.length > 2 } }
 
         if (userWords.isEmpty() || correctWords.isEmpty()) {
             return false
         }
 
+        // Semantic word mappings for better matching
+        val semanticMappings = mapOf(
+            "water" to listOf("water", "drinking", "irrigation", "hydration"),
+            "food" to listOf("food", "farming", "agriculture", "crops", "harvest"),
+            "transport" to listOf("transport", "transportation", "trade", "travel", "movement"),
+            "provided" to listOf("provided", "gave", "supplied", "offered", "made"),
+            "easier" to listOf("easier", "better", "improved", "facilitated"),
+            "climate" to listOf("climate", "weather", "environment", "conditions"),
+            "egyptian" to listOf("egyptian", "egypt", "ancient"),
+            "nile" to listOf("nile", "river")
+        )
+
         val matchingWords = userWords.count { userWord ->
             correctWords.any { correctWord ->
+                // Direct match
                 userWord == correctWord ||
-                        (userWord.length > 4 && correctWord.startsWith(userWord)) ||
-                        (correctWord.length > 4 && userWord.startsWith(correctWord))
+                // Substring matching
+                (userWord.length > 3 && correctWord.contains(userWord)) ||
+                (correctWord.length > 3 && userWord.contains(correctWord)) ||
+                // Prefix matching
+                (userWord.length > 4 && correctWord.startsWith(userWord)) ||
+                (correctWord.length > 4 && userWord.startsWith(correctWord)) ||
+                // Semantic mapping check
+                semanticMappings[userWord]?.contains(correctWord) == true ||
+                semanticMappings[correctWord]?.contains(userWord) == true
             }
         }
 
+        // Also check for key concept coverage - if user mentions main concepts, accept it
+        val keyConceptsInUser = userWords.intersect(setOf("water", "food", "transport", "transportation", "trade", "farming"))
+        val keyConceptsInCorrect = correctWords.intersect(setOf("water", "food", "transport", "transportation", "trade", "farming"))
+        val conceptCoverage = if (keyConceptsInCorrect.isNotEmpty()) {
+            keyConceptsInUser.size.toFloat() / keyConceptsInCorrect.size
+        } else 0f
+
         val similarity = matchingWords.toFloat() / maxOf(userWords.size, correctWords.size)
-        return similarity >= 0.8f
+        
+        // Accept if either good word similarity OR good concept coverage
+        return similarity >= 0.6f || conceptCoverage >= 0.7f
     }
 
     /* ─────────────────────── Enhanced Question generation with retry ─────────────────────── */
@@ -726,14 +820,18 @@ class QuizGeneratorViewModel @Inject constructor(
                         lastError = Exception("Low quality question")
                     } else {
                         // Check similarity
-                        val isTooSimilar = previousQuestions.any { prev ->
-                            calculateEnhancedSimilarity(question.questionText.lowercase(), prev.lowercase()) > 0.7f
+                        val similarities = previousQuestions.map { prev ->
+                            prev to calculateEnhancedSimilarity(question.questionText.lowercase(), prev.lowercase())
                         }
+                        val maxSimilarity = similarities.maxOfOrNull { it.second } ?: 0f
+                        val isTooSimilar = maxSimilarity > 0.7f
 
                         if (!isTooSimilar) {
+                            Timber.d("Question accepted, max similarity: $maxSimilarity")
                             return@withContext question
                         } else {
-                            Timber.w("Question too similar, retrying with more variety...")
+                            val mostSimilar = similarities.maxByOrNull { it.second }
+                            Timber.w("Question too similar (${maxSimilarity}): '${question.questionText.take(50)}...' vs '${mostSimilar?.first?.take(50)}...'")
                             lastError = Exception("Question too similar")
                         }
                     }
@@ -2186,9 +2284,17 @@ class QuizGeneratorViewModel @Inject constructor(
         }
 
         // Combine and deduplicate
-        return (allRecentQuestions + topicQuestions)
+        val finalQuestions = (allRecentQuestions + topicQuestions)
             .distinct()
             .takeLast(50) // Keep more questions for better deduplication
+            
+        // Debug logging
+        Timber.d("Recent question deduplication: Found ${finalQuestions.size} recent questions for $subject/$topic")
+        finalQuestions.take(3).forEach { q ->
+            Timber.d("Recent question sample: ${q.take(50)}...")
+        }
+        
+        return finalQuestions
     }
 
     private fun isBalancedJson(json: String): Boolean {
