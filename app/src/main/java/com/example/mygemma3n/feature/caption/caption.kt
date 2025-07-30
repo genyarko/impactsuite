@@ -249,6 +249,7 @@ data class CaptionState(
     val latencyMs: Long = 0,
     val isModelReady: Boolean = false,
     val error: String? = null,
+    val isUsingOnlineService: Boolean = false,
 
     /* new diagnostics / buffers */
     val audioBuffer: MutableList<FloatArray> = mutableListOf(),

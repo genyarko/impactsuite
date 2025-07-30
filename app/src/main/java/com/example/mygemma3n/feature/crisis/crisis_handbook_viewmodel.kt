@@ -10,6 +10,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mygemma3n.R
 import com.example.mygemma3n.data.UnifiedGemmaService
+import com.example.mygemma3n.data.GeminiApiService
+import com.example.mygemma3n.data.GeminiApiConfig
+import com.example.mygemma3n.data.CapitalCities
+import com.example.mygemma3n.data.CapitalCity
+import com.example.mygemma3n.data.GooglePlacesService
+import com.example.mygemma3n.domain.repository.SettingsRepository
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import com.example.mygemma3n.remote.EmergencyDatabase
 import com.example.mygemma3n.remote.Hospital
 import com.example.mygemma3n.shared_utilities.CrisisFunctionCalling
@@ -21,6 +29,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -33,6 +42,9 @@ import javax.inject.Inject
 class CrisisHandbookViewModel @Inject constructor(
     @ApplicationContext private val appContext: Context,
     private val unifiedGemmaService: UnifiedGemmaService,
+    private val geminiApiService: GeminiApiService,
+    private val googlePlacesService: GooglePlacesService,
+    private val settingsRepository: SettingsRepository,
     private val functionCalling: CrisisFunctionCalling,
     private val offlineMapService: OfflineMapService,
     private val emergencyContacts: EmergencyContactsRepository
@@ -256,6 +268,46 @@ SPLINTING BASICS:
 
     private val _state = MutableStateFlow(CrisisHandbookState())
     val state: StateFlow<CrisisHandbookState> = _state.asStateFlow()
+    
+    /* ───────── service selection helpers ───────── */
+    private fun hasNetworkConnection(): Boolean {
+        val connectivityManager = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val activeNetwork = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+    }
+
+    private suspend fun shouldUseOnlineService(): Boolean {
+        return try {
+            val useOnlineService = settingsRepository.useOnlineServiceFlow.first()
+            val hasApiKey = settingsRepository.apiKeyFlow.first().isNotBlank()
+            val hasNetwork = hasNetworkConnection()
+            
+            useOnlineService && hasApiKey && hasNetwork
+        } catch (e: Exception) {
+            Timber.w(e, "Error checking service preference, defaulting to offline")
+            false
+        }
+    }
+
+    private suspend fun initializeApiServiceIfNeeded() {
+        if (!geminiApiService.isInitialized()) {
+            val apiKey = settingsRepository.apiKeyFlow.first()
+            if (apiKey.isNotBlank()) {
+                try {
+                    geminiApiService.initialize(GeminiApiConfig(apiKey = apiKey))
+                    Timber.d("GeminiApiService initialized for Crisis Handbook")
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to initialize GeminiApiService")
+                    throw e
+                }
+            } else {
+                throw IllegalStateException("API key not found")
+            }
+        }
+    }
 
     private suspend fun ensureModelInitialized(): Boolean {
         return try {
@@ -282,6 +334,9 @@ SPLINTING BASICS:
 
         viewModelScope.launch {
             try {
+                // Update service mode indicator
+                val usingOnline = shouldUseOnlineService()
+                
                 // Clear previous state and show processing
                 _state.update {
                     it.copy(
@@ -289,7 +344,8 @@ SPLINTING BASICS:
                         error = null,
                         response = null,
                         nearbyFacilities = emptyList(),
-                        mapState = it.mapState?.copy(facilities = emptyList(), route = null)
+                        mapState = it.mapState?.copy(facilities = emptyList(), route = null),
+                        isUsingOnlineService = usingOnline
                     )
                 }
 
@@ -319,8 +375,8 @@ SPLINTING BASICS:
                         handleFirstAidQuery(query)
                     }
                     else -> {
-                        // Try AI generation with aggressive timeout
-                        val response = generateEmergencyResponseWithFallback(query)
+                        // Try AI generation with service selection
+                        val response = generateEmergencyResponseWithService(query)
                         _state.update {
                             it.copy(
                                 response = response,
@@ -396,7 +452,12 @@ SPLINTING BASICS:
             return
         }
 
-        showNearestHospitalsDirectly()
+        // Use online or offline hospital search based on service availability
+        if (shouldUseOnlineService()) {
+            searchHospitalsOnline(location)
+        } else {
+            showNearestHospitalsDirectly()
+        }
     }
 
     private suspend fun handleContactQuery(query: String) {
@@ -436,9 +497,9 @@ SPLINTING BASICS:
             return
         }
 
-        // Try AI generation with very short timeout
+        // Try AI generation with service selection
         val response = withTimeoutOrNull(10_000) { // 10 second timeout
-            generateFirstAidResponseOptimized(query)
+            generateFirstAidResponseWithService(query)
         } ?: genericFallback
 
         _state.update {
@@ -449,6 +510,34 @@ SPLINTING BASICS:
         }
     }
 
+    private suspend fun generateFirstAidResponseWithService(query: String): String {
+        return if (shouldUseOnlineService()) {
+            try {
+                initializeApiServiceIfNeeded()
+                generateFirstAidResponseOnline(query)
+            } catch (e: Exception) {
+                Timber.w(e, "Online first aid response failed, falling back to offline")
+                generateFirstAidResponseOptimized(query)
+            }
+        } else {
+            generateFirstAidResponseOptimized(query)
+        }
+    }
+    
+    private suspend fun generateFirstAidResponseOnline(query: String): String {
+        val prompt = """You are a qualified first aid instructor. For this situation: "$query"
+        
+Provide step-by-step first aid instructions:
+        1. Assess the situation and ensure safety
+        2. Specific first aid steps
+        3. When to seek professional medical help
+        
+Be clear, accurate, and prioritize safety. If unsure, recommend calling emergency services."""
+
+        val response = geminiApiService.generateTextComplete(prompt)
+        return if (response.isBlank()) genericFallback else response
+    }
+    
     private suspend fun generateFirstAidResponseOptimized(query: String): String {
         try {
             // Ensure model is ready
@@ -486,6 +575,41 @@ $response
         } catch (e: Exception) {
             Timber.e(e, "Error generating first aid response")
             return genericFallback
+        }
+    }
+
+    private suspend fun generateEmergencyResponseWithService(query: String): String {
+        return if (shouldUseOnlineService()) {
+            try {
+                initializeApiServiceIfNeeded()
+                generateEmergencyResponseOnline(query)
+            } catch (e: Exception) {
+                Timber.w(e, "Online emergency response failed, falling back to offline")
+                generateEmergencyResponseWithFallback(query)
+            }
+        } else {
+            generateEmergencyResponseWithFallback(query)
+        }
+    }
+    
+    private suspend fun generateEmergencyResponseOnline(query: String): String {
+        return try {
+            withTimeoutOrNull(8_000) {
+                val prompt = """You are an emergency response assistant. For this emergency situation: "$query"
+                
+Provide a clear, actionable response with:
+                1. Immediate safety steps (if applicable)
+                2. When to call emergency services
+                3. Next actions to take
+                
+Keep response brief but comprehensive. Focus on safety."""
+
+                val response = geminiApiService.generateTextComplete(prompt)
+                if (response.isBlank()) noResponseFallback else response
+            } ?: timeoutFallback
+        } catch (e: Exception) {
+            Timber.e(e, "Error generating online emergency response")
+            throw e
         }
     }
 
@@ -618,6 +742,101 @@ $response
             }
         }
     }
+    
+    private suspend fun searchHospitalsOnline(location: Location) {
+        _state.update { it.copy(isProcessing = true, error = null) }
+        
+        try {
+            // Get API key for Google Places
+            val apiKey = settingsRepository.apiKeyFlow.first()
+            if (apiKey.isBlank()) {
+                Timber.w("No API key available for Places search, falling back to offline")
+                showNearestHospitalsDirectly()
+                return
+            }
+            
+            // Find nearest capital for context
+            val nearestCapital = CapitalCities.findNearestCapital(location.latitude, location.longitude)
+            val distanceToCapital = nearestCapital.distanceFrom(location.latitude, location.longitude)
+            
+            Timber.d("User location: ${location.latitude}, ${location.longitude}")
+            Timber.d("Nearest capital: ${nearestCapital.capital}, ${nearestCapital.country} (${distanceToCapital.toInt()}km away)")
+            
+            // Use Google Places API to find real hospitals
+            val searchRadius = if (distanceToCapital <= 50) 25000 else 50000 // 25km or 50km radius
+            
+            val placesResult = withTimeoutOrNull(8_000) {
+                googlePlacesService.searchNearbyHospitals(
+                    latitude = location.latitude,
+                    longitude = location.longitude,
+                    radiusMeters = searchRadius,
+                    apiKey = apiKey
+                )
+            }
+            
+            if (placesResult != null && placesResult.success && placesResult.hospitals.isNotEmpty()) {
+                // Success with Google Places API
+                val hospitals = placesResult.hospitals.take(15) // Limit to top 15
+                
+                showOnOfflineMap(hospitals)
+                _state.update {
+                    it.copy(
+                        nearbyFacilities = hospitals,
+                        response = "Found ${hospitals.size} medical facilities using live data (${searchRadius/1000}km search radius)\n\n" +
+                                "Nearest capital: ${nearestCapital.capital}, ${nearestCapital.country} (${distanceToCapital.toInt()}km away)\n\n" +
+                                "ℹ️ Results from Google Places - real-time hospital data",
+                        isProcessing = false
+                    )
+                }
+                
+                Timber.d("Successfully found ${hospitals.size} hospitals via Google Places API")
+                
+            } else if (placesResult != null && !placesResult.success) {
+                // Places API failed, try AI fallback for remote areas
+                Timber.w("Places API failed: ${placesResult.errorMessage}, trying AI guidance")
+                
+                if (distanceToCapital > 100) {
+                    // Use AI for remote area guidance
+                    val aiGuidance = withTimeoutOrNull(6_000) {
+                        geminiApiService.generateTextComplete(
+                            """The user is in a remote area ${distanceToCapital.toInt()}km from ${nearestCapital.capital}, ${nearestCapital.country}.
+                            
+Provide emergency medical guidance:
+                            1. How to find nearest medical facilities in rural ${nearestCapital.country}
+                            2. Emergency contact numbers for ${nearestCapital.country}
+                            3. When to seek evacuation to ${nearestCapital.capital}
+                            
+Keep response brief and practical."""
+                        )
+                    }
+                    
+                    if (aiGuidance != null && aiGuidance.isNotBlank()) {
+                        _state.update {
+                            it.copy(
+                                response = "Medical guidance for remote area near ${nearestCapital.country}:\n\n$aiGuidance",
+                                isProcessing = false
+                            )
+                        }
+                        return
+                    }
+                }
+                
+                // Final fallback to offline
+                showNearestHospitalsDirectly()
+                
+            } else {
+                // Timeout or no results
+                Timber.w("Places API search timed out or returned no results, falling back to offline")
+                showNearestHospitalsDirectly()
+            }
+            
+        } catch (e: Exception) {
+            Timber.e(e, "Online hospital search failed, falling back to offline")
+            showNearestHospitalsDirectly()
+        }
+    }
+    
+    // Removed parseCapitalHospitalResponse - now using real Google Places API data
 
     private fun showOnOfflineMap(facilities: List<Hospital>) {
         val markers = facilities.map { hospital ->
@@ -740,7 +959,22 @@ $response
                             appContext.startActivity(intent)
                             return@launch
                         }
-                        showNearestHospitalsDirectly()
+                        
+                        val location = getFreshLocation(appContext)
+                        if (location != null) {
+                            if (shouldUseOnlineService()) {
+                                searchHospitalsOnline(location)
+                            } else {
+                                showNearestHospitalsDirectly()
+                            }
+                        } else {
+                            _state.update {
+                                it.copy(
+                                    error = "Getting location... Please try again in a moment.",
+                                    isProcessing = false
+                                )
+                            }
+                        }
                     }
                 }
             ),
