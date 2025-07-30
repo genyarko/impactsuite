@@ -6,6 +6,11 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mygemma3n.data.UnifiedGemmaService
+import com.example.mygemma3n.data.GeminiApiService
+import com.example.mygemma3n.data.GeminiApiConfig
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import com.example.mygemma3n.domain.repository.SettingsRepository
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -18,6 +23,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.first
 import org.apache.poi.xwpf.usermodel.XWPFDocument
 import timber.log.Timber
 import java.io.*
@@ -27,7 +33,9 @@ import androidx.core.graphics.createBitmap
 @HiltViewModel
 class SummarizerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val gemmaService: UnifiedGemmaService
+    private val gemmaService: UnifiedGemmaService,
+    private val geminiApiService: GeminiApiService,
+    private val settingsRepository: SettingsRepository
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SummarizerState())
@@ -45,6 +53,75 @@ class SummarizerViewModel @Inject constructor(
 
     // Cache for model initialization
     private var isModelReady = false
+
+    /* ---------- Helper Methods ---------- */
+
+    private fun hasNetworkConnection(): Boolean {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val activeNetwork = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+    }
+
+    private suspend fun shouldUseOnlineService(): Boolean {
+        return try {
+            val useOnlineService = settingsRepository.useOnlineServiceFlow.first()
+            val hasApiKey = settingsRepository.apiKeyFlow.first().isNotBlank()
+            val hasNetwork = hasNetworkConnection()
+            
+            useOnlineService && hasApiKey && hasNetwork
+        } catch (e: Exception) {
+            Timber.w(e, "Error checking service preference, defaulting to offline")
+            false
+        }
+    }
+
+    private suspend fun initializeApiServiceIfNeeded() {
+        if (!geminiApiService.isInitialized()) {
+            val apiKey = settingsRepository.apiKeyFlow.first()
+            if (apiKey.isNotBlank()) {
+                try {
+                    geminiApiService.initialize(GeminiApiConfig(apiKey = apiKey))
+                    Timber.d("GeminiApiService initialized successfully")
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to initialize GeminiApiService")
+                    throw e
+                }
+            } else {
+                throw IllegalStateException("API key not found")
+            }
+        }
+    }
+
+    private suspend fun generateSummaryWithService(text: String): String {
+        return if (shouldUseOnlineService()) {
+            try {
+                initializeApiServiceIfNeeded()
+                geminiApiService.generateTextComplete(
+                    "Summarize the following text in a clear, concise manner. " +
+                    "Focus on the main points and key information:\n\n$text"
+                )
+            } catch (e: Exception) {
+                Timber.w(e, "Online service failed, falling back to offline")
+                generateSummaryOffline(text)
+            }
+        } else {
+            generateSummaryOffline(text)
+        }
+    }
+
+    private suspend fun generateSummaryOffline(text: String): String {
+        if (!isModelReady) {
+            gemmaService.initializeBestAvailable()
+            isModelReady = true
+        }
+        return gemmaService.generateTextAsync(
+            "Summarize the following text in a clear, concise manner. " +
+            "Focus on the main points and key information:\n\n$text"
+        )
+    }
 
     /* ---------- Public API ---------- */
 
@@ -104,9 +181,13 @@ class SummarizerViewModel @Inject constructor(
     }
 
     private suspend fun initializeModelIfNeeded() {
-        if (!gemmaService.isInitialized()) {
-            gemmaService.initializeBestAvailable()
-            isModelReady = true
+        if (shouldUseOnlineService()) {
+            initializeApiServiceIfNeeded()
+        } else {
+            if (!gemmaService.isInitialized()) {
+                gemmaService.initializeBestAvailable()
+                isModelReady = true
+            }
         }
     }
 
@@ -303,14 +384,7 @@ class SummarizerViewModel @Inject constructor(
 
         Timber.d("Direct summary prompt length: ${prompt.length} chars (~${prompt.length/4} tokens)")
 
-        return gemmaService.generateTextAsync(
-            prompt,
-            UnifiedGemmaService.GenerationConfig(
-                maxTokens = 100, // Conservative token count
-                temperature = 0.2f,
-                topK = 15
-            )
-        ).trim()
+        return generateSummaryWithService(prompt).trim()
     }
 
     private suspend fun generateAbstractiveSummary(extractedText: String): String {
@@ -328,13 +402,7 @@ class SummarizerViewModel @Inject constructor(
                 val prompt = "Key points in 2 sentences: $chunk"
                 Timber.d("Chunk prompt length: ${prompt.length} chars (~${prompt.length / 4} tokens)")
 
-                gemmaService.generateTextAsync(
-                    prompt,
-                    UnifiedGemmaService.GenerationConfig(
-                        maxTokens = 60,
-                        temperature = 0.2f
-                    )
-                ).trim()
+                generateSummaryWithService(prompt).trim()
             }
             chunkSummaries.add(summary)
         }
@@ -347,13 +415,7 @@ class SummarizerViewModel @Inject constructor(
         val finalPrompt = "Combine into 3-4 sentences: $finalText"
         Timber.d("Final prompt length: ${finalPrompt.length} chars (~${finalPrompt.length / 4} tokens)")
 
-        return gemmaService.generateTextAsync(
-            finalPrompt,
-            UnifiedGemmaService.GenerationConfig(
-                maxTokens = 80,
-                temperature = 0.3f
-            )
-        ).trim()
+        return generateSummaryWithService(finalPrompt).trim()
     }
 
 }

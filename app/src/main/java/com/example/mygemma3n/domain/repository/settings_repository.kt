@@ -8,6 +8,8 @@ import com.example.mygemma3n.models.EmbedderModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import com.example.mygemma3n.EMBEDDER_KEY
+import com.example.mygemma3n.GEMINI_API_KEY
+import com.example.mygemma3n.USE_ONLINE_SERVICE
 import com.example.mygemma3n.dataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -25,6 +27,22 @@ class SettingsRepository @Inject constructor(
             )
         }
 
+    val apiKeyFlow: Flow<String> = dataStore.data
+        .map { prefs ->
+            prefs[GEMINI_API_KEY] ?: ""
+        }
+
+    val useOnlineServiceFlow: Flow<Boolean> = dataStore.data
+        .map { prefs ->
+            prefs[USE_ONLINE_SERVICE] ?: true  // Default to online if network available
+        }
+
     suspend fun save(model: EmbedderModel) =
         dataStore.edit { it[EMBEDDER_KEY] = model.name }
+
+    suspend fun saveApiKey(apiKey: String) =
+        dataStore.edit { it[GEMINI_API_KEY] = apiKey }
+
+    suspend fun saveUseOnlineService(useOnline: Boolean) =
+        dataStore.edit { it[USE_ONLINE_SERVICE] = useOnline }
 }

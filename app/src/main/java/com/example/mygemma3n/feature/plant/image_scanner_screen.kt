@@ -287,7 +287,10 @@ private fun ResultsSection(
                 }
                 scanState.currentAnalysis != null -> {
                     val analysis = scanState.currentAnalysis
-                    AnalysisResultCard(analysis = analysis)
+                    AnalysisResultCard(
+                        analysis = analysis,
+                        isUsingOnlineService = scanState.isUsingOnlineService
+                    )
                 }
             }
         }
@@ -316,11 +319,33 @@ private fun ErrorCard(error: String) {
 }
 
 @Composable
-private fun AnalysisResultCard(analysis: GeneralAnalysis) {
+private fun AnalysisResultCard(
+    analysis: GeneralAnalysis,
+    isUsingOnlineService: Boolean = false
+) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // Service mode indicator
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 4.dp)
+        ) {
+            Icon(
+                imageVector = if (isUsingOnlineService) Icons.Default.Info else Icons.Default.Grass,
+                contentDescription = null,
+                tint = if (isUsingOnlineService) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = if (isUsingOnlineService) "Online Analysis" else "Offline Analysis",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        
         // Main result with confidence
         Card(
             colors = CardDefaults.cardColors(
