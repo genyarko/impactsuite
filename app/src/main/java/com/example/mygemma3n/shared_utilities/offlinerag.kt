@@ -29,7 +29,7 @@ class OfflineRAG @Inject constructor(
         private const val TOP_K = 5
     }
 
-    enum class Subject { MATHEMATICS, SCIENCE, HISTORY, LANGUAGE_ARTS, GEOGRAPHY, ENGLISH, GENERAL,ECONOMICS }
+    enum class Subject { MATHEMATICS, SCIENCE, HISTORY, LANGUAGE_ARTS, GEOGRAPHY, ENGLISH, GENERAL, ECONOMICS, COMPUTER_SCIENCE }
 
     data class Document(
         val id: String,

@@ -1,66 +1,114 @@
 {
   "PYP": {
     "Phase 1 (KG)": [
-      "Sense of place & personal histories",
-      "Family and cultural background",
-      "Basic spatial awareness (classroom ↔ home ↔ community)"
+      "Sense of place",
+      "Personal histories",
+      "Family background",
+      "Cultural background",
+      "Classroom spatial awareness",
+      "Home spatial awareness",
+      "Community spatial awareness"
     ],
     "Phase 2 (Grades 1–2)": [
-      "Earth’s resources & sustainability (reuse–reduce–recycle)",
-      "Local environments and caring for surroundings",
-      "Simple map symbols, directions and scales"
+      "Earth's natural resources",
+      "Sustainability concepts",
+      "Reuse practices",
+      "Reduce practices",
+      "Recycle practices",
+      "Local environments",
+      "Caring for surroundings",
+      "Map symbols",
+      "Directions and orientation",
+      "Map scales"
     ],
     "Phase 3 (Grades 3–4)": [
-      "Representing place (maps, globes, atlases)",
-      "Relationships between locations (distance, scale, region)",
-      "Global perspectives & recording the past"
+      "Maps",
+      "Globes",
+      "Atlases",
+      "Distance",
+      "Scale",
+      "Region",
+      "Global perspectives",
+      "Recording the past"
     ],
     "Phase 4 (Grades 5–6)": [
-      "Human diversity, migration & settlement",
-      "Rights, responsibilities & stewardship",
-      "Interdependence of economic / environmental systems",
+      "Human diversity",
+      "Migration",
+      "Settlement",
+      "Rights",
+      "Responsibilities",
+      "Stewardship",
+      "Economic‑systems interdependence",
+      "Environmental‑systems interdependence",
       "Sustainable resource use"
     ]
   },
-
   "MYP": {
-    "MYP 1 (Grade 6)": [
-      "What is Geography? (physical vs human)",
-      "Types of maps & projections",
-      "Latitude, longitude & orientation",
-      "Five themes of geography (location, place, HEI, movement, region)"
+    "MYP 1 (Grade 6)": [
+      "What is geography?",
+      "Physical geography vs. human geography",
+      "Types of maps",
+      "Map projections",
+      "Latitude and longitude",
+      "Cardinal directions & orientation",
+      "Five themes of Geography: location",
+      "Five themes of Geography: place",
+      "Five themes of Geography: human‑environment interaction",
+      "Five themes of Geography: movement",
+      "Five themes of Geography: region"
     ],
-    "MYP 2 (Grade 7)": [
-      "Natural & human environments",
-      "Climate systems and climate change",
-      "Biomes & ecosystems",
-      "Settlement patterns & urbanisation",
-      "Sustainability debates and environmental protection"
+    "MYP 2 (Grade 7)": [
+      "Natural environments",
+      "Human environments",
+      "Climate systems",
+      "Climate change",
+      "Biomes",
+      "Ecosystems",
+      "Settlement patterns",
+      "Urbanisation",
+      "Sustainability debates",
+      "Environmental protection"
     ],
-    "MYP 3 (Grade 8)": [
-      "Population dynamics & migration",
-      "Resource management (water, energy, food)",
-      "Globalisation & interdependence",
-      "Natural hazards & risk management",
-      "River and coastal processes"
+    "MYP 3 (Grade 8)": [
+      "Population dynamics",
+      "Migration",
+      "Water resource management",
+      "Energy resource management",
+      "Food resource management",
+      "Globalisation",
+      "Interdependence",
+      "Natural hazards",
+      "Risk management",
+      "River processes",
+      "Coastal processes"
     ],
-    "MYP 4–5 (Grades 9–10)": {
+    "MYP 4–5 (Grades 9–10)": {
       "Topics": [
-        "Changing population structure & policies",
-        "Urban systems & sustainable cities",
-        "Trade, aid & global flows",
-        "Natural‑resource use & scarcity",
-        "Tourism impacts & management",
-        "River/coastal landforms & hazards",
-        "Global climate‑change vulnerability & resilience",
-        "Disaster preparedness & response",
-        "Tectonic hazards & management strategies",
-        "Biome conservation & sustainable use",
+        "Changing population structure",
+        "Population policies",
+        "Urban systems",
+        "Sustainable cities",
+        "Trade flows",
+        "Aid flows",
+        "Global flows",
+        "Natural resource use",
+        "Resource scarcity",
+        "Tourism impacts",
+        "Tourism management",
+        "River landforms & processes",
+        "Coastal landforms & hazards",
+        "Climate‑change vulnerability",
+        "Climate‑change resilience",
+        "Disaster preparedness",
+        "Disaster response",
+        "Tectonic hazards",
+        "Hazard management strategies",
+        "Biome conservation",
+        "Biome sustainable use",
         "GIS applications in geographic inquiry"
       ]
     }
   },
-
   "DP": {
     "Core": [
       "Population distribution – changing population",

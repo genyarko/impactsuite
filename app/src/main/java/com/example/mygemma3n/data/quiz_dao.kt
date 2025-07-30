@@ -18,8 +18,14 @@ interface QuizDao {
     @Update
     suspend fun updateQuiz(entity: QuizEntity)
 
+    // wipe the table ⤵
+    @Query("DELETE FROM quizzes")
+    suspend fun deleteAll()
+
     @Query("SELECT * FROM quizzes ORDER BY createdAt DESC")
     fun getAll(): Flow<List<QuizEntity>>
+
+
 
     @Query(
         """
@@ -69,6 +75,8 @@ interface QuizDao {
 
     @Dao
     interface QuestionSessionDao {
+        @Query("DELETE FROM question_sessions")
+        suspend fun deleteAll()
 
         @Insert(onConflict = OnConflictStrategy.REPLACE)
         suspend fun insertSession(session: QuestionSession)

@@ -287,7 +287,9 @@ class UnifiedGemmaService @Inject constructor(
 
     suspend fun getAvailableModels(): List<ModelVariant> = withContext(Dispatchers.IO) {
         ModelVariant.entries.filter { variant ->
-            resolveAssetName(variant) != null || File(getCachedModelPath(variant)).exists()
+            resolveAssetName(variant) != null || 
+            File(getCachedModelPath(variant)).exists() ||
+            File(getDownloadedModelPath(variant)).exists()
         }.also {
             Timber.d("Available models: ${it.map(ModelVariant::displayName)}")
         }
@@ -341,18 +343,31 @@ class UnifiedGemmaService @Inject constructor(
     /* --------------------------------------------------------------------- */
 
     private suspend fun resolveModelBundle(variant: ModelVariant): String = withContext(Dispatchers.IO) {
+        // 1. Check if already cached (from previous assets copy)
         val cached = File(getCachedModelPath(variant))
         if (cached.exists()) return@withContext cached.absolutePath
 
+        // 2. Check assets directory first 
         val assetName = resolveAssetName(variant)
-            ?: throw IllegalStateException("${variant.displayName} not packaged in assets/models")
-
-        cached.parentFile?.mkdirs()
-        context.assets.open("models/$assetName").use { input ->
-            cached.outputStream().use { output -> input.copyTo(output) }
+        if (assetName != null) {
+            // Copy from assets to cache for performance
+            cached.parentFile?.mkdirs()
+            context.assets.open("models/$assetName").use { input ->
+                cached.outputStream().use { output -> input.copyTo(output) }
+            }
+            Timber.i("Copied $assetName from assets → ${cached.absolutePath}")
+            return@withContext cached.absolutePath
         }
-        Timber.i("Copied $assetName → ${cached.absolutePath}")
-        return@withContext cached.absolutePath
+
+        // 3. Check downloaded models directory (if not in assets)
+        val downloaded = File(getDownloadedModelPath(variant))
+        if (downloaded.exists()) {
+            Timber.i("Using downloaded model: ${downloaded.absolutePath}")
+            return@withContext downloaded.absolutePath
+        }
+
+        // 4. Model not found anywhere - should trigger download
+        throw IllegalStateException("${variant.displayName} not found in assets or downloads - download required")
     }
 
     /** Locate the file in assets/models, case‑insensitive. */
@@ -361,6 +376,9 @@ class UnifiedGemmaService @Inject constructor(
 
     private fun getCachedModelPath(variant: ModelVariant): String =
         File(context.cacheDir, "models/${variant.fileName}").absolutePath
+
+    private fun getDownloadedModelPath(variant: ModelVariant): String =
+        File(context.filesDir, "models/${variant.fileName}").absolutePath
 
     companion object {
         // Remember to keep these extensions uncompressed in build.gradle:

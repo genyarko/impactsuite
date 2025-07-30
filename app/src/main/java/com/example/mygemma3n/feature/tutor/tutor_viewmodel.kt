@@ -1381,35 +1381,64 @@ private fun ensureCompleteResponse(response: String, grade: Int): String {
         """.trimIndent()
     }
 
-    private fun loadCurriculumForSubject(context: Context, subject: OfflineRAG.Subject): List<String> {
+    private suspend fun loadCurriculumForSubject(context: Context, subject: OfflineRAG.Subject): List<String> {
         return try {
             Timber.d("Loading curriculum for subject: ${subject.name}")
             
-            // Load from assets or cached curriculum
+            // Try to load from curriculum cache (which uses the actual JSON files)
+            try {
+                val curriculumTopics = curriculumCache.getCurriculumTopics(context, subject)
+                if (curriculumTopics.isNotEmpty()) {
+                    val topicTitles = curriculumTopics.map { it.title }
+                    Timber.d("Loaded ${topicTitles.size} topics from curriculum cache for ${subject.name}: ${topicTitles.joinToString(", ")}")
+                    return topicTitles
+                }
+            } catch (e: Exception) {
+                Timber.w(e, "Failed to load from curriculum cache, using fallback")
+            }
+            
+            // Fallback to Grade 6/MYP 1 curriculum-aligned topics if curriculum cache fails
             val defaultTopics = when (subject) {
                 OfflineRAG.Subject.MATHEMATICS -> listOf(
-                    "Addition and Subtraction", "Multiplication and Division", "Fractions", 
-                    "Decimals", "Geometry", "Algebra", "Statistics"
+                    "Number systems", "Estimation", "Algebraic patterns", "Equations", 
+                    "Geometry", "Angles", "Fractions, percentages", "Proportions", 
+                    "Data management", "Time-series graphs"
                 )
                 OfflineRAG.Subject.SCIENCE -> listOf(
-                    "Life Science", "Physical Science", "Earth Science", "Chemistry", 
-                    "Physics", "Biology", "Environmental Science"
+                    "Intro to science", "Safety", "Scientific equipment", "Variables", 
+                    "States of matter", "Mixtures", "Forces", "Motion basics", 
+                    "Scientific investigations", "Solar system", "Moon phases", "Cells", 
+                    "Microscopes", "Plant reproduction", "Human reproduction"
                 )
                 OfflineRAG.Subject.ENGLISH -> listOf(
-                    "Reading Comprehension", "Grammar", "Writing", "Literature", 
-                    "Poetry", "Essays", "Vocabulary"
+                    "Exploring challenges (personal narratives)", "Impactful changes (research)", 
+                    "How laws shape lives (persuasive writing)", "Myths & legends (analysis)", 
+                    "Advertisements (persuasion techniques)"
                 )
                 OfflineRAG.Subject.HISTORY -> listOf(
-                    "Ancient History", "World History", "American History", "European History",
-                    "Modern History", "Cultural Studies", "Government"
+                    "Early humans", "Early prehistory", "Mesopotamia", "Early governance systems",
+                    "Ancient Egypt", "The Nile's influence", "Ancient India", "Foundations of Hinduism",
+                    "Ancient China", "Origins of Confucianism", "Ancient Greece", "Birth of democracy",
+                    "Roman Republic", "Roman Empire", "Rise of Christianity", "Expansion of Islam"
                 )
                 OfflineRAG.Subject.GEOGRAPHY -> listOf(
-                    "Physical Geography", "Human Geography", "World Regions", "Climate",
-                    "Natural Resources", "Maps and Navigation", "Cultural Geography"
+                    "What is geography?", "Physical vs human geography", "Types of maps", 
+                    "Map projections", "Latitude and longitude", "Cardinal directions", 
+                    "Five themes: location", "Five themes: place", "Five themes: human-environment interaction", 
+                    "Five themes: movement", "Five themes: region"
                 )
                 OfflineRAG.Subject.ECONOMICS -> listOf(
-                    "Basic Economics", "Supply and Demand", "Markets", "Money and Banking",
-                    "International Trade", "Government Economics", "Personal Finance"
+                    "What is economics?", "Scarcity", "Choice", "Opportunity cost", 
+                    "Factors of production", "Basic economic questions", "Demand and Supply",
+                    "Market systems", "Resource allocation", "Budgeting basics"
+                )
+                OfflineRAG.Subject.COMPUTER_SCIENCE -> listOf(
+                    "Apply the design cycle to identify and plan digital solutions",
+                    "Develop algorithms with flowcharts and pseudocode",
+                    "Program simple interactive stories or games in Scratch or Python",
+                    "Explore basic robotics with LEGO or micro:bit",
+                    "Discuss data representation (binary, pixels, bits)",
+                    "Demonstrate responsible use of online tools"
                 )
                 else -> listOf("General Topics", "Basic Concepts", "Advanced Topics")
             }

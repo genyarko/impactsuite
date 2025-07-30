@@ -1234,6 +1234,14 @@ private fun getSubjectCards() = listOf(
         icon = Icons.AutoMirrored.Filled.TrendingUp,
         color = Color(0xFF795548),
         defaultSessionType = TutorSessionType.CONCEPT_EXPLANATION
+    ),
+    SubjectCard(
+        subject = OfflineRAG.Subject.COMPUTER_SCIENCE,
+        displayName = "Computer Science",
+        description = "Programming, Algorithms, Data Structures, Web Development",
+        icon = Icons.Default.Computer,
+        color = Color(0xFF607D8B),
+        defaultSessionType = TutorSessionType.PRACTICE_PROBLEMS
     )
 )
 
@@ -1274,6 +1282,12 @@ private fun getSampleTopics(subject: OfflineRAG.Subject): List<String> {
             "Market structures",
             "Government policies",
             "International trade"
+        )
+        OfflineRAG.Subject.COMPUTER_SCIENCE -> listOf(
+            "Programming fundamentals",
+            "Data structures and algorithms",
+            "Web development basics",
+            "Database design"
         )
         else -> listOf("General topics", "Basic concepts", "Fundamentals")
     }

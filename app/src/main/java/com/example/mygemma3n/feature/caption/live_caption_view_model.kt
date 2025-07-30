@@ -10,6 +10,7 @@ import com.example.mygemma3n.feature.chat.ChatMessage
 import com.example.mygemma3n.service.AudioCaptureService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -162,7 +163,7 @@ class LiveCaptionViewModel @Inject constructor(
 
     private fun initialiseEngines() = viewModelScope.launch {
         try {
-            // Speech key from DataStore
+            // Speech key from DataStore - retry if not initialized
             if (!speechService.isInitialized) {
                 val key = getApplication<Application>().dataStore.data
                     .map { it[SPEECH_API_KEY] ?: "" }
@@ -171,7 +172,28 @@ class LiveCaptionViewModel @Inject constructor(
                     _state.update { it.copy(error = "Please enter your Speech API key in Settings") }
                     return@launch
                 }
-                speechService.initializeWithApiKey(key)
+                
+                // Retry speech service initialization up to 3 times
+                var retries = 3
+                var lastException: Exception? = null
+                while (retries > 0 && !speechService.isInitialized) {
+                    try {
+                        speechService.initializeWithApiKey(key)
+                        break
+                    } catch (e: Exception) {
+                        lastException = e
+                        retries--
+                        if (retries > 0) {
+                            Timber.w(e, "Speech service init failed, retrying... ($retries attempts left)")
+                            delay(1000) // Wait 1 second before retry
+                        }
+                    }
+                }
+                
+                if (!speechService.isInitialized) {
+                    _state.update { it.copy(error = "Speech service initialization failed: ${lastException?.message}") }
+                    return@launch
+                }
             }
 
             // Gemma for translation

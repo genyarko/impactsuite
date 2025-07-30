@@ -133,6 +133,18 @@
 -keep class android.arch.** { *; }
 -keep class android.lifecycle.** { *; }
 
-
+# MediaPipe optimizations
 -keep class com.google.mediapipe.** { *; }
 -dontwarn com.google.mediapipe.**
+
+# Remove unused Google Play Services
+-dontwarn com.google.android.gms.mlkit.**
+-dontwarn com.google.mlkit.vision.segmentation.**
+
+# PDF processing handled by Android native PdfRenderer + ML Kit
+# DOCX processing uses Apache POI
+-dontwarn org.apache.poi.**
+
+# Network optimization
+-dontwarn okhttp3.internal.**
+-dontwarn retrofit2.Platform$Java8

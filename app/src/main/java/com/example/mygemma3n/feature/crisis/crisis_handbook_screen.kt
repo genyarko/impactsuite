@@ -34,6 +34,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
@@ -47,6 +49,7 @@ import timber.log.Timber
 import com.google.android.gms.location.Priority
 import androidx.core.net.toUri
 import com.google.android.gms.tasks.CancellationTokenSource
+import com.example.mygemma3n.util.GoogleServicesUtil
 
 
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
@@ -85,26 +88,27 @@ fun CrisisHandbookScreen(
         isVoiceInputActive = false
     }
 
-    // Get user location on launch
+    // Get user location on launch (only if Google Services available)
     LaunchedEffect(locationPermission.status) {
-        if (locationPermission.status.isGranted) {
-            val fusedLocationClient =
-                LocationServices.getFusedLocationProviderClient(context)
+        if (locationPermission.status.isGranted && GoogleServicesUtil.isGooglePlayServicesAvailable(context)) {
+            GoogleServicesUtil.withGoogleServicesSuspend(
+                context = context,
+                block = {
+                    val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
+                    @SuppressLint("MissingPermission")   // we *did* check
+                    val loc = fusedLocationClient.getCurrentLocation(
+                        Priority.PRIORITY_HIGH_ACCURACY, null
+                    ).await()
 
-            try {
-                @SuppressLint("MissingPermission")   // we *did* check
-                val loc = fusedLocationClient.getCurrentLocation(
-                    Priority.PRIORITY_HIGH_ACCURACY, null
-                ).await()
-
-
-                loc?.let {
-                    userLocation = it
-                    viewModel.updateUserLocation(it)
-                } ?: Timber.w("No location available – using defaults")
-            } catch (se: SecurityException) {
-                Timber.e(se, "Location permission was revoked at runtime")
-            }
+                    loc?.let {
+                        userLocation = it
+                        viewModel.updateUserLocation(it)
+                    } ?: Timber.w("No location available – using defaults")
+                },
+                onUnavailable = {
+                    Timber.w("Location services unavailable - Google Services not available")
+                }
+            )
         }
     }
 
@@ -173,7 +177,20 @@ fun CrisisHandbookScreen(
                         onContactClick = { contact ->
                             selectedContact = contact
                         },
-                        onShowMap = { showMap = true },
+                        onShowMap = { 
+                            if (GoogleServicesUtil.isGooglePlayServicesAvailable(context)) {
+                                showMap = true
+                            } else {
+                                // Show snackbar informing user that Maps requires Google Services
+                                // Use rememberCoroutineScope for composable context
+                                scope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        message = "Map feature requires Google Services (not available on this device)",
+                                        duration = SnackbarDuration.Short
+                                    )
+                                }
+                            }
+                        },
                         onRequestLocationPermission = {
                             locationPermission.launchPermissionRequest()
                         },
@@ -229,20 +246,28 @@ fun CrisisHandbookScreen(
 }
 
 suspend fun getFreshLocation(context: Context): Location? {
-    val client = LocationServices.getFusedLocationProviderClient(context)
+    return GoogleServicesUtil.withGoogleServicesSuspend(
+        context = context,
+        block = {
+            val client = LocationServices.getFusedLocationProviderClient(context)
 
-    @SuppressLint("MissingPermission")
-    val loc = client.getCurrentLocation(
-        Priority.PRIORITY_HIGH_ACCURACY,
-        CancellationTokenSource().token
-    ).await()
+            @SuppressLint("MissingPermission")
+            val loc = client.getCurrentLocation(
+                Priority.PRIORITY_HIGH_ACCURACY,
+                CancellationTokenSource().token
+            ).await()
 
-    val now = System.currentTimeMillis()          // ← add this line
+            val now = System.currentTimeMillis()
 
-    return loc?.takeIf {
-        it.accuracy <= 100 &&          // ≤ 100 m
+            loc?.takeIf {
+                it.accuracy <= 100 &&          // ≤ 100 m
                 now - it.time <= 30_000        // ≤ 30 s old
-    }
+            }
+        },
+        onUnavailable = {
+            Timber.w("Cannot get fresh location - Google Services not available")
+        }
+    )
 }
 
 
