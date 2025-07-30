@@ -9,6 +9,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import kotlinx.coroutines.delay
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -29,6 +30,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.foundation.clickable
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +49,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.view.WindowManager
+import com.example.mygemma3n.feature.quiz.trivia.QuizTrivia
 typealias QuizGeneratorViewModelState = QuizGeneratorViewModel.QuizState
 
 
@@ -61,6 +64,7 @@ fun QuizScreen(
     var showStudentDialog by remember { mutableStateOf(true) }
     var studentName by remember { mutableStateOf("") }
     var studentGrade by remember { mutableIntStateOf(5) }
+    var studentCountry by remember { mutableStateOf("") }
     
     val context = LocalContext.current
     
@@ -152,7 +156,8 @@ fun QuizScreen(
 
                 state.isGenerating -> GenerationProgress(
                     done = state.questionsGenerated,
-                    mode = state.mode
+                    mode = state.mode,
+                    studentGrade = state.studentGrade
                 )
 
                 else -> state.currentQuiz?.let { quiz ->
@@ -208,6 +213,60 @@ fun QuizScreen(
 
                             Spacer(modifier = Modifier.height(16.dp))
 
+                            // Country Selection
+                            var expandedCountry by remember { mutableStateOf(false) }
+                            val countries = listOf(
+                                "United States", "Canada", "United Kingdom", "Australia", 
+                                "New Zealand", "South Africa", "India", "Singapore", 
+                                "Hong Kong", "United Arab Emirates", "Qatar", "Kuwait",
+                                "Saudi Arabia", "Egypt", "Kenya", "Nigeria", "Ghana",
+                                "Germany", "France", "Spain", "Italy", "Netherlands",
+                                "Sweden", "Norway", "Denmark", "Finland", "Japan",
+                                "South Korea", "China", "Thailand", "Malaysia", "Philippines",
+                                "Indonesia", "Vietnam", "Brazil", "Mexico", "Argentina",
+                                "Chile", "Colombia", "Peru", "Other"
+                            )
+                            
+                            ExposedDropdownMenuBox(
+                                expanded = expandedCountry,
+                                onExpandedChange = { expandedCountry = !expandedCountry }
+                            ) {
+                                OutlinedTextField(
+                                    value = studentCountry,
+                                    onValueChange = { },
+                                    readOnly = true,
+                                    label = { Text("Country/Region") },
+                                    placeholder = { Text("Select your country") },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Public, contentDescription = null)
+                                    },
+                                    trailingIcon = {
+                                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedCountry)
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .menuAnchor(),
+                                    singleLine = true
+                                )
+                                
+                                ExposedDropdownMenu(
+                                    expanded = expandedCountry,
+                                    onDismissRequest = { expandedCountry = false }
+                                ) {
+                                    countries.forEach { country ->
+                                        DropdownMenuItem(
+                                            text = { Text(country) },
+                                            onClick = {
+                                                studentCountry = country
+                                                expandedCountry = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
                             Text(
                                 "Grade Level: $studentGrade",
                                 style = MaterialTheme.typography.bodyMedium,
@@ -237,7 +296,7 @@ fun QuizScreen(
                         Button(
                             onClick = {
                                 if (studentName.isNotBlank()) {
-                                    viewModel.initializeQuizWithStudent(studentName, studentGrade)
+                                    viewModel.initializeQuizWithStudent(studentName, studentGrade, studentCountry)
                                     showStudentDialog = false
                                 }
                             },
@@ -1015,7 +1074,7 @@ fun EnhancedAnswerSection(
                         isWrong = question.isAnswered && opt == question.userAnswer && opt != question.correctAnswer,
                         enabled = !question.isAnswered,
                         onClick = { onAnswerChange(opt) },
-                        prefix = "${('A'..'D').toList()[idx]}. "
+                        prefix = "${('A'..'Z').toList().getOrElse(idx) { 'A' + idx }}. "
                     )
                     if (idx < validOptions.size - 1) {
                         Spacer(Modifier.height(8.dp))
@@ -1206,6 +1265,7 @@ private fun GenerationProgress(
     done: Int,
     total: Int = 10,
     mode: QuizMode,
+    studentGrade: Int? = null,
     modifier: Modifier = Modifier
 ) {
     val state by (hiltViewModel<QuizGeneratorViewModel>()).state.collectAsStateWithLifecycle()
@@ -1398,6 +1458,316 @@ private fun GenerationProgress(
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onPrimary
                         )
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(32.dp))
+
+        // Trivia section while waiting
+        TriviaWhileWaiting(studentGrade = studentGrade)
+    }
+}
+
+/* Trivia component to entertain users during quiz generation */
+@Composable
+private fun TriviaWhileWaiting(
+    studentGrade: Int?,
+    modifier: Modifier = Modifier
+) {
+    var currentTriviaQuestion by remember { mutableStateOf<Question?>(null) }
+    var showAnswer by remember { mutableStateOf(false) }
+    var userAnswer by remember { mutableStateOf<String?>(null) }
+
+    // Get a new trivia question periodically or on first load
+    LaunchedEffect(Unit) {
+        currentTriviaQuestion = QuizTrivia.getGradeAppropriateTriviaQuestions(studentGrade, 1).firstOrNull()
+    }
+
+    // Auto-refresh trivia question every 15 seconds
+    LaunchedEffect(currentTriviaQuestion) {
+        while (true) {
+            delay(15000) // 15 seconds
+            currentTriviaQuestion = QuizTrivia.getGradeAppropriateTriviaQuestions(studentGrade, 1).firstOrNull()
+            showAnswer = false
+            userAnswer = null
+        }
+    }
+
+    currentTriviaQuestion?.let { question ->
+        Card(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer
+            ),
+            elevation = CardDefaults.cardElevation(8.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Header
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Quiz,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "While you wait... Trivia Time! 🎲",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    
+                    // Show question pool info
+                    val availableCount = QuizTrivia.getAvailableQuestionCount(studentGrade)
+                    val gradeText = when {
+                        studentGrade == null -> "All questions available"
+                        studentGrade == 0 -> "Kindergarten questions"
+                        else -> "K-${studentGrade} questions available"
+                    }
+                    
+                    Text(
+                        "$gradeText • $availableCount total",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                    )
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                // Question
+                Text(
+                    text = question.questionText,
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(16.dp))
+
+                // Answer options based on question type
+                when (question.questionType) {
+                    QuestionType.MULTIPLE_CHOICE -> {
+                        question.options.forEach { option ->
+                            val isSelected = userAnswer == option
+                            val isCorrect = showAnswer && option == question.correctAnswer
+                            val isWrong = showAnswer && isSelected && option != question.correctAnswer
+
+                            ElevatedButton(
+                                onClick = {
+                                    if (!showAnswer) {
+                                        userAnswer = option
+                                        showAnswer = true
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 2.dp),
+                                colors = ButtonDefaults.elevatedButtonColors(
+                                    containerColor = when {
+                                        isCorrect -> MaterialTheme.colorScheme.primary
+                                        isWrong -> MaterialTheme.colorScheme.error
+                                        isSelected -> MaterialTheme.colorScheme.primaryContainer
+                                        else -> MaterialTheme.colorScheme.surface
+                                    }
+                                ),
+                                enabled = !showAnswer
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.Start,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (isCorrect) {
+                                        Icon(
+                                            Icons.Default.CheckCircle,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                    } else if (isWrong) {
+                                        Icon(
+                                            Icons.Default.Cancel,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                    }
+                                    Text(option)
+                                }
+                            }
+                        }
+                    }
+
+                    QuestionType.TRUE_FALSE -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            listOf("True", "False").forEach { option ->
+                                val isSelected = userAnswer == option
+                                val isCorrect = showAnswer && option == question.correctAnswer
+                                val isWrong = showAnswer && isSelected && option != question.correctAnswer
+
+                                ElevatedButton(
+                                    onClick = {
+                                        if (!showAnswer) {
+                                            userAnswer = option
+                                            showAnswer = true
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.elevatedButtonColors(
+                                        containerColor = when {
+                                            isCorrect -> MaterialTheme.colorScheme.primary
+                                            isWrong -> MaterialTheme.colorScheme.error
+                                            isSelected -> MaterialTheme.colorScheme.primaryContainer
+                                            else -> MaterialTheme.colorScheme.surface
+                                        }
+                                    ),
+                                    enabled = !showAnswer
+                                ) {
+                                    if (isCorrect) {
+                                        Icon(Icons.Default.Check, null, Modifier.size(16.dp))
+                                    } else if (isWrong) {
+                                        Icon(Icons.Default.Close, null, Modifier.size(16.dp))
+                                    } else {
+                                        Icon(
+                                            if (option == "True") Icons.Default.Check else Icons.Default.Close,
+                                            null,
+                                            Modifier.size(16.dp)
+                                        )
+                                    }
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(option)
+                                }
+                            }
+                        }
+                    }
+
+                    QuestionType.FILL_IN_BLANK -> {
+                        var textInput by remember { mutableStateOf("") }
+
+                        OutlinedTextField(
+                            value = textInput,
+                            onValueChange = { textInput = it },
+                            label = { Text("Your answer") },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !showAnswer,
+                            singleLine = true
+                        )
+
+                        Spacer(Modifier.height(8.dp))
+
+                        if (!showAnswer) {
+                            Button(
+                                onClick = {
+                                    userAnswer = textInput
+                                    showAnswer = true
+                                },
+                                enabled = textInput.isNotBlank()
+                            ) {
+                                Text("Submit")
+                            }
+                        }
+                    }
+
+                    else -> {
+                        // For other question types, just show the answer after a delay
+                        LaunchedEffect(question.id) {
+                            delay(3000)
+                            showAnswer = true
+                        }
+                    }
+                }
+
+                // Show explanation when answer is revealed
+                AnimatedVisibility(
+                    visible = showAnswer,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    Column {
+                        Spacer(Modifier.height(12.dp))
+                        
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                            )
+                        ) {
+                            Column(Modifier.padding(12.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.Lightbulb,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.onTertiaryContainer
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        "Answer: ${question.correctAnswer}",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                                    )
+                                }
+                                
+                                if (question.explanation.isNotBlank()) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = question.explanation,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Fun fact or encouraging message
+                if (showAnswer) {
+                    Spacer(Modifier.height(12.dp))
+                    
+                    Text(
+                        text = QuizTrivia.getRandomFunFact(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                // Next question button
+                if (showAnswer) {
+                    Spacer(Modifier.height(16.dp))
+                    
+                    OutlinedButton(
+                        onClick = {
+                            currentTriviaQuestion = QuizTrivia.getGradeAppropriateTriviaQuestions(studentGrade, 1).firstOrNull()
+                            showAnswer = false
+                            userAnswer = null
+                        }
+                    ) {
+                        Icon(Icons.Default.Refresh, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("New Question")
                     }
                 }
             }

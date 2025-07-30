@@ -16,8 +16,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Chat
@@ -69,6 +72,7 @@ import com.example.mygemma3n.data.UnifiedGemmaService
 import com.example.mygemma3n.data.validateKey
 import com.example.mygemma3n.di.SpeechRecognitionServiceEntryPoint
 import com.example.mygemma3n.feature.caption.SpeechRecognitionService
+import com.example.mygemma3n.SPEECH_API_KEY
 import com.example.mygemma3n.feature.cbt.CBTCoachScreen
 import com.example.mygemma3n.feature.chat.ChatScreen
 import com.example.mygemma3n.feature.crisis.CrisisHandbookScreen
@@ -91,6 +95,8 @@ import com.example.mygemma3n.feature.tutor.TutorScreen
 import com.example.mygemma3n.feature.analytics.AnalyticsDashboardScreen
 import com.example.mygemma3n.ui.components.InitializationScreen
 import com.example.mygemma3n.ui.settings.QuizSettingsScreen
+import com.example.mygemma3n.service.ModelDownloadService
+import com.example.mygemma3n.util.GoogleServicesUtil
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 
@@ -102,7 +108,24 @@ val MAPS_API_KEY   = stringPreferencesKey("google_maps_api_key")
 class MainActivity : ComponentActivity() {
 
     @Inject lateinit var geminiApiService: GeminiApiService
-    @Inject lateinit var unifiedGemmaService: UnifiedGemmaService  // Add this
+    @Inject lateinit var unifiedGemmaService: UnifiedGemmaService
+    @Inject lateinit var modelDownloadService: ModelDownloadService
+    @Inject lateinit var speechRecognitionService: SpeechRecognitionService
+
+    // Function to manually re-initialize speech service if needed
+    fun reinitializeSpeechService() {
+        lifecycleScope.launch {
+            try {
+                val speechKey = dataStore.data.map { it[SPEECH_API_KEY].orEmpty() }.first()
+                if (speechKey.isNotBlank()) {
+                    speechRecognitionService.initializeWithApiKey(speechKey)
+                    Timber.d("Speech service re-initialized successfully")
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to re-initialize speech service")
+            }
+        }
+    }
 
     // Initialization state that can be observed by Compose
     companion object {
@@ -137,32 +160,60 @@ class MainActivity : ComponentActivity() {
 
     private suspend fun initializeApp() {
         try {
-            // Step 1: Check model files
-            updateInitState("Checking model files...", 0.1f)
-            delay(500) // Small delay for UI
+            // Step 1: Check and download model files if needed
+            updateInitState("Checking AI models...", 0.1f)
+            
+            val modelsReady = checkAndEnsureModelsAvailable()
+            if (!modelsReady) {
+                throw IllegalStateException("Failed to prepare AI models")
+            }
 
-            // Step 2: Initialize Gemini API if key exists
-            updateInitState("Setting up online features...", 0.3f)
+            // Step 2: Initialize Gemini API and Speech Service if keys exist and Google Services available
+            updateInitState("Setting up online features...", 0.5f)
             val apiKeyDeferred = lifecycleScope.async {
-                val key = dataStore.data.map { it[API_KEY].orEmpty() }.first()
-                if (key.isNotBlank()) {
-                    runCatching {
-                        geminiApiService.initialize(GeminiApiConfig(apiKey = key))
-                        Timber.d("Gemini API initialized")
-                    }.onFailure {
-                        Timber.e(it, "Gemini API initialization failed")
-                    }
+                val geminiKey = dataStore.data.map { it[API_KEY].orEmpty() }.first()
+                val speechKey = dataStore.data.map { it[SPEECH_API_KEY].orEmpty() }.first()
+                
+                if (geminiKey.isNotBlank()) {
+                    GoogleServicesUtil.withGoogleServicesSuspend(
+                        context = this@MainActivity,
+                        block = {
+                            geminiApiService.initialize(GeminiApiConfig(apiKey = geminiKey))
+                            Timber.d("Gemini API initialized")
+                        },
+                        onUnavailable = {
+                            Timber.w("Skipping Gemini API initialization - Google Services not available")
+                        }
+                    )
+                }
+                
+                if (speechKey.isNotBlank() && !speechRecognitionService.isInitialized) {
+                    GoogleServicesUtil.withGoogleServicesSuspend(
+                        context = this@MainActivity,
+                        block = {
+                            try {
+                                speechRecognitionService.initializeWithApiKey(speechKey)
+                                Timber.d("Speech Recognition Service initialized automatically")
+                            } catch (e: Exception) {
+                                Timber.e(e, "Failed to initialize Speech Recognition Service: ${e.message}")
+                                // Don't throw - continue initialization
+                            }
+                        },
+                        onUnavailable = {
+                            Timber.w("Skipping Speech Recognition Service initialization - Google Services not available")
+                        }
+                    )
                 }
             }
 
             // Step 3: Initialize Gemma model
-            updateInitState("Loading AI model...", 0.5f)
+            updateInitState("Loading AI model...", 0.7f)
             val gemmaDeferred = lifecycleScope.async {
                 initializeGemmaModel()
             }
 
             // Step 4: Wait for both to complete
-            updateInitState("Finalizing setup...", 0.8f)
+            updateInitState("Finalizing setup...", 0.9f)
             apiKeyDeferred.await()
             gemmaDeferred.await()
 
@@ -179,11 +230,95 @@ class MainActivity : ComponentActivity() {
 
         } catch (e: Exception) {
             Timber.e(e, "App initialization failed")
+            // Instead of failing completely, mark as initialized with partial functionality
             initializationState.value = InitializationState(
                 isInitializing = false,
-                error = "Initialization failed: ${e.message}",
-                status = "Error"
+                status = "Initialized with limited features",
+                progress = 1.0f,
+                error = null // Don't show error - app is still functional
             )
+        }
+    }
+
+    private suspend fun checkAndEnsureModelsAvailable(): Boolean {
+        return try {
+            // First check if embedding model is in assets (required)
+            val assetsModelsReady = checkAssetsModelsAvailable()
+            if (!assetsModelsReady) {
+                Timber.e("Universal Sentence Encoder not found in assets - cannot continue")
+                return false
+            }
+            
+            // Check if Gemma models are available (assets or downloads)
+            updateInitState("Checking AI models...", 0.2f)
+            val availableGemmaModels = unifiedGemmaService.getAvailableModels()
+            if (availableGemmaModels.isNotEmpty()) {
+                Timber.d("Gemma models available: ${availableGemmaModels.map { it.displayName }}")
+                return true
+            }
+
+            // No Gemma models found - check if already downloaded
+            updateInitState("Checking downloaded models...", 0.25f)
+            if (modelDownloadService.isModelDownloaded()) {
+                Timber.d("Gemma models already downloaded to files directory")
+                return true
+            }
+
+            // Need to download Gemma models from Dropbox
+            updateInitState("Downloading AI models...", 0.3f)
+            Timber.d("Gemma models not found, starting download from Dropbox")
+            
+            val downloadResult = modelDownloadService.downloadModel { progress ->
+                // Update initialization state with download progress
+                val progressPercent = 0.3f + (progress.overallProgress * 0.4f) // Map to 30%-70% range
+                val statusMessage = when {
+                    progress.error != null -> "Download error: ${progress.error}"
+                    progress.isComplete -> "Models downloaded successfully"
+                    progress.currentFile != null -> "Downloading ${progress.currentFile}... (${progress.currentFileIndex}/${progress.totalFiles})"
+                    else -> "Preparing download..."
+                }
+                updateInitState(statusMessage, progressPercent)
+            }
+            
+            downloadResult.isSuccess
+            
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to ensure models are available")
+            false
+        }
+    }
+
+    private suspend fun checkAssetsModelsAvailable(): Boolean = withContext(Dispatchers.IO) {
+        return@withContext try {
+            val assets = assets.list("models")?.toSet().orEmpty()
+            
+            // Universal Sentence Encoder should always be in assets
+            val requiredInAssets = "universal_sentence_encoder.tflite"
+            if (requiredInAssets !in assets) {
+                Timber.e("Required embedding model not found in assets: $requiredInAssets")
+                return@withContext false
+            }
+            
+            // Check if any Gemma model is available in assets (optional)
+            val gemmaModels = listOf(
+                "gemma-3n-e2b-it-int4.task",
+                "gemma-3n-E2B-it-int4.task", // Case variations
+                "gemma-3n-e4b-it-int4.task",
+                "gemma-3n-E4B-it-int4.task"
+            )
+            val hasGemmaInAssets = gemmaModels.any { it in assets }
+            
+            if (hasGemmaInAssets) {
+                Timber.d("Gemma model found in assets - no download needed")
+            } else {
+                Timber.d("No Gemma model in assets - will need to download")
+            }
+            
+            // Return true if embedding model is available (Gemma download handled separately)
+            true
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to check assets models")
+            false
         }
     }
 
@@ -195,7 +330,10 @@ class MainActivity : ComponentActivity() {
                 // Check available models first
                 val availableModels = unifiedGemmaService.getAvailableModels()
                 if (availableModels.isEmpty()) {
-                    throw IllegalStateException("No Gemma models found in assets")
+                    Timber.d("No Gemma models found in assets or cache - checking if download needed")
+                    // Models should have been downloaded in checkAndEnsureModelsAvailable()
+                    // If still not available, it's a real error
+                    throw IllegalStateException("No Gemma models available after download attempt")
                 }
 
                 Timber.d("Available models: ${availableModels.map { it.displayName }}")
@@ -403,7 +541,8 @@ fun Gemma3nNavigation(
             }
             ApiSettingsScreen(
                 geminiApiService = geminiApiService,
-                speechService = speechService
+                speechService = speechService,
+                onNavigateBack = { navController.popBackStack() }
             )
         }
     }
@@ -741,8 +880,6 @@ fun checkModelAvailability(
     onStatusUpdate: (Float, Boolean, Boolean, String?, List<String>) -> Unit
 ) = CoroutineScope(Dispatchers.IO).launch {
     try {
-        val assets = ctx.assets.list("models")?.toSet().orEmpty()
-
         val required = listOf(
             "gemma-3n-E2B-it-int4.task",
             "universal_sentence_encoder.tflite"
@@ -751,33 +888,57 @@ fun checkModelAvailability(
             "gemma-3n-E4B-it-int4.task"
         )
 
-        val missing = required.filterNot(assets::contains)
-        if (missing.isNotEmpty()) {
-            onStatusUpdate(0f, false, false,
-                "Missing required files:\n${missing.joinToString("\n")}", emptyList())
+        // First check assets directory
+        val assets = ctx.assets.list("models")?.toSet().orEmpty()
+        val assetsAvailable = (required + optional).filter(assets::contains)
+        
+        if (required.all { it in assets }) {
+            // Models available in assets - copy to cache
+            onStatusUpdate(0f, false, true, null, assetsAvailable)
+            
+            val copied = mutableListOf<String>()
+            val outDir = File(ctx.cacheDir, "models").apply { mkdirs() }
+
+            assets.filter { it.endsWith(".task") || it.endsWith(".tflite") }.forEach { name ->
+                runCatching {
+                    ctx.assets.open("models/$name").use { input ->
+                        File(outDir, name).outputStream().use { input.copyTo(it) }
+                    }
+                    copied += name
+                }.onFailure { Timber.e(it, "Copy failed: $name") }
+            }
+
+            if (copied.isEmpty())
+                onStatusUpdate(0f, false, false, "Failed to copy model files", assetsAvailable)
+            else
+                onStatusUpdate(100f, true, false, null, assetsAvailable)
             return@launch
         }
 
-        val availableModels = (required + optional).filter(assets::contains)
-        onStatusUpdate(0f, false, true, null, availableModels)
-
-        // Copy to cache
-        val copied = mutableListOf<String>()
-        val outDir = File(ctx.cacheDir, "models").apply { mkdirs() }
-
-        assets.filter { it.endsWith(".task") || it.endsWith(".tflite") }.forEach { name ->
-            runCatching {
-                ctx.assets.open("models/$name").use { input ->
-                    File(outDir, name).outputStream().use { input.copyTo(it) }
-                }
-                copied += name
-            }.onFailure { Timber.e(it, "Copy failed: $name") }
+        // Check downloaded models directory
+        val modelsDir = File(ctx.filesDir, "models")
+        val downloadedFiles = if (modelsDir.exists()) {
+            modelsDir.listFiles()?.map { it.name }?.toSet().orEmpty()
+        } else {
+            emptySet()
+        }
+        
+        val downloadedAvailable = (required + optional).filter { it in downloadedFiles }
+        
+        if (required.all { it in downloadedFiles }) {
+            // Models available in downloads directory
+            onStatusUpdate(100f, true, false, null, downloadedAvailable)
+            return@launch
         }
 
-        if (copied.isEmpty())
-            onStatusUpdate(0f, false, false, "Failed to copy model files", availableModels)
-        else
-            onStatusUpdate(100f, true, false, null, availableModels)
+        // Models not found in either location
+        val missingFromAssets = required.filterNot(assets::contains)
+        val missingFromDownloads = required.filterNot(downloadedFiles::contains)
+        
+        onStatusUpdate(0f, false, false,
+            "Models not found. Missing from assets: ${missingFromAssets.joinToString(", ")}\n" +
+            "Missing from downloads: ${missingFromDownloads.joinToString(", ")}", 
+            assetsAvailable + downloadedAvailable)
 
     } catch (e: Exception) {
         onStatusUpdate(0f, false, false, "Error: ${e.localizedMessage}", emptyList())
@@ -863,7 +1024,8 @@ private fun FeatureButton(
 @Composable
 fun ApiSettingsScreen(
     geminiApiService: GeminiApiService,
-    speechService: SpeechRecognitionService // <-- Inject this!
+    speechService: SpeechRecognitionService, // <-- Inject this!
+    onNavigateBack: () -> Unit = {}
 ) {
     var apiKey by remember { mutableStateOf("") }
     var mapsApiKey by remember { mutableStateOf("") }
@@ -885,280 +1047,306 @@ fun ApiSettingsScreen(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        Text(
-            text = "API Configuration",
-            style = MaterialTheme.typography.headlineMedium
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = "Enter your API keys to enable all features",
-            style = MaterialTheme.typography.bodyMedium
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Gemini API Key
-        OutlinedTextField(
-            value = apiKey,
-            onValueChange = { apiKey = it },
-            label = { Text("Gemini API Key") },
-            placeholder = { Text("AIza...") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            enabled = !isLoading,
-            supportingText = { Text("Required for AI features") }
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Google Cloud Speech API Key
-        OutlinedTextField(
-            value = speechApiKey,
-            onValueChange = { speechApiKey = it },
-            label = { Text("Google Cloud Speech API Key") },
-            placeholder = { Text("AIza...") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            enabled = !isLoading,
-            supportingText = { Text("Required for Live Caption audio transcription") }
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Google Maps API Key
-        OutlinedTextField(
-            value = mapsApiKey,
-            onValueChange = { mapsApiKey = it },
-            label = { Text("Google Maps API Key (Optional)") },
-            placeholder = { Text("AIza...") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            enabled = !isLoading,
-            supportingText = { Text("Required for Crisis Handbook map feature") }
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { 
+                    Text(
+                        text = "API Configuration",
+                        style = MaterialTheme.typography.headlineMedium
+                    ) 
+                },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back"
+                        )
+                    }
+                }
+            )
+        }
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp)
         ) {
-            Button(
-                onClick = {
-                    isLoading = true
-                    validationMessage = null
-                    CoroutineScope(Dispatchers.IO).launch {
-                        try {
-                            var allValid = true
-                            val messages = mutableListOf<String>()
+            Text(
+                text = "Enter your API keys to enable all features",
+                style = MaterialTheme.typography.bodyMedium
+            )
 
-                            // Validate Gemini API key
-                            if (apiKey.isNotBlank()) {
-                                if (geminiApiService.validateKey(apiKey)) {
-                                    context.dataStore.edit { it[API_KEY] = apiKey }
-                                    messages.add("✓ Gemini API key validated")
-                                } else {
-                                    messages.add("✗ Invalid Gemini API key")
-                                    allValid = false
-                                }
-                            }
+            Spacer(modifier = Modifier.height(24.dp))
 
-                            // Save Speech API key and initialize SpeechRecognitionService
-                            if (speechApiKey.isNotBlank()) {
-                                if (speechApiKey.startsWith("AIza") && speechApiKey.length > 20) {
-                                    context.dataStore.edit { settings ->
-                                        settings[SPEECH_API_KEY] = speechApiKey
-                                    }
-                                    // Initialize the speech service with this API key
-                                    try {
-                                        speechService.initializeWithApiKey(speechApiKey)
-                                        messages.add("✓ Speech API key saved & initialized")
-                                    } catch (e: Exception) {
-                                        messages.add("✗ Failed to initialize SpeechRecognitionService: ${e.message}")
+            // Gemini API Key
+            OutlinedTextField(
+                value = apiKey,
+                onValueChange = { apiKey = it },
+                label = { Text("Gemini API Key") },
+                placeholder = { Text("AIza...") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                enabled = !isLoading,
+                supportingText = { Text("Required for AI features") }
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Google Cloud Speech API Key
+            OutlinedTextField(
+                value = speechApiKey,
+                onValueChange = { speechApiKey = it },
+                label = { Text("Google Cloud Speech API Key") },
+                placeholder = { Text("AIza...") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                enabled = !isLoading,
+                supportingText = { Text("Auto-enables speech features: Live Caption, AI Tutor voice, CBT Coach") }
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Google Maps API Key
+            OutlinedTextField(
+                value = mapsApiKey,
+                onValueChange = { mapsApiKey = it },
+                label = { Text("Google Maps API Key (Optional)") },
+                placeholder = { Text("AIza...") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                enabled = !isLoading,
+                supportingText = { Text("Required for Crisis Handbook map feature") }
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = {
+                        isLoading = true
+                        validationMessage = null
+                        CoroutineScope(Dispatchers.IO).launch {
+                            try {
+                                var allValid = true
+                                val messages = mutableListOf<String>()
+
+                                // Validate Gemini API key
+                                if (apiKey.isNotBlank()) {
+                                    if (geminiApiService.validateKey(apiKey)) {
+                                        context.dataStore.edit { it[API_KEY] = apiKey }
+                                        messages.add("✓ Gemini API key validated")
+                                    } else {
+                                        messages.add("✗ Invalid Gemini API key")
                                         allValid = false
                                     }
-                                } else {
-                                    messages.add("✗ Invalid Speech API key format")
-                                    allValid = false
                                 }
-                            }
 
-                            // Save Maps API key (no validation for now)
-                            if (mapsApiKey.isNotBlank()) {
-                                context.dataStore.edit { settings ->
-                                    settings[MAPS_API_KEY] = mapsApiKey
+                                // Save Speech API key (will be auto-initialized on app restart)
+                                if (speechApiKey.isNotBlank()) {
+                                    if (speechApiKey.startsWith("AIza") && speechApiKey.length > 20) {
+                                        context.dataStore.edit { settings ->
+                                            settings[SPEECH_API_KEY] = speechApiKey
+                                        }
+                                        // Test the API key validation but auto-initialize on app restart
+                                        GoogleServicesUtil.withGoogleServices(
+                                            context = context,
+                                            block = {
+                                                try {
+                                                    // Just validate, don't permanently initialize (will happen automatically on app restart)
+                                                    speechService.initializeWithApiKey(speechApiKey)
+                                                    messages.add("✓ Speech API key saved & validated (will auto-enable for all features on restart)")
+                                                } catch (e: Exception) {
+                                                    messages.add("✗ Speech API key validation failed: ${e.message}")
+                                                    allValid = false
+                                                }
+                                            },
+                                            onUnavailable = {
+                                                messages.add("✓ Speech API key saved (will auto-enable when Google Services available)")
+                                            }
+                                        ) ?: run {
+                                            // If Google Services not available, still save the key
+                                            messages.add("✓ Speech API key saved (will auto-enable when Google Services available)")
+                                        }
+                                    } else {
+                                        messages.add("✗ Invalid Speech API key format")
+                                        allValid = false
+                                    }
                                 }
-                                messages.add("✓ Maps API key saved")
-                            }
 
-                            withContext(Dispatchers.Main) {
-                                validationMessage = messages.joinToString("\n")
-                            }
-                        } catch (e: Exception) {
-                            withContext(Dispatchers.Main) {
-                                validationMessage = "Error: ${e.message}"
-                            }
-                        } finally {
-                            withContext(Dispatchers.Main) {
-                                isLoading = false
+                                // Save Maps API key (no validation for now)
+                                if (mapsApiKey.isNotBlank()) {
+                                    context.dataStore.edit { settings ->
+                                        settings[MAPS_API_KEY] = mapsApiKey
+                                    }
+                                    messages.add("✓ Maps API key saved")
+                                }
+
+                                withContext(Dispatchers.Main) {
+                                    validationMessage = messages.joinToString("\n")
+                                }
+                            } catch (e: Exception) {
+                                withContext(Dispatchers.Main) {
+                                    validationMessage = "Error: ${e.message}"
+                                }
+                            } finally {
+                                withContext(Dispatchers.Main) {
+                                    isLoading = false
+                                }
                             }
                         }
+                    },
+                    enabled = (apiKey.isNotBlank() || mapsApiKey.isNotBlank() || speechApiKey.isNotBlank()) && !isLoading,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    } else {
+                        Text("Save & Validate")
                     }
-                },
-                enabled = (apiKey.isNotBlank() || mapsApiKey.isNotBlank() || speechApiKey.isNotBlank()) && !isLoading,
-                modifier = Modifier.weight(1f)
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                } else {
-                    Text("Save & Validate")
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        apiKey = ""
+                        mapsApiKey = ""
+                        speechApiKey = ""
+                        CoroutineScope(Dispatchers.IO).launch {
+                            context.dataStore.edit { settings ->
+                                settings.remove(API_KEY)
+                                settings.remove(MAPS_API_KEY)
+                                settings.remove(SPEECH_API_KEY)
+                            }
+                        }
+                        validationMessage = "API keys cleared"
+                    },
+                    enabled = !isLoading
+                ) {
+                    Text("Clear All")
                 }
             }
 
-            OutlinedButton(
-                onClick = {
-                    apiKey = ""
-                    mapsApiKey = ""
-                    speechApiKey = ""
-                    CoroutineScope(Dispatchers.IO).launch {
-                        context.dataStore.edit { settings ->
-                            settings.remove(API_KEY)
-                            settings.remove(MAPS_API_KEY)
-                            settings.remove(SPEECH_API_KEY)
-                        }
-                    }
-                    validationMessage = "API keys cleared"
-                },
-                enabled = !isLoading
-            ) {
-                Text("Clear All")
+            validationMessage?.let { message ->
+                Spacer(modifier = Modifier.height(16.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (message.contains("✓") && !message.contains("✗"))
+                            MaterialTheme.colorScheme.secondaryContainer
+                        else if (message.contains("✗"))
+                            MaterialTheme.colorScheme.errorContainer
+                        else
+                            MaterialTheme.colorScheme.surfaceVariant
+                    )
+                ) {
+                    Text(
+                        text = message,
+                        modifier = Modifier.padding(16.dp),
+                        color = if (message.contains("✓") && !message.contains("✗"))
+                            MaterialTheme.colorScheme.onSecondaryContainer
+                        else if (message.contains("✗"))
+                            MaterialTheme.colorScheme.onErrorContainer
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
-        }
 
-        validationMessage?.let { message ->
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text(
+                text = "Get your API keys from:",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Medium
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Text(
+                        text = "Gemini: ",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "https://makersuite.google.com/app/apikey",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Text(
+                        text = "Speech: ",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "https://console.cloud.google.com/apis/library/speech.googleapis.com",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Text(
+                        text = "Maps: ",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "https://console.cloud.google.com/",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (message.contains("✓") && !message.contains("✗"))
-                        MaterialTheme.colorScheme.secondaryContainer
-                    else if (message.contains("✗"))
-                        MaterialTheme.colorScheme.errorContainer
-                    else
-                        MaterialTheme.colorScheme.surfaceVariant
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
                 )
             ) {
-                Text(
-                    text = message,
-                    modifier = Modifier.padding(16.dp),
-                    color = if (message.contains("✓") && !message.contains("✗"))
-                        MaterialTheme.colorScheme.onSecondaryContainer
-                    else if (message.contains("✗"))
-                        MaterialTheme.colorScheme.onErrorContainer
-                    else
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Text(
-            text = "Get your API keys from:",
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.Medium
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Top
-            ) {
-                Text(
-                    text = "Gemini: ",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Medium
-                )
-                Text(
-                    text = "https://makersuite.google.com/app/apikey",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Top
-            ) {
-                Text(
-                    text = "Speech: ",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Medium
-                )
-                Text(
-                    text = "https://console.cloud.google.com/apis/library/speech.googleapis.com",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Top
-            ) {
-                Text(
-                    text = "Maps: ",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Medium
-                )
-                Text(
-                    text = "https://console.cloud.google.com/",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
-            )
-        ) {
-            Column(
-                modifier = Modifier.padding(12.dp)
-            ) {
-                Text(
-                    text = "Note for Speech API:",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Medium
-                )
-                Text(
-                    text = "Enable the Cloud Speech-to-Text API in your Google Cloud Console and create an API key with Speech-to-Text permissions.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                )
+                Column(
+                    modifier = Modifier.padding(12.dp)
+                ) {
+                    Text(
+                        text = "Note for Speech API:",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "Enable the Cloud Speech-to-Text API in your Google Cloud Console and create an API key with Speech-to-Text permissions.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
             }
         }
     }
-
-
 }

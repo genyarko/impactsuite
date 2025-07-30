@@ -1,44 +1,72 @@
 {
   "PYP": {
     "Phase 1 (KG)": [
-      "Personal history and memory",
-      "Family and community roles",
-      "Celebrations and traditions",
-      "Rules and routines",
-      "Understanding change over time"
+      "Personal timelines",
+      "Family memories",
+      "Family roles",
+      "Community roles",
+      "Celebrations",
+      "Traditions",
+      "Classroom rules",
+      "Daily routines",
+      "Recognising change over time"
     ],
     "Phase 2 (Grades 1-2)": [
-      "Local community history",
-      "Connections between people and places",
-      "How time and change affect people",
-      "Celebrations across cultures",
-      "Roles and responsibilities in communities"
+      "Origins of the local community",
+      "Local historical landmarks",
+      "People–place connections",
+      "Transportation links in communities",
+      "Daily life then and now",
+      "Technological change over time",
+      "Cultural celebrations in the community",
+      "Global celebrations",
+      "Community helper roles",
+      "Civic responsibilities of citizens"
     ],
     "Phase 3 (Grades 3-4)": [
-      "Cultural influences in society",
-      "Systems and organization in ancient communities",
-      "Early forms of technology",
-      "Human impact on environment",
-      "Comparing past and present communities"
+      "Language influences on culture",
+      "Art and architecture influences",
+      "Governance in ancient communities",
+      "Economic systems in ancient communities",
+      "Stone‑Age technology",
+      "Bronze and iron tools",
+      "Human impact: deforestation",
+      "Human impact: pollution",
+      "Past vs. present housing",
+      "Past vs. present transportation"
     ],
     "Phase 4 (Grade 5)": [
-      "Beliefs and values shaping behavior",
-      "Causes and effects of migration",
-      "Historical evidence and interpretation",
-      "Recording and remembering history",
-      "Rights, responsibilities, and governance"
+      "Religious beliefs shaping behaviour",
+      "Cultural values shaping behaviour",
+      "Push and pull factors of migration",
+      "Cultural diffusion through migration",
+      "Primary sources",
+      "Secondary sources",
+      "Oral histories",
+      "Digital archives",
+      "Human rights",
+      "Civic responsibilities",
+      "Systems of governance"
     ]
   },
   "MYP": {
     "MYP 1 (Grade 6)": [
-      "Early humans and prehistory",
-      "Mesopotamia and early systems",
-      "Ancient Egypt and the Nile",
-      "Ancient India and Hinduism",
-      "Ancient China and Confucianism",
-      "Ancient Greece and democracy",
-      "Roman Republic and Empire",
-      "Spread of Christianity and Islam"
+      "Early humans",
+      "Early prehistory",
+      "Mesopotamia",
+      "Early governance systems",
+      "Ancient Egypt",
+      "The Nile's influence",
+      "Ancient India",
+      "Foundations of Hinduism",
+      "Ancient China",
+      "Origins of Confucianism",
+      "Ancient Greece",
+      "Birth of democracy",
+      "Roman Republic",
+      "Roman Empire",
+      "Rise of Christianity",
+      "Expansion of Islam"
     ],
     "MYP 2 (Grade 7)": [
       "Forms of government",
@@ -60,9 +88,13 @@
     ],
     "MYP 4–5 (Grades 9–10)": {
       "Year 4 Topics": [
+        "French revolutions",
+        "Haitian revolutions",
         "French and Haitian revolutions",
         "Industrial Revolution",
-        "Political ideologies (liberalism, socialism, nationalism)",
+        "Political ideologies (liberalism)",
+        "Political ideologies (socialism)",
+        "Political ideologies (nationalism)",
         "Revolutions of 1848"
       ],
       "Year 5 Topics": [

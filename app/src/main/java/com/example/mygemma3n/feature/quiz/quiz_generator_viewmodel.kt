@@ -64,6 +64,7 @@ class QuizGeneratorViewModel @Inject constructor(
         val generationPhase: String = "Starting...", // For animation variety
         val studentName: String? = null,
         val studentGrade: Int? = null,
+        val studentCountry: String? = null,
         val curriculumTopics: List<String> = emptyList(),
         val isLoadingCurriculum: Boolean = false
     )
@@ -127,14 +128,29 @@ class QuizGeneratorViewModel @Inject constructor(
     /**
      * Initialize quiz with student info
      */
-    fun initializeQuizWithStudent(name: String, gradeLevel: Int) = viewModelScope.launch {
+    fun initializeQuizWithStudent(name: String, gradeLevel: Int, country: String = "") = viewModelScope.launch {
         try {
+            // Check if country has changed and clear history if needed
+            val previousCountry = _state.value.studentCountry
+            val newCountry = country.takeIf { it.isNotBlank() }
+            
+            if (previousCountry != newCountry && newCountry != null) {
+                Timber.i("Student country changed from $previousCountry to $newCountry - clearing quiz history")
+                try {
+                    quizRepo.clearAllQuizzes()
+                    Timber.i("Quiz history cleared successfully for country change")
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to clear quiz history during country change")
+                }
+            }
+            
             val student = studentIntegration.getOrCreateStudent(name, gradeLevel)
 
             _state.update {
                 it.copy(
                     studentName = name,
                     studentGrade = gradeLevel,
+                    studentCountry = newCountry,
                     difficulty = studentIntegration.getSuggestedDifficulty(student, Subject.GENERAL)
                 )
             }
@@ -232,6 +248,20 @@ class QuizGeneratorViewModel @Inject constructor(
     fun clearError() {
         _state.update { it.copy(error = null) }
     }
+    
+    /**
+     * Clear quiz history to reset country context influence
+     * This can be called when switching student countries or to refresh the question pool
+     */
+    fun clearQuizHistory() = viewModelScope.launch {
+        try {
+            Timber.i("Clearing quiz history to reset country context influence")
+            quizRepo.clearAllQuizzes()
+            Timber.i("Quiz history cleared successfully")
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to clear quiz history")
+        }
+    }
 
     // Also update loadSubjects method
     fun loadSubjects() = viewModelScope.launch {
@@ -268,6 +298,7 @@ class QuizGeneratorViewModel @Inject constructor(
                 topic = topic,
                 count = questionCount,
                 difficulty = _state.value.difficulty,
+                country = _state.value.studentCountry,
                 previousQuestions = getRecentQuestionTexts(subject, topic)
             )
 
@@ -325,19 +356,19 @@ class QuizGeneratorViewModel @Inject constructor(
 
         try {
             // 1. Adaptive difficulty based on performance
-            _state.update { it.copy(generationPhase = "Analyzing your performance...") }
-            delay(500) // Small delay for UI feedback
+            _state.update { it.copy(generationPhase = "🎯 Analyzing your performance...") }
+            delay(800) // Small delay for UI feedback
             val adaptedDifficulty = quizRepo.getAdaptiveDifficulty(subject, _state.value.difficulty)
             _state.update { it.copy(difficulty = adaptedDifficulty) }
 
             // 2. Get learner profile for better question generation
-            _state.update { it.copy(generationPhase = "Loading your profile...") }
-            delay(300)
+            _state.update { it.copy(generationPhase = "📊 Building your learning profile...") }
+            delay(600)
             val profile = quizRepo.getLearnerProfile(subject)
             _state.update { it.copy(learnerProfile = profile) }
 
             // 3. Get previous questions for deduplication
-            _state.update { it.copy(generationPhase = "Checking question history...") }
+            _state.update { it.copy(generationPhase = "🔍 Ensuring fresh content...") }
             val historyTexts = quizRepo
                 .getQuizzesFor(subject, topic)
                 .flatMap { it.questions }
@@ -349,8 +380,8 @@ class QuizGeneratorViewModel @Inject constructor(
             // 4. Generate questions based on mode
             when (_state.value.mode) {
                 QuizMode.REVIEW -> {
-                    _state.update { it.copy(generationPhase = "Gathering review questions...") }
-                    delay(400)
+                    _state.update { it.copy(generationPhase = "📚 Gathering your review questions...") }
+                    delay(600)
 
                     // Include some review questions from spaced repetition
                     val reviewQuestions = quizRepo.getQuestionsForSpacedReview(
@@ -367,7 +398,7 @@ class QuizGeneratorViewModel @Inject constructor(
                     // Generate remaining new questions
                     val remaining = questionCount - questions.size
                     if (remaining > 0) {
-                        _state.update { it.copy(generationPhase = "Creating new questions...") }
+                        _state.update { it.copy(generationPhase = "✨ Creating new challenges...") }
                         val newQuestions = generateQuestionsSequentially(
                             subject = subject,
                             topic = topic,
@@ -385,7 +416,7 @@ class QuizGeneratorViewModel @Inject constructor(
 
                 else -> {
                     // Normal or adaptive mode - generate all questions
-                    _state.update { it.copy(generationPhase = "Crafting questions...") }
+                    _state.update { it.copy(generationPhase = "🎨 Crafting your perfect quiz...") }
                     val newQuestions = generateQuestionsSequentially(
                         subject = subject,
                         topic = topic,
@@ -404,8 +435,8 @@ class QuizGeneratorViewModel @Inject constructor(
             // Ensure we don't exceed the requested count
             val finalQuestions = questions.take(questionCount)
 
-            _state.update { it.copy(generationPhase = "Finalizing quiz...") }
-            delay(300)
+            _state.update { it.copy(generationPhase = "🎉 Finalizing your quiz experience...") }
+            delay(400)
 
             val quiz = Quiz(
                 id = java.util.UUID.randomUUID().toString(),
@@ -451,11 +482,12 @@ class QuizGeneratorViewModel @Inject constructor(
 
         // Update generation phases dynamically
         val phases = listOf(
-            "Thinking of creative questions...",
-            "Making it challenging...",
-            "Adding variety...",
-            "Ensuring uniqueness...",
-            "Almost there..."
+            "Analyzing your learning style...",
+            "Crafting personalized questions...",
+            "Adding educational variety...",
+            "Polishing question quality...",
+            "Finalizing your quiz experience...",
+            "Almost ready for you!"
         )
 
         repeat(count) { idx ->
@@ -516,6 +548,27 @@ class QuizGeneratorViewModel @Inject constructor(
             // Check for exact match first
             var correct = normalizedUserAnswer.equals(normalizedCorrectAnswer, ignoreCase = true)
 
+            // Special handling for True/False questions
+            if (!correct && q.questionType == QuestionType.TRUE_FALSE) {
+                // Normalize True/False answers
+                val userTrueFalse = when (normalizedUserAnswer) {
+                    "true", "t", "yes", "y", "1" -> "true"
+                    "false", "f", "no", "n", "0" -> "false"
+                    else -> normalizedUserAnswer
+                }
+                val correctTrueFalse = when (normalizedCorrectAnswer) {
+                    "true", "t", "yes", "y", "1" -> "true"
+                    "false", "f", "no", "n", "0" -> "false"
+                    else -> normalizedCorrectAnswer
+                }
+                correct = userTrueFalse == correctTrueFalse
+                
+                // Log potential question type mismatch
+                if (!correct && !listOf("true", "false").contains(normalizedCorrectAnswer)) {
+                    Timber.w("Question type mismatch detected - TRUE_FALSE question with non-boolean answer: '${q.correctAnswer}'")
+                }
+            }
+
             // For multiple choice, check if user answer matches any option
             if (!correct && q.questionType == QuestionType.MULTIPLE_CHOICE) {
                 // Check if user typed an option instead of selecting it
@@ -533,10 +586,15 @@ class QuizGeneratorViewModel @Inject constructor(
             if (!correct && (q.questionType == QuestionType.FILL_IN_BLANK ||
                         q.questionType == QuestionType.SHORT_ANSWER)) {
                 correct = checkAnswerVariations(normalizedUserAnswer, normalizedCorrectAnswer, q)
+                
+                // Additional lenient check for 6th graders - accept if user mentions any key concept
+                if (!correct) {
+                    correct = checkSimpleKeywordMatch(normalizedUserAnswer, normalizedCorrectAnswer)
+                }
             }
 
-            // Log for debugging
-            Timber.d("Answer check - User: '$normalizedUserAnswer', Expected: '$normalizedCorrectAnswer', Correct: $correct")
+            // Log for debugging with question type information
+            Timber.d("Answer check - Type: ${q.questionType}, User: '$normalizedUserAnswer', Expected: '$normalizedCorrectAnswer', Correct: $correct")
 
             // Record the attempt
             quizRepo.recordQuestionAttempt(q, correct)
@@ -754,17 +812,58 @@ class QuizGeneratorViewModel @Inject constructor(
             }
         }
 
-        // Also check for key concept coverage - if user mentions main concepts, accept it
-        val keyConceptsInUser = userWords.intersect(setOf("water", "food", "transport", "transportation", "trade", "farming"))
-        val keyConceptsInCorrect = correctWords.intersect(setOf("water", "food", "transport", "transportation", "trade", "farming"))
+        // Expanded key concepts for better coverage (more lenient for 6th graders)
+        val keyConceptsSet = setOf(
+            "water", "food", "transport", "transportation", "trade", "farming", "agriculture",
+            "leader", "leadership", "ruler", "king", "queen", "government", "rule", "control",
+            "egypt", "egyptian", "nile", "river", "flood", "flooding", "harvest", "planting",
+            "ancient", "civilization", "empire", "kingdom", "city", "culture", "religion",
+            "democracy", "republic", "monarchy", "organize", "organization", "skill", "skills",
+            "communication", "roads", "canals", "harbors", "travel", "commerce", "goods",
+            "agreement", "exchange", "infrastructure", "customers", "business", "economy"
+        )
+        
+        val keyConceptsInUser = userWords.intersect(keyConceptsSet)
+        val keyConceptsInCorrect = correctWords.intersect(keyConceptsSet)
         val conceptCoverage = if (keyConceptsInCorrect.isNotEmpty()) {
             keyConceptsInUser.size.toFloat() / keyConceptsInCorrect.size
         } else 0f
 
         val similarity = matchingWords.toFloat() / maxOf(userWords.size, correctWords.size)
         
-        // Accept if either good word similarity OR good concept coverage
-        return similarity >= 0.6f || conceptCoverage >= 0.7f
+        // More lenient thresholds for 6th graders:
+        // - Accept if user mentions ANY key concept (even just one)
+        // - Lower word similarity requirement
+        // - Accept if user answer contains at least one important word
+        val hasKeyWords = keyConceptsInUser.isNotEmpty()
+        val hasReasonableSimilarity = similarity >= 0.3f  // Lowered from 0.6f
+        val hasGoodConceptCoverage = conceptCoverage >= 0.5f  // Lowered from 0.7f
+        
+        return hasKeyWords || hasReasonableSimilarity || hasGoodConceptCoverage
+    }
+
+    /**
+     * Simple keyword matching for 6th graders - accept if user mentions any important concept
+     */
+    private fun checkSimpleKeywordMatch(userAnswer: String, correctAnswer: String): Boolean {
+        val userWords = userAnswer.split(" ").filter { it.length > 2 }
+        val correctWords = correctAnswer.split(" ").filter { it.length > 2 }
+        
+        // Key educational concepts that if mentioned, should be accepted
+        val importantConcepts = setOf(
+            "trade", "trading", "leader", "leadership", "ruler", "rule", "government", 
+            "skill", "skills", "organization", "communicate", "communication",
+            "roads", "infrastructure", "agriculture", "farming", "water", "nile",
+            "egypt", "egyptian", "ancient", "civilization", "democracy", "republic"
+        )
+        
+        // Accept if user mentions any important concept that's also in the correct answer
+        val userConcepts = userWords.intersect(importantConcepts)
+        val correctConcepts = correctWords.intersect(importantConcepts)
+        
+        // If both user and correct answer contain important concepts, and there's overlap, accept it
+        return userConcepts.isNotEmpty() && correctConcepts.isNotEmpty() && 
+               (userConcepts.intersect(correctConcepts).isNotEmpty() || userConcepts.size >= 1)
     }
 
     /* ─────────────────────── Enhanced Question generation with retry ─────────────────────── */
@@ -1832,69 +1931,174 @@ class QuizGeneratorViewModel @Inject constructor(
 
     /* ─────────────────────── Validate questions before adding ─────────────────────── */
 
+    /**
+     * Generate contextually relevant fallback options for multiple choice questions
+     */
+    private fun generateFallbackOptions(correctAnswer: String, questionText: String): List<String> {
+        val fallbackOptions = mutableListOf(correctAnswer)
+        val questionLower = questionText.lowercase()
+        
+        // Generate subject-specific wrong answers based on question context
+        when {
+            questionLower.contains("year") || questionLower.contains("date") || questionLower.contains("century") -> {
+                // For time-related questions
+                fallbackOptions.addAll(listOf(
+                    "1500 BCE", "500 CE", "1200 CE", "1800 CE"
+                ).filter { it != correctAnswer }.take(3))
+            }
+            questionLower.contains("river") || questionLower.contains("nile") -> {
+                // For geography/river questions  
+                fallbackOptions.addAll(listOf(
+                    "Amazon River", "Mississippi River", "Yangtze River", "Nile River"
+                ).filter { it != correctAnswer }.take(3))
+            }
+            questionLower.contains("egypt") || questionLower.contains("pharaoh") -> {
+                // For Egyptian history
+                fallbackOptions.addAll(listOf(
+                    "Mesopotamia", "Ancient Greece", "Roman Empire", "Persian Empire"
+                ).filter { it != correctAnswer }.take(3))
+            }
+            questionLower.contains("government") || questionLower.contains("democracy") -> {
+                // For government questions
+                fallbackOptions.addAll(listOf(
+                    "Monarchy", "Democracy", "Republic", "Theocracy"
+                ).filter { it != correctAnswer }.take(3))
+            }
+            else -> {
+                // Generic fallbacks
+                fallbackOptions.addAll(listOf(
+                    "Option A", "Option B", "Option C"
+                ))
+            }
+        }
+        
+        // Ensure we have exactly 4 options
+        while (fallbackOptions.size < 4) {
+            fallbackOptions.add("Additional Option ${fallbackOptions.size}")
+        }
+        
+        return fallbackOptions.take(4).shuffled()
+    }
+
+    /**
+     * Detect the actual question type based on the content to prevent mismatches
+     */
+    private fun detectActualQuestionType(question: Question): QuestionType {
+        val normalizedAnswer = normalizeAnswer(question.correctAnswer)
+        val questionText = question.questionText.lowercase()
+        
+        // Check for "which of the following" format questions (should be multiple choice)
+        if (questionText.contains("which of the following") || 
+            questionText.contains("which one of the following") ||
+            questionText.contains("which among the following") ||
+            questionText.contains("select all that apply") ||
+            questionText.contains("choose the correct option") ||
+            questionText.contains("choose the best answer")) {
+            return QuestionType.MULTIPLE_CHOICE
+        }
+        
+        // Check for True/False patterns
+        if (listOf("true", "false", "t", "f", "yes", "no", "y", "n").contains(normalizedAnswer)) {
+            return QuestionType.TRUE_FALSE
+        }
+        
+        // Check for fill-in-the-blank patterns (short single answers)
+        if (question.questionText.contains("_____") || question.questionText.contains("___")) {
+            return QuestionType.FILL_IN_BLANK
+        }
+        
+        // Check for multiple choice (has options)
+        if (question.options.size >= 2) {
+            return QuestionType.MULTIPLE_CHOICE
+        }
+        
+        // Check for long answers (likely short answer)
+        if (question.correctAnswer.split(" ").size > 3) {
+            return QuestionType.SHORT_ANSWER
+        }
+        
+        // Default to original type if can't determine
+        return question.questionType
+    }
+
     private fun validateQuestion(question: Question): Question {
-        return when (question.questionType) {
+        // First, detect and fix potential question type mismatches
+        val actualQuestionType = detectActualQuestionType(question)
+        val correctedQuestion = if (actualQuestionType != question.questionType) {
+            Timber.w("Question type mismatch detected: expected ${question.questionType}, but content suggests ${actualQuestionType}. Auto-correcting.")
+            question.copy(questionType = actualQuestionType)
+        } else {
+            question
+        }
+        
+        return when (correctedQuestion.questionType) {
             QuestionType.MULTIPLE_CHOICE -> {
                 // For multiple choice, we MUST have 4 valid options
                 val validOptions = when {
-                    question.options.isEmpty() -> {
-                        // Generate default options if none provided
-                        Timber.w("Multiple choice question has no options, generating defaults")
-                        listOf(
-                            question.correctAnswer,
-                            "Incorrect Option 1",
-                            "Incorrect Option 2",
-                            "Incorrect Option 3"
-                        ).shuffled()
+                    correctedQuestion.options.isEmpty() -> {
+                        // Generate contextually relevant options if none provided
+                        Timber.w("Multiple choice question has no options, generating contextual fallbacks")
+                        generateFallbackOptions(correctedQuestion.correctAnswer, correctedQuestion.questionText)
                     }
-                    question.options.size < 4 -> {
+                    correctedQuestion.options.size < 4 -> {
                         // Pad options to 4
-                        val opts = question.options.toMutableList()
-                        if (!opts.contains(question.correctAnswer)) {
-                            opts.add(0, question.correctAnswer)
+                        val opts = correctedQuestion.options.toMutableList()
+                        if (!opts.contains(correctedQuestion.correctAnswer)) {
+                            opts.add(0, correctedQuestion.correctAnswer)
                         }
                         while (opts.size < 4) {
                             opts.add("Option ${('A' + opts.size)}")
                         }
                         opts.shuffled()
                     }
-                    question.options.size > 4 -> {
+                    correctedQuestion.options.size > 4 -> {
                         // Trim to 4 options, ensuring correct answer is included
-                        val opts = if (question.options.contains(question.correctAnswer)) {
-                            question.options.take(4)
+                        val opts = if (correctedQuestion.options.contains(correctedQuestion.correctAnswer)) {
+                            correctedQuestion.options.take(4)
                         } else {
-                            listOf(question.correctAnswer) + question.options.take(3)
+                            listOf(correctedQuestion.correctAnswer) + correctedQuestion.options.take(3)
                         }.shuffled()
                         opts
                     }
                     else -> {
                         // Ensure correct answer is in options
-                        if (!question.options.contains(question.correctAnswer)) {
-                            (listOf(question.correctAnswer) + question.options.take(3)).shuffled()
+                        if (!correctedQuestion.options.contains(correctedQuestion.correctAnswer)) {
+                            (listOf(correctedQuestion.correctAnswer) + correctedQuestion.options.take(3)).shuffled()
                         } else {
-                            question.options
+                            correctedQuestion.options
                         }
                     }
                 }
 
-                question.copy(options = validOptions)
+                correctedQuestion.copy(options = validOptions)
             }
 
             QuestionType.TRUE_FALSE -> {
-                // Ensure only True/False options
-                question.copy(
+                // Ensure only True/False options and validate correctAnswer
+                val normalizedCorrect = normalizeAnswer(correctedQuestion.correctAnswer)
+                val validTrueFalseAnswer = when {
+                    normalizedCorrect == "true" || normalizedCorrect == "t" || normalizedCorrect == "yes" || normalizedCorrect == "y" -> "True"
+                    normalizedCorrect == "false" || normalizedCorrect == "f" || normalizedCorrect == "no" || normalizedCorrect == "n" -> "False"
+                    else -> {
+                        // Log warning for potential data quality issue
+                        Timber.w("TRUE_FALSE question with non-boolean answer: '${correctedQuestion.correctAnswer}'. Defaulting to 'True'")
+                        "True"
+                    }
+                }
+                
+                correctedQuestion.copy(
                     options = listOf("True", "False"),
-                    correctAnswer = if (question.correctAnswer.equals("true", ignoreCase = true)) "True" else "False"
+                    correctAnswer = validTrueFalseAnswer
                 )
             }
 
             QuestionType.FILL_IN_BLANK,
             QuestionType.SHORT_ANSWER -> {
                 // Ensure no options for text input questions
-                question.copy(options = emptyList())
+                correctedQuestion.copy(options = emptyList())
             }
 
-            else -> question
+            else -> correctedQuestion
         }
     }
 
@@ -2255,6 +2459,12 @@ class QuizGeneratorViewModel @Inject constructor(
 
     // Helper to get recent questions
     private suspend fun getRecentQuestionTexts(subject: Subject, topic: String): List<String> {
+        val studentCountry = _state.value.studentCountry
+        
+        // If we have country context, be more selective about historical questions
+        if (studentCountry != null && (subject == Subject.HISTORY || subject == Subject.GEOGRAPHY)) {
+            return getCountryFilteredQuestionTexts(subject, topic, studentCountry)
+        }
         // Get questions from the last week across ALL topics for this subject
         val oneWeekAgo = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000L)
 
@@ -2295,6 +2505,88 @@ class QuizGeneratorViewModel @Inject constructor(
         }
         
         return finalQuestions
+    }
+    
+    /**
+     * Get recent questions filtered to be more relevant for country-specific context
+     */
+    private suspend fun getCountryFilteredQuestionTexts(
+        subject: Subject, 
+        topic: String, 
+        country: String
+    ): List<String> {
+        // Get recent questions but be more selective
+        val threeDaysAgo = System.currentTimeMillis() - (3 * 24 * 60 * 60 * 1000L) // Shorter time window
+        
+        val recentQuizzes = quizRepo.getAllQuizzes()
+            .first()
+            .filter { quiz ->
+                quiz.subject == subject &&
+                quiz.createdAt > threeDaysAgo // More recent questions only
+            }
+            .sortedByDescending { it.createdAt }
+            .take(5) // Fewer historical questions
+        
+        val allRecentQuestions = recentQuizzes
+            .flatMap { it.questions }
+            .map { it.questionText }
+            .distinct()
+        
+        // Filter out questions that seem unrelated to the country context
+        val countryFilteredQuestions = allRecentQuestions.filter { questionText ->
+            isQuestionRelevantForCountry(questionText, country, subject)
+        }
+        
+        Timber.d("Country-filtered recent questions: Found ${countryFilteredQuestions.size} relevant questions for $country in $subject")
+        countryFilteredQuestions.take(2).forEach { q ->
+            Timber.d("Country-filtered question sample: ${q.take(50)}...")
+        }
+        
+        return countryFilteredQuestions.takeLast(10) // Keep fewer for better diversity
+    }
+    
+    /**
+     * Check if a question seems relevant for the student's country context
+     */
+    private fun isQuestionRelevantForCountry(
+        questionText: String, 
+        country: String, 
+        subject: Subject
+    ): Boolean {
+        val question = questionText.lowercase()
+        
+        // Always include questions that mention the student's country
+        if (question.contains(country.lowercase())) {
+            return true
+        }
+        
+        // For history and geography, filter out obviously unrelated content
+        if (subject == Subject.HISTORY || subject == Subject.GEOGRAPHY) {
+            // Filter out questions about other specific countries/regions that aren't relevant
+            val irrelevantKeywords = when (country) {
+                "Ghana" -> listOf(
+                    "china", "japan", "europe", "america", "india", "russia", 
+                    "world war", "napoleon", "roman", "viking", "confucius", 
+                    "hinduism", "buddhism", "christianity"
+                )
+                else -> listOf(
+                    "specific country names that don't relate", // This could be expanded per country
+                )
+            }
+            
+            // If question contains irrelevant keywords, exclude it
+            val hasIrrelevantContent = irrelevantKeywords.any { keyword ->
+                question.contains(keyword)
+            }
+            
+            if (hasIrrelevantContent) {
+                Timber.d("Filtering out irrelevant question for $country: ${questionText.take(50)}...")
+                return false
+            }
+        }
+        
+        // Include questions about general concepts, basic historical periods, etc.
+        return true
     }
 
     private fun isBalancedJson(json: String): Boolean {

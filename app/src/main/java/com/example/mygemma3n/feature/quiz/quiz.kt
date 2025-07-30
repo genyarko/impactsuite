@@ -12,7 +12,7 @@ import com.example.mygemma3n.data.QuizDao   // add this
 
 /* ─────────────────────── Core enums ─────────────────────── */
 
-enum class Subject { MATHEMATICS, SCIENCE, HISTORY, LANGUAGE_ARTS, GEOGRAPHY, ENGLISH, GENERAL, ECONOMICS }
+enum class Subject { MATHEMATICS, SCIENCE, HISTORY, LANGUAGE_ARTS, GEOGRAPHY, ENGLISH, GENERAL, ECONOMICS, COMPUTER_SCIENCE }
 enum class Difficulty { EASY, MEDIUM, HARD, ADAPTIVE }
 
 enum class QuestionType { MULTIPLE_CHOICE, TRUE_FALSE, FILL_IN_BLANK, SHORT_ANSWER, MATCHING }
@@ -178,6 +178,10 @@ interface EducationalContentDao {
 interface UserProgressDao {
     @Insert suspend fun insert(progress: UserProgress)
 
+    @Query("DELETE FROM user_progress")
+    suspend fun deleteAll()
+
+
     @Query(
         """
         SELECT AVG(CASE WHEN correct THEN 1 ELSE 0 END)
@@ -210,6 +214,9 @@ interface QuestionHistoryDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(history: QuestionHistory)
 
+    @Query("DELETE FROM question_history")
+    suspend fun deleteAll()
+
     @Query(
         """
         SELECT * FROM question_history
@@ -240,6 +247,8 @@ interface QuestionHistoryDao {
 @Dao
 interface WrongAnswerDao {
     @Insert suspend fun insert(wrongAnswer: WrongAnswer)
+    @Query("DELETE FROM wrong_answers")
+    suspend fun deleteAll()
 
     @Query(
         """
@@ -487,6 +496,15 @@ class QuizRepository @Inject constructor(
             totalQuestionsAnswered = recentProgress.size,
             streakDays = 0 // Would need to calculate from daily activity
         )
+    }
+
+    @Transaction
+    suspend fun clearAllQuizzes() {
+        db.quizDao().deleteAll()               // quizzes
+        db.progressDao().deleteAll()           // user_progress
+        db.questionHistoryDao().deleteAll()    // question_history
+        db.wrongAnswerDao().deleteAll()        // wrong_answers
+        db.questionSessionDao().deleteAll()    // question_sessions (if you have one)
     }
 
     /* -- mapping helpers ------------------------------------------------- */

@@ -1,62 +1,115 @@
 {
   "PYP": {
     "Phase 1 (KG)": [
-      "Roles & responsibilities in groups (home/school)",
-      "Sharing limited resources fairly",
-      "Basic needs versus wants"
+      "Roles in groups (home/school)",
+      "Responsibilities in groups (home/school)",
+      "Sharing limited resources",
+      "Fairness in resource sharing",
+      "Basic needs",
+      "Wants"
     ],
     "Phase 2 (Grades 1–2)": [
-      "Goods, services & community helpers",
-      "Cooperation and simple exchange (barter/money)",
-      "Rules and routines that organise economic activity"
+      "Goods",
+      "Services",
+      "Community helpers",
+      "Cooperation",
+      "Simple exchange (barter)",
+      "Simple exchange (money)",
+      "Rules that organise economic activity",
+      "Routines that organise economic activity"
     ],
     "Phase 3 (Grades 3–4)": [
-      "Production, trade & interdependence",
-      "Supply, demand & price in everyday contexts",
-      "Ethical consumer choices (reuse–reduce–recycle)"
+      "Production",
+      "Trade",
+      "Interdependence",
+      "Supply in everyday contexts",
+      "Demand in everyday contexts",
+      "Price in everyday contexts",
+      "Ethical consumer choices",
+      "Reuse",
+      "Reduce",
+      "Recycle"
     ],
     "Phase 4 (Grades 5–6)": [
-      "Market systems & resource allocation",
-      "Impact of technology on production and jobs",
-      "Equity, sustainability & consumer responsibility",
-      "Entrepreneurship and budgeting basics"
+      "Market systems",
+      "Resource allocation",
+      "Impact of technology on production",
+      "Impact of technology on jobs",
+      "Equity",
+      "Sustainability",
+      "Consumer responsibility",
+      "Entrepreneurship",
+      "Budgeting basics"
     ]
   },
-
   "MYP": {
-    "MYP 1 (Grade 6)": [
-      "What is Economics? Scarcity, choice & opportunity cost",
-      "Factors of production & basic economic questions",
-      "Simple demand–supply diagrams"
+    "MYP 1 (Grade 6)": [
+      "What is economics?",
+      "Scarcity",
+      "Choice",
+      "Opportunity cost",
+      "Factors of production",
+      "Basic economic questions",
+      "Demand and Supply",
+      "Demand diagrams",
+      "Supply diagrams",
+      "Market‑equilibrium diagrams"
     ],
-    "MYP 2 (Grade 7)": [
-      "Market systems & price mechanisms",
-      "Economic agents: consumers, producers, government, banks",
-      "Circular flow of income & local business case studies"
+    "MYP 2 (Grade 7)": [
+      "Market systems",
+      "Price mechanisms",
+      "Consumers",
+      "Producers",
+      "Government as an economic agent",
+      "Banks and financial intermediaries",
+      "Circular flow of income",
+      "Local business case studies"
     ],
-    "MYP 3 (Grade 8)": [
-      "Business cycle & unemployment/inflation basics",
-      "Government objectives & policy tools",
-      "Poverty, inequality & development indicators",
-      "Globalisation and fair trade"
+    "MYP 3 (Grade 8)": [
+      "Business cycle",
+      "Unemployment basics",
+      "Inflation basics",
+      "Government objectives",
+      "Policy tools",
+      "Poverty",
+      "Inequality",
+      "Development indicators",
+      "Globalisation",
+      "Fair trade"
     ],
-    "MYP 4–5 (Grades 9–10)": {
+    "MYP 4–5 (Grades 9–10)": {
       "Topics": [
-        "Scarcity, demand & supply analysis",
-        "Market structures & market failure",
-        "Circular flow, GDP & business cycle",
-        "Government economic & social objectives",
-        "Poverty, inequality & redistribution policies",
-        "Economic growth vs. sustainable development",
-        "Local production & ethical/fair trade",
-        "Global production, trade & economic integration",
-        "Conflicts & ethical issues in economics",
-        "Development levels (LEDCs, MEDCs, emerging economies)",
-        "Indicators: GDP, HDI, Gini coefficient"
+        "Scarcity analysis",
+        "Demand analysis",
+        "Supply analysis",
+        "Market structures",
+        "Market failure",
+        "Circular flow",
+        "Gross Domestic Product",
+        "Business cycle",
+        "Government economic objectives",
+        "Government social objectives",
+        "Poverty",
+        "Inequality",
+        "Redistribution policies",
+        "Economic growth",
+        "Sustainable development",
+        "Local production",
+        "Ethical and fair trade",
+        "Global production",
+        "International trade",
+        "Economic integration",
+        "Economic conflicts",
+        "Ethical issues in economics",
+        "LEDCs development",
+        "MEDCs development",
+        "Emerging economies",
+        "GDP indicator",
+        "HDI indicator",
+        "Gini coefficient"
       ]
     }
   },
-
   "DP": {
     "Unit 1: Introduction to Economics": [
       "Economics as a social science",

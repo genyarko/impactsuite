@@ -70,9 +70,9 @@ android {
         freeCompilerArgs += listOf(
             "-opt-in=kotlin.RequiresOptIn",
             "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
-            "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api"
+            "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
+            "-XXLanguage:+PropertyParamAnnotationDefaultTargetMode"
         )
-        freeCompilerArgs = listOf("-XXLanguage:+PropertyParamAnnotationDefaultTargetMode")
     }
     buildFeatures {
         compose = true
@@ -106,10 +106,7 @@ android {
     sourceSets {
         getByName("main") {
             assets {
-                srcDirs("src/main/assets", "src/main/ml", "src\\main\\assets", "src\\main\\assets",
-                    "src\\main\\assets",
-                    "src\\main\\assets"
-                )
+                srcDirs("src/main/assets", "src/main/ml")
             }
         }
     }
@@ -131,20 +128,20 @@ dependencies {
 // Navigation
     implementation(libs.androidx.hilt.navigation.compose)
 
-// Google AI Edge LiteRT (Gemma 3n)
+// Google AI Edge LiteRT (Unified ML Stack)
     implementation(libs.litert.support)
+    implementation(libs.litert.gpu)
 // Room Database
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
-    implementation(libs.litert.gpu)
-    implementation(libs.play.services.mlkit.subject.segmentation)
-    implementation(libs.firebase.crashlytics.buildtools)
-    implementation(libs.androidx.ui.test.android)
     ksp(libs.androidx.room.compiler)
 
 // WorkManager
     implementation(libs.androidx.work.runtime.ktx)
-    implementation(libs.androidx.room.ktx.v261)
+
+// Firebase & UI Testing
+    implementation(libs.firebase.crashlytics.buildtools)
+    implementation(libs.androidx.ui.test.android)
 
 // Hilt Dependency Injection
     implementation(libs.hilt.android)
@@ -184,7 +181,8 @@ dependencies {
 
 // JSON Parsing
     implementation(libs.gson)
-    implementation(libs.pdfbox)
+    
+    // DOCX Processing
     implementation(libs.poi.ooxml)
 
 // DataStore
@@ -197,51 +195,41 @@ dependencies {
     implementation(libs.androidx.media3.common.ktx)
     implementation(libs.androidx.media3.exoplayer)
 
-//    implementation(libs.litert)
-//    implementation(libs.litert.gpu)
+// Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.ui.test.junit4)
-    debugImplementation(libs.androidx.ui.tooling)
-    debugImplementation(libs.androidx.ui.test.manifest)
-    implementation(libs.play.services.measurement.api)
-    implementation(libs.localagents.rag)
-
-    // Tensorflow Lite
-    implementation(libs.tensorflow.lite)
-    implementation(libs.tensorflow.lite.select.tf.ops)
-    implementation(libs.tensorflow.lite.support)
-    implementation(libs.tensorflow.lite.gpu)
-    implementation(libs.tensorflow.lite.gpu.api)
-    implementation(libs.tensorflow.lite.metadata)
-
-
-    // MediaPipe for .task models (if you want to use .task files)
-    implementation(libs.tasks.genai)
-
-    implementation(libs.tasks.text)
-// For downloading models
-    implementation(libs.okhttp)
-
-    // Hilt work manager
-    implementation(libs.androidx.hilt.work)
-    // Optional instrumentation-test helpers
     androidTestImplementation(libs.hilt.android.testing)
 
-    // Leak Detection (debug only)
+// Debug Tools
+    debugImplementation(libs.androidx.ui.tooling)
+    debugImplementation(libs.androidx.ui.test.manifest)
     debugImplementation(libs.leakcanary.android)
 
+// Analytics & Services
+    implementation(libs.play.services.measurement.api)
+    implementation(libs.localagents.rag)
     implementation(libs.asset.delivery.ktx)
 
-    implementation(libs.androidx.datastore.preferences.v110)
+// TensorFlow Lite (Legacy - for compatibility)
+    implementation(libs.tensorflow.lite)
+    implementation(libs.tensorflow.lite.support)
+    implementation(libs.tensorflow.lite.metadata)
+    // Note: Removed duplicate GPU delegates as LiteRT handles GPU acceleration
 
-    //implementation(libs.pdfbox.android)
-    implementation(libs.poi.ooxml.v523)
-    //implementation("com.tom-roush:pdfbox-android:2.0.29.0")
+// MediaPipe
+    implementation(libs.tasks.genai)
+    implementation(libs.tasks.text)
 
-    //implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+// Networking
+    implementation(libs.okhttp)
+
+// Hilt work manager
+    implementation(libs.androidx.hilt.work)
+
+    // PDF processing uses Android native PdfRenderer + ML Kit text recognition
     implementation(libs.text.recognition)
 
     //Lifecycle
@@ -281,7 +269,8 @@ configurations.all {
         force(
             "com.google.protobuf:protobuf-java:3.21.12",
             "com.google.api.grpc:proto-google-common-protos:2.29.0",
-            "com.google.firebase:protolite-well-known-types:18.0.1"
+            "com.google.firebase:protolite-well-known-types:18.0.1",
+            "androidx.test.espresso:espresso-core:3.6.1"
         )
     }
 }

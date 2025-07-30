@@ -24,7 +24,9 @@ class CurriculumAwareQuizGenerator @Inject constructor(
         val title: String,
         val gradeRange: String,
         val phase: String,
-        val subtopics: List<String> = emptyList()
+        val subtopics: List<String> = emptyList(),
+        val countries: List<String> = emptyList(), // Empty list means applies to all countries
+        val countrySpecific: Map<String, String> = emptyMap() // Country-specific variations
     )
 
     /**
@@ -36,16 +38,17 @@ class CurriculumAwareQuizGenerator @Inject constructor(
         topic: String,
         count: Int,
         difficulty: Difficulty,
+        country: String? = null,
         previousQuestions: List<String> = emptyList()
     ): List<Question> = withContext(Dispatchers.IO) {
 
         // Load curriculum topics for the subject and grade
-        val curriculumTopics = loadCurriculumForGrade(subject, gradeLevel)
+        val curriculumTopics = loadCurriculumForGrade(subject, gradeLevel, country)
 
         // Find relevant topics or use the provided topic
         // 1. Build the list (existing code)
         var relevantTopics = if (topic.isBlank()) {
-            curriculumTopics.take(5)
+            curriculumTopics.shuffled().take(5)
         } else {
             curriculumTopics.filter { it.title.contains(topic, ignoreCase = true) }
                 .ifEmpty { listOf(CurriculumTopic(topic, "", "")) }
@@ -68,9 +71,12 @@ class CurriculumAwareQuizGenerator @Inject constructor(
 
         val questions = mutableListOf<Question>()
         val questionTypes = selectQuestionTypesForGrade(gradeLevel, count)
+        
+        // Shuffle topics for each quiz session to vary question order
+        val shuffledTopics = relevantTopics.shuffled()
 
         for (i in 0 until count) {
-            val selectedTopic = relevantTopics[i % relevantTopics.size]
+            val selectedTopic = shuffledTopics[i % shuffledTopics.size]
             val questionType = questionTypes[i]
 
             try {
@@ -80,6 +86,7 @@ class CurriculumAwareQuizGenerator @Inject constructor(
                     gradeLevel = gradeLevel,
                     questionType = questionType,
                     difficulty = adjustDifficultyForGrade(difficulty, gradeLevel),
+                    country = country,
                     previousQuestions = previousQuestions + questions.map { it.questionText },
                     attemptNumber = i
                 )
@@ -95,7 +102,8 @@ class CurriculumAwareQuizGenerator @Inject constructor(
                     topic = selectedTopic,
                     gradeLevel = gradeLevel,
                     questionType = questionType,
-                    difficulty = difficulty
+                    difficulty = difficulty,
+                    country = country
                 )
                 questions.add(fallback)
             }
@@ -110,7 +118,8 @@ class CurriculumAwareQuizGenerator @Inject constructor(
     /** Load curriculum topics appropriate for the grade level */
     private suspend fun loadCurriculumForGrade(
         subject: Subject,
-        gradeLevel: Int
+        gradeLevel: Int,
+        country: String? = null
     ): List<CurriculumTopic> = withContext(Dispatchers.IO) {
 
         // ── Correct relative paths ──────────────────────────────────────────────
@@ -121,7 +130,8 @@ class CurriculumAwareQuizGenerator @Inject constructor(
             Subject.LANGUAGE_ARTS           -> "curriculum/english_curriculum.json"
             Subject.HISTORY                 -> "curriculum/history_curriculum.json"
             Subject.GEOGRAPHY               -> "curriculum/geography_curriculum.json"
-            Subject.ECONOMICS               -> "curriculum/economics_curriculum.json"  // Add this line
+            Subject.ECONOMICS               -> "curriculum/economics_curriculum.json"
+            Subject.COMPUTER_SCIENCE        -> "curriculum/computer_science_curriculum.json"
             else                            -> return@withContext emptyList()
         }
 
@@ -139,12 +149,29 @@ class CurriculumAwareQuizGenerator @Inject constructor(
                 Subject.LANGUAGE_ARTS    -> parseEnglish(jsonString, gradeLevel, topics)
                 Subject.HISTORY          -> parseHistory(jsonString, gradeLevel, topics)
                 Subject.GEOGRAPHY        -> parseGeography(jsonString, gradeLevel, topics)
-                Subject.ECONOMICS        -> parseEconomics(jsonString, gradeLevel, topics)  // Add this line
+                Subject.ECONOMICS        -> parseEconomics(jsonString, gradeLevel, topics)
+                Subject.COMPUTER_SCIENCE -> parseComputerScience(jsonString, gradeLevel, topics)
                 else -> Unit
             }
 
-            Timber.d("Loaded ${topics.size} topics for $subject grade $gradeLevel")
-            topics
+            // Filter topics by country if specified
+            val filteredTopics = if (country != null) {
+                topics.filter { topic ->
+                    // Include topic if:
+                    // 1. No countries specified (applies to all)
+                    // 2. Country is in the topic's countries list
+                    // 3. Topic has country-specific variations for this country
+                    topic.countries.isEmpty() || 
+                    topic.countries.contains(country) ||
+                    topic.countrySpecific.containsKey(country)
+                }
+            } else {
+                topics
+            }
+
+            Timber.d("Loaded ${filteredTopics.size} topics for $subject grade $gradeLevel" + 
+                    if (country != null) " (filtered for $country)" else "")
+            filteredTopics
         } catch (e: Exception) {
             Timber.e(e, "Failed to load curriculum for $subject")
             emptyList()
@@ -494,8 +521,76 @@ class CurriculumAwareQuizGenerator @Inject constructor(
         }
     }
 
+    private fun parseComputerScience(jsonString: String, gradeLevel: Int, topics: MutableList<CurriculumTopic>) {
+        val json = JSONObject(jsonString)
 
+        when (gradeLevel) {
+            0 -> addTopicsFromArray(json, "PYP", "Phase 1 (KG)", topics)
+            1, 2 -> addTopicsFromArray(json, "PYP", "Phase 2 (Grades 1–2)", topics)
+            3, 4 -> addTopicsFromArray(json, "PYP", "Phase 3 (Grades 3–4)", topics)
+            5 -> addTopicsFromArray(json, "PYP", "Phase 4 (Grades 5–6)", topics)
+            6 -> addTopicsFromArray(json, "MYP", "MYP 1 (Grade 6)", topics)
+            7 -> addTopicsFromArray(json, "MYP", "MYP 2 (Grade 7)", topics)
+            8 -> addTopicsFromArray(json, "MYP", "MYP 3 (Grade 8)", topics)
+            9, 10 -> {
+                // Handle MYP 4-5 with nested Topics structure
+                val myp = json.getJSONObject("MYP")
+                if (myp.has("MYP 4–5 (Grades 9–10)")) {
+                    val myp45 = myp.getJSONObject("MYP 4–5 (Grades 9–10)")
+                    if (myp45.has("Topics")) {
+                        val topicsArray = myp45.getJSONArray("Topics")
+                        for (i in 0 until topicsArray.length()) {
+                            topics.add(CurriculumTopic(
+                                title = topicsArray.getString(i),
+                                gradeRange = "Grades 9-10",
+                                phase = "MYP 4-5"
+                            ))
+                        }
+                    }
+                }
+            }
+            11, 12 -> {
+                // DP Computer Science themes
+                val dp = json.getJSONObject("DP")
 
+                // Theme A - Concepts of computer science
+                if (dp.has("Theme A – Concepts of computer science")) {
+                    val themeA = dp.getJSONArray("Theme A – Concepts of computer science")
+                    for (i in 0 until themeA.length()) {
+                        topics.add(CurriculumTopic(
+                            title = "Theme A - ${themeA.getString(i)}",
+                            gradeRange = "Grades 11-12",
+                            phase = "DP Computer Science"
+                        ))
+                    }
+                }
+
+                // Theme B - Computational thinking & problem-solving
+                if (dp.has("Theme B – Computational thinking & problem-solving")) {
+                    val themeB = dp.getJSONArray("Theme B – Computational thinking & problem-solving")
+                    for (i in 0 until themeB.length()) {
+                        topics.add(CurriculumTopic(
+                            title = "Theme B - ${themeB.getString(i)}",
+                            gradeRange = "Grades 11-12",
+                            phase = "DP Computer Science"
+                        ))
+                    }
+                }
+
+                // Practical programme
+                if (dp.has("Practical programme")) {
+                    val practical = dp.getJSONArray("Practical programme")
+                    for (i in 0 until practical.length()) {
+                        topics.add(CurriculumTopic(
+                            title = "Practical - ${practical.getString(i)}",
+                            gradeRange = "Grades 11-12",
+                            phase = "DP Computer Science"
+                        ))
+                    }
+                }
+            }
+        }
+    }
 
     private fun addTopicsFromArray(
         json: JSONObject,
@@ -556,6 +651,7 @@ class CurriculumAwareQuizGenerator @Inject constructor(
         gradeLevel: Int,
         questionType: QuestionType,
         difficulty: Difficulty,
+        country: String? = null,
         previousQuestions: List<String>,
         attemptNumber: Int
     ): Question {
@@ -570,33 +666,56 @@ class CurriculumAwareQuizGenerator @Inject constructor(
                     gradeLevel = gradeLevel,
                     questionType = questionType,
                     difficulty = difficulty,
+                    country = country,
                     previousQuestions = previousQuestions,
                     attemptNumber = attemptNumber + attempt
                 )
+                
+                // Log prompt length to help debug truncation issues
+                Timber.d("Generated prompt length: ${prompt.length} characters")
 
-                val response = gemmaService.generateTextAsync(
-                    prompt,
-                    UnifiedGemmaService.GenerationConfig(
-                        maxTokens = 500,
-                        temperature = 0.7f + ((attemptNumber + attempt) * 0.05f),
-                        topK = 40 + (attempt * 10)
+                val response = try {
+                    gemmaService.generateTextAsync(
+                        prompt,
+                        UnifiedGemmaService.GenerationConfig(
+                            maxTokens = 500,
+                            temperature = 0.7f + ((attemptNumber + attempt) * 0.05f),
+                            topK = 40 + (attempt * 10)
+                        )
                     )
-                )
+                } catch (e: Exception) {
+                    // Handle MediaPipe session corruption
+                    if (e.message?.contains("timestamp mismatch") == true || 
+                        e.message?.contains("INVALID_ARGUMENT") == true) {
+                        Timber.w("MediaPipe session corruption detected, using fallback")
+                        throw Exception("Session corruption - will use fallback")
+                    }
+                    throw e
+                }
 
+                Timber.d("Received AI response length: ${response.length} characters")
                 val question = parseQuestionResponse(response, questionType, difficulty, gradeLevel)
+                Timber.d("Successfully parsed question: ${question.questionText.take(50)}...")
                 
                 // Check similarity against previous questions
                 val similarities = previousQuestions.map { prev ->
                     calculateSimilarity(question.questionText.lowercase(), prev.lowercase())
                 }
                 val maxSimilarity = similarities.maxOfOrNull { it } ?: 0f
-                val isTooSimilar = maxSimilarity > 0.75f
+                // Use a more lenient threshold for curriculum questions since they're topic-specific
+                // and allow more similarity, especially for foundational concepts
+                val similarityThreshold = when (attempt) {
+                    0 -> 0.85f  // First attempt: strict
+                    1 -> 0.90f  // Second attempt: more lenient
+                    else -> 0.95f  // Final attempt: very lenient
+                }
+                val isTooSimilar = maxSimilarity > similarityThreshold
                 
                 if (!isTooSimilar) {
-                    Timber.d("Curriculum question accepted, max similarity: $maxSimilarity")
+                    Timber.d("Curriculum question accepted, max similarity: $maxSimilarity (threshold: $similarityThreshold)")
                     return question
                 } else {
-                    Timber.w("Curriculum question too similar ($maxSimilarity), attempt ${attempt + 1}")
+                    Timber.w("Curriculum question too similar ($maxSimilarity > $similarityThreshold), attempt ${attempt + 1}")
                     lastError = Exception("Question too similar: $maxSimilarity")
                 }
                 
@@ -608,7 +727,7 @@ class CurriculumAwareQuizGenerator @Inject constructor(
         
         // If all attempts failed, use fallback
         Timber.e(lastError, "All curriculum question attempts failed, using fallback")
-        return generateCurriculumFallback(subject, topic, gradeLevel, questionType, difficulty)
+        return generateCurriculumFallback(subject, topic, gradeLevel, questionType, difficulty, country)
     }
 
     /**
@@ -620,30 +739,69 @@ class CurriculumAwareQuizGenerator @Inject constructor(
         gradeLevel: Int,
         questionType: QuestionType,
         difficulty: Difficulty,
+        country: String? = null,
         previousQuestions: List<String>,
         attemptNumber: Int
     ): String {
 
         val gradeContext = getGradeContext(gradeLevel)
-        val topicDescription = if (topic.subtopics.isNotEmpty()) {
+        
+        // Handle country-specific topic variations
+        val topicDescription = if (country != null && topic.countrySpecific.containsKey(country)) {
+            topic.countrySpecific[country] ?: topic.title
+        } else if (topic.subtopics.isNotEmpty()) {
             "${topic.title} (specifically: ${topic.subtopics.random()})"
         } else {
             topic.title
         }
+        
+        // Add country context for relevant subjects
+        val countryContext = if (country != null && (subject == Subject.HISTORY || subject == Subject.GEOGRAPHY)) {
+            val context = getCountryContext(country, subject)
+            Timber.d("Country context for $country in $subject: ${context.take(100)}...")
+            context
+        } else {
+            Timber.d("No country context applied for country=$country, subject=$subject")
+            null
+        }
 
         val typeInstructions = getQuestionTypeInstructions(questionType, gradeLevel)
         val example = getGradeAppropriateExample(questionType, subject, gradeLevel)
+        
+        // Add variety based on attempt number to reduce similarity
+        val approachVariations = listOf(
+            "Focus on practical applications and real-world examples",
+            "Emphasize conceptual understanding and 'why' questions",
+            "Use creative scenarios and storytelling elements", 
+            "Connect to current events or popular culture",
+            "Focus on problem-solving and critical thinking",
+            "Use analogies and comparisons to familiar concepts"
+        )
+        
+        val questionStyles = listOf(
+            "analytical and thoughtful",
+            "creative and imaginative", 
+            "practical and application-focused",
+            "exploratory and discovery-based",
+            "comparative and contrasting",
+            "scenario-based and contextual"
+        )
+        
+        val selectedApproach = approachVariations[attemptNumber % approachVariations.size]
+        val selectedStyle = questionStyles[attemptNumber % questionStyles.size]
 
-        return """
-            Create a $questionType question for a Grade $gradeLevel student.
+        val prompt = """
+            Create a $selectedStyle $questionType question for a Grade $gradeLevel student.
             
             Subject: $subject
             Topic: $topicDescription
             Curriculum Phase: ${topic.phase}
             Difficulty: $difficulty
+            Approach: $selectedApproach
             
             GRADE CONTEXT:
             $gradeContext
+            ${countryContext?.let { "\n            COUNTRY CONTEXT:\n            $it" } ?: ""}
             
             INSTRUCTIONS:
             $typeInstructions
@@ -655,10 +813,18 @@ class CurriculumAwareQuizGenerator @Inject constructor(
             - Use age-appropriate vocabulary for grade $gradeLevel
             - Question must be about the specific topic: $topicDescription
             - Make it engaging and relevant to students of this age
-            - Avoid these previous questions: ${previousQuestions.takeLast(3).joinToString("; ")}
+            - Use a $selectedStyle approach with focus on: $selectedApproach
+            - Create something completely different from these previous questions: ${previousQuestions.takeLast(3).joinToString("; ") { "\"${it.take(25)}...\"" }}
             
             Generate the question in valid JSON format:
         """.trimIndent()
+        
+        // Log prompt preview for debugging
+        if (country != null) {
+            Timber.d("Prompt preview (country=$country): ${prompt.take(300)}...")
+        }
+        
+        return prompt
     }
 
     /**
@@ -669,18 +835,19 @@ class CurriculumAwareQuizGenerator @Inject constructor(
         topic: CurriculumTopic,
         gradeLevel: Int,
         questionType: QuestionType,
-        difficulty: Difficulty
+        difficulty: Difficulty,
+        country: String? = null
     ): Question {
 
         // Create grade and subject appropriate fallbacks
         val fallbackPool = when (subject) {
-            Subject.MATHEMATICS -> getMathFallbacks(gradeLevel, topic.title)
-            Subject.SCIENCE -> getScienceFallbacks(gradeLevel, topic.title)
-            Subject.ENGLISH, Subject.LANGUAGE_ARTS -> getEnglishFallbacks(gradeLevel, topic.title)
-            Subject.HISTORY -> getHistoryFallbacks(gradeLevel, topic.title)
-            Subject.GEOGRAPHY -> getGeographyFallbacks(gradeLevel, topic.title)
-            Subject.ECONOMICS -> getEconomicsFallbacks(gradeLevel, topic.title)
-            else -> getGeneralFallbacks(gradeLevel)
+            Subject.MATHEMATICS -> getMathFallbacks(gradeLevel, topic.title, country)
+            Subject.SCIENCE -> getScienceFallbacks(gradeLevel, topic.title, country)
+            Subject.ENGLISH, Subject.LANGUAGE_ARTS -> getEnglishFallbacks(gradeLevel, topic.title, country)
+            Subject.HISTORY -> getHistoryFallbacks(gradeLevel, topic.title, country)
+            Subject.GEOGRAPHY -> getGeographyFallbacks(gradeLevel, topic.title, country)
+            Subject.ECONOMICS -> getEconomicsFallbacks(gradeLevel, topic.title, country)
+            else -> getGeneralFallbacks(gradeLevel, country)
         }
 
         val selectedFallback = fallbackPool.filter { it.questionType == questionType }
@@ -851,7 +1018,9 @@ class CurriculumAwareQuizGenerator @Inject constructor(
                 .removeSuffix("```")
                 .trim()
 
-            val json = JSONObject(cleaned)
+            // Fix common JSON issues
+            val sanitized = sanitizeAndFixJson(cleaned)
+            val json = JSONObject(sanitized)
 
             var questionText = json.getString("question")
             val correctAnswer = json.getString("correctAnswer")
@@ -882,14 +1051,76 @@ class CurriculumAwareQuizGenerator @Inject constructor(
             )
 
         } catch (e: Exception) {
-            Timber.e(e, "Failed to parse curriculum question")
-            throw e
+            Timber.e(e, "Failed to parse curriculum question, response preview: ${response.take(200)}...")
+            
+            // Attempt to extract basic info from malformed response
+            return tryParseFromMalformedResponse(response, questionType, difficulty).also { fallback ->
+                if (fallback != null) {
+                    Timber.i("Successfully recovered question using fallback parsing")
+                } else {
+                    Timber.e("Complete parsing failure - will throw exception")
+                }
+            } ?: throw Exception("Could not parse response after all attempts: ${e.message}")
+        }
+    }
+
+    /**
+     * Attempt to parse essential information from malformed AI responses
+     */
+    private fun tryParseFromMalformedResponse(
+        response: String, 
+        questionType: QuestionType, 
+        difficulty: Difficulty
+    ): Question? {
+        return try {
+            // Extract question text using regex patterns
+            val questionPattern = "\"question\"\\s*:\\s*\"([^\"]+)\"".toRegex()
+            val questionMatch = questionPattern.find(response)
+            val questionText = questionMatch?.groupValues?.get(1) ?: return null
+            
+            // Extract correct answer
+            val answerPattern = "\"correctAnswer\"\\s*:\\s*\"([^\"]+)\"".toRegex()
+            val answerMatch = answerPattern.find(response)
+            val correctAnswer = answerMatch?.groupValues?.get(1) ?: return null
+            
+            // Extract explanation (optional)
+            val explanationPattern = "\"explanation\"\\s*:\\s*\"([^\"]+)\"".toRegex()
+            val explanationMatch = explanationPattern.find(response)
+            val explanation = explanationMatch?.groupValues?.get(1) ?: "Generated from partial response"
+            
+            // Extract options for multiple choice
+            val options = when (questionType) {
+                QuestionType.MULTIPLE_CHOICE -> {
+                    val optionsPattern = "\"options\"\\s*:\\s*\\[([^\\]]+)\\]".toRegex()
+                    val optionsMatch = optionsPattern.find(response)
+                    optionsMatch?.groupValues?.get(1)?.let { optionsStr ->
+                        optionsStr.split(",")
+                            .map { it.trim().removePrefix("\"").removeSuffix("\"") }
+                            .filter { it.isNotBlank() }
+                    } ?: listOf(correctAnswer, "Option 1", "Option 2", "Option 3")
+                }
+                QuestionType.TRUE_FALSE -> listOf("True", "False")
+                else -> emptyList()
+            }
+            
+            Question(
+                questionText = questionText,
+                questionType = questionType,
+                options = options,
+                correctAnswer = correctAnswer,
+                explanation = explanation,
+                difficulty = difficulty,
+                conceptsCovered = listOf("curriculum-topic-fallback")
+            )
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to parse from malformed response")
+            null
         }
     }
 
     // Subject-specific fallback pools
 
-    private fun getMathFallbacks(gradeLevel: Int, topic: String): List<Question> {
+    private fun getMathFallbacks(gradeLevel: Int, topic: String, country: String? = null): List<Question> {
         return when {
             gradeLevel <= 2 -> listOf(
                 Question(
@@ -940,7 +1171,7 @@ class CurriculumAwareQuizGenerator @Inject constructor(
         }
     }
 
-    private fun getScienceFallbacks(gradeLevel: Int, topic: String): List<Question> {
+    private fun getScienceFallbacks(gradeLevel: Int, topic: String, country: String? = null): List<Question> {
         return when {
             gradeLevel <= 2 -> listOf(
                 Question(
@@ -983,7 +1214,7 @@ class CurriculumAwareQuizGenerator @Inject constructor(
         }
     }
 
-    private fun getEnglishFallbacks(gradeLevel: Int, topic: String): List<Question> {
+    private fun getEnglishFallbacks(gradeLevel: Int, topic: String, country: String? = null): List<Question> {
         return when {
             gradeLevel <= 2 -> listOf(
                 Question(
@@ -1018,8 +1249,68 @@ class CurriculumAwareQuizGenerator @Inject constructor(
         }
     }
 
-    private fun getHistoryFallbacks(gradeLevel: Int, topic: String): List<Question> {
-        return when {
+    private fun getHistoryFallbacks(gradeLevel: Int, topic: String, country: String? = null): List<Question> {
+        val countrySpecificQuestions = when (country) {
+            "Canada" -> listOf(
+                Question(
+                    questionText = "When did Canada become a country?",
+                    questionType = QuestionType.MULTIPLE_CHOICE,
+                    options = listOf("1867", "1876", "1901", "1931"),
+                    correctAnswer = "1867",
+                    explanation = "Canada became a country on July 1, 1867 through Confederation",
+                    difficulty = Difficulty.MEDIUM
+                ),
+                Question(
+                    questionText = "Who was Canada's first Prime Minister?",
+                    questionType = QuestionType.MULTIPLE_CHOICE,
+                    options = listOf("John A. Macdonald", "Wilfrid Laurier", "Robert Borden", "Alexander Mackenzie"),
+                    correctAnswer = "John A. Macdonald",
+                    explanation = "Sir John A. Macdonald was Canada's first Prime Minister",
+                    difficulty = Difficulty.MEDIUM
+                )
+            )
+            "Australia" -> listOf(
+                Question(
+                    questionText = "When did Australia become a federation?",
+                    questionType = QuestionType.MULTIPLE_CHOICE,
+                    options = listOf("1895", "1901", "1910", "1920"),
+                    correctAnswer = "1901",
+                    explanation = "Australia became a federation on January 1, 1901",
+                    difficulty = Difficulty.MEDIUM
+                )
+            )
+            "United Kingdom" -> listOf(
+                Question(
+                    questionText = "Who was the British queen during the Victorian era?",
+                    questionType = QuestionType.MULTIPLE_CHOICE,
+                    options = listOf("Elizabeth I", "Victoria", "Elizabeth II", "Mary"),
+                    correctAnswer = "Victoria",
+                    explanation = "Queen Victoria reigned during the Victorian era (1837-1901)",
+                    difficulty = Difficulty.MEDIUM
+                )
+            )
+            "Ghana" -> listOf(
+                Question(
+                    questionText = "Who was Ghana's first president after independence?",
+                    questionType = QuestionType.MULTIPLE_CHOICE,
+                    options = listOf("Kwame Nkrumah", "Jerry Rawlings", "John Kufuor", "Kofi Annan"),
+                    correctAnswer = "Kwame Nkrumah",
+                    explanation = "Kwame Nkrumah became Ghana's first president when it gained independence in 1957",
+                    difficulty = Difficulty.MEDIUM
+                ),
+                Question(
+                    questionText = "What was Ghana called before independence?",
+                    questionType = QuestionType.MULTIPLE_CHOICE,
+                    options = listOf("Gold Coast", "Ivory Coast", "Upper Volta", "British West Africa"),
+                    correctAnswer = "Gold Coast",
+                    explanation = "Ghana was known as the Gold Coast during British colonial rule",
+                    difficulty = Difficulty.EASY
+                )
+            )
+            else -> emptyList()
+        }
+
+        val generalQuestions = when {
             gradeLevel <= 5 -> listOf(
                 Question(
                     questionText = "Who was the first president of the United States?",
@@ -1041,9 +1332,11 @@ class CurriculumAwareQuizGenerator @Inject constructor(
                 )
             )
         }
+
+        return countrySpecificQuestions + generalQuestions
     }
 
-    private fun getGeographyFallbacks(gradeLevel: Int, topic: String): List<Question> {
+    private fun getGeographyFallbacks(gradeLevel: Int, topic: String, country: String? = null): List<Question> {
         return when {
             gradeLevel <= 5 -> listOf(
                 Question(
@@ -1068,7 +1361,7 @@ class CurriculumAwareQuizGenerator @Inject constructor(
         }
     }
 
-    private fun getEconomicsFallbacks(gradeLevel: Int, topic: String): List<Question> {
+    private fun getEconomicsFallbacks(gradeLevel: Int, topic: String, country: String? = null): List<Question> {
         return when {
             gradeLevel <= 2 -> listOf(
                 Question(
@@ -1145,7 +1438,7 @@ class CurriculumAwareQuizGenerator @Inject constructor(
         }
     }
 
-    private fun getGeneralFallbacks(gradeLevel: Int): List<Question> {
+    private fun getGeneralFallbacks(gradeLevel: Int, country: String? = null): List<Question> {
         return listOf(
             Question(
                 questionText = "Which season comes after summer?",
@@ -1205,6 +1498,122 @@ class CurriculumAwareQuizGenerator @Inject constructor(
             text.windowed(3, 1).toSet()
         } else {
             emptySet()
+        }
+    }
+
+    /**
+     * Sanitize and fix common JSON issues from AI responses
+     */
+    private fun sanitizeAndFixJson(rawJson: String): String {
+        var json = rawJson.trim()
+        
+        // If JSON doesn't start with {, try to find it
+        val startIndex = json.indexOf('{')
+        if (startIndex > 0) {
+            json = json.substring(startIndex)
+        }
+        
+        // Handle unterminated strings by finding incomplete fields
+        if (!json.endsWith("}")) {
+            // Find the last complete field
+            val lastCompleteField = findLastCompleteField(json)
+            if (lastCompleteField != -1) {
+                json = json.substring(0, lastCompleteField) + "}"
+            } else {
+                // Fallback: just add closing brace
+                json += "}"
+            }
+        }
+        
+        // Fix common quote issues
+        json = json.replace(""", "\"").replace(""", "\"")
+        json = json.replace("'", "\"") // Replace single quotes with double quotes in keys
+        
+        // Ensure all string values are properly quoted
+        json = fixUnquotedStrings(json)
+        
+        return json
+    }
+    
+    private fun findLastCompleteField(json: String): Int {
+        var lastGoodPosition = -1
+        var inString = false
+        var escaped = false
+        var braceLevel = 0
+        
+        for (i in json.indices) {
+            val char = json[i]
+            
+            when {
+                escaped -> escaped = false
+                char == '\\' && inString -> escaped = true
+                char == '"' -> inString = !inString
+                !inString -> {
+                    when (char) {
+                        '{' -> braceLevel++
+                        '}' -> braceLevel--
+                        ',' -> if (braceLevel == 1) lastGoodPosition = i
+                    }
+                }
+            }
+        }
+        
+        return lastGoodPosition
+    }
+    
+    private fun fixUnquotedStrings(json: String): String {
+        // This is a simplified fix - in practice, you might need more robust parsing
+        return json.replace(Regex("(\\w+)\\s*:"), "\"$1\":")
+    }
+
+    /**
+     * Get country-specific context for questions
+     */
+    private fun getCountryContext(country: String, subject: Subject): String {
+        return when (subject) {
+            Subject.HISTORY -> getHistoryCountryContext(country)
+            Subject.GEOGRAPHY -> getGeographyCountryContext(country)
+            else -> ""
+        }
+    }
+
+    private fun getHistoryCountryContext(country: String): String {
+        return when (country) {
+            "United States" -> "Focus on American history, including Colonial period, Revolutionary War, Civil War, and modern American events. Use examples from U.S. historical figures and events."
+            "Canada" -> "Emphasize Canadian history including Indigenous peoples, French and British colonization, Confederation, and Canadian identity. Reference Canadian historical figures and events."
+            "United Kingdom" -> "Draw from British history including monarchies, Industrial Revolution, British Empire, and modern UK. Use examples from British historical figures and events."
+            "Australia" -> "Include Australian history such as Aboriginal culture, British colonization, gold rushes, and modern Australia. Reference Australian historical figures and events."
+            "India" -> "Incorporate Indian history including ancient civilizations, Mughal Empire, British colonial period, independence movement, and modern India."
+            "South Africa" -> "Include South African history covering indigenous peoples, Dutch and British colonization, apartheid, and post-apartheid era."
+            "Germany" -> "Focus on German history including Holy Roman Empire, unification, World Wars, division and reunification."
+            "France" -> "Emphasize French history including monarchy, French Revolution, Napoleon, and modern France."
+            "China" -> "Include Chinese history covering ancient dynasties, imperial China, modern revolutions, and contemporary China."
+            "Japan" -> "Focus on Japanese history including samurai period, Meiji Restoration, World War II, and modern Japan."
+            "Ghana" -> "Focus on Ghanaian history including ancient kingdoms (like the Gold Coast), colonial period under British rule, independence movement led by Kwame Nkrumah, and modern Ghana. Reference Ghanaian historical figures and West African context."
+            "Nigeria" -> "Include Nigerian history covering ancient kingdoms (Benin, Oyo), British colonial period, independence movement, civil war, and modern Nigeria. Reference Nigerian historical figures and West African context."
+            "Kenya" -> "Focus on Kenyan history including indigenous peoples, British colonial period, Mau Mau uprising, independence movement, and modern Kenya. Reference Kenyan historical figures and East African context."
+            "Egypt" -> "Include Egyptian history covering ancient civilizations, pharaohs, Islamic period, Ottoman rule, British influence, modern independence, and contemporary Egypt."
+            else -> "Use examples and context relevant to the student's country and region when possible."
+        }
+    }
+
+    private fun getGeographyCountryContext(country: String): String {
+        return when (country) {
+            "United States" -> "Use American geographic examples including states, major cities, rivers, mountain ranges, and climate zones. Reference the continental US, Alaska, and Hawaii."
+            "Canada" -> "Include Canadian geographic features such as provinces, territories, major cities, the Canadian Shield, Rocky Mountains, and Arctic regions."
+            "United Kingdom" -> "Focus on British Isles geography including England, Scotland, Wales, Northern Ireland, major cities, and surrounding seas."
+            "Australia" -> "Emphasize Australian geography including states, territories, Outback, Great Barrier Reef, major cities, and unique climate zones."
+            "India" -> "Include Indian subcontinent geography covering states, Himalayas, major rivers like Ganges, monsoons, and diverse climate zones."
+            "South Africa" -> "Focus on South African geography including provinces, major cities, Table Mountain, Drakensberg Mountains, and different climate regions."
+            "Germany" -> "Include German geography covering states (Länder), major cities, rivers like Rhine and Danube, and Central European features."
+            "France" -> "Emphasize French geography including regions, major cities, Alps, Mediterranean coast, and European context."
+            "China" -> "Focus on Chinese geography including provinces, major cities, rivers like Yangtze and Yellow River, and diverse landscapes."
+            "Japan" -> "Include Japanese geography covering islands, major cities, mountains, earthquakes, and Pacific location."
+            "Ghana" -> "Focus on Ghanaian geography including regions (Northern, Middle, Southern), major cities like Accra and Kumasi, Volta River, Lake Volta, Atlantic coastline, and West African climate zones."
+            "Nigeria" -> "Include Nigerian geography covering states, major cities like Lagos and Abuja, Niger River, diverse climate zones from Sahel to coastal regions, and West African context."
+            "Kenya" -> "Focus on Kenyan geography including counties, major cities like Nairobi and Mombasa, Great Rift Valley, Mount Kenya, Lake Victoria, and East African features."
+            "Egypt" -> "Include Egyptian geography covering governorates, major cities like Cairo and Alexandria, Nile River, deserts, and North African/Middle Eastern context."
+            else -> "Use geographic examples and context relevant to the student's country and region when possible."
         }
     }
 }

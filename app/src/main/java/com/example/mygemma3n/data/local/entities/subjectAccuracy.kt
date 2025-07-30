@@ -5,11 +5,10 @@ import androidx.room.Insert
 import androidx.room.Query
 import com.example.mygemma3n.feature.quiz.Difficulty
 import com.example.mygemma3n.feature.quiz.UserProgress
-import com.google.mlkit.vision.segmentation.subject.Subject
 
 // Define a POJO to match your query result
 data class SubjectAccuracy(
-    val subject: Subject,
+    val subject: com.example.mygemma3n.feature.quiz.Subject,
     val accuracy: Float
 )
 

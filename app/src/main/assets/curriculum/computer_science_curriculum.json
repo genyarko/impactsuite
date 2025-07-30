@@ -1,0 +1,102 @@
+{
+  "PYP": {
+    "Phase 1 (KG)": [
+      "Turn a computer on/off and operate a mouse/trackpad",
+      "Identify basic hardware components (monitor, keyboard, mouse)",
+      "Use simple graphics apps to draw and colour",
+      "Type letters and short words with correct posture",
+      "Work with a peer in an educational game or activity",
+      "Recognise safe and respectful device use"
+    ],
+    "Phase 2 (Grades 1\u20132)": [
+      "Navigate desktop icons and simple menus",
+      "Use special keys (Enter, Space, Backspace) confidently",
+      "Open, close and save documents",
+      "Search for images or facts online with guidance",
+      "Create a short multimedia slide with text and pictures",
+      "Demonstrate basic online safety and etiquette"
+    ],
+    "Phase 3 (Grades 3\u20134)": [
+      "Produce a multimedia presentation with audio and transitions",
+      "Create a simple program in a block\u2011based language (e.g., Scratch)",
+      "Use digital drawing/design software to illustrate ideas",
+      "Evaluate online sources for reliability",
+      "Send and reply to emails using proper etiquette",
+      "Describe positive digital citizenship behaviours"
+    ],
+    "Phase 4 (Grades 5\u20136)": [
+      "Collect and analyse data with spreadsheets and basic formulas",
+      "Design a game or animation using block\u2011based coding",
+      "Build online forms and charts to present findings",
+      "Manage files and folders in local/cloud drives",
+      "Conduct independent research from multiple sources",
+      "Explain digital footprints, cyberbullying and privacy"
+    ]
+  },
+  "MYP": {
+    "MYP 1 (Grade 6)": [
+      "Apply the design cycle to identify and plan digital solutions",
+      "Develop algorithms with flowcharts and pseudocode",
+      "Program simple interactive stories or games in Scratch or Python",
+      "Explore basic robotics with LEGO or micro:bit",
+      "Discuss data representation (binary, pixels, bits)",
+      "Demonstrate responsible use of online tools"
+    ],
+    "MYP 2 (Grade 7)": [
+      "Use variables, conditionals and loops in a text\u2011based language",
+      "Create a basic website with HTML and CSS",
+      "Collect sensor data with microcontrollers and display results",
+      "Edit digital media (audio, video, images) for a project",
+      "Explain fundamentals of cybersecurity and strong passwords",
+      "Collaborate online using shared documents and version control basics"
+    ],
+    "MYP 3 (Grade 8)": [
+      "Design and prototype a mobile or web app",
+      "Analyse datasets with spreadsheets or beginner data\u2011science tools",
+      "Program autonomous behaviours in VEX or similar robotics kits",
+      "Model objects in CAD and produce a 3\u2011D print",
+      "Use Agile project management (scrum boards, sprints)",
+      "Debate ethical issues: privacy, AI bias, e\u2011waste"
+    ],
+    "MYP 4\u20135 (Grades 9\u201310)": {
+      "Topics": [
+        "Algorithm efficiency and Big\u2011O notation",
+        "Object\u2011oriented programming fundamentals",
+        "Data structures: arrays, lists, stacks, queues",
+        "Relational databases and SQL basics",
+        "Client\u2013server networking and protocols",
+        "Cybersecurity threats and defences",
+        "Internet of Things and embedded systems",
+        "Introduction to machine learning concepts",
+        "Human\u2013computer interaction and UX principles",
+        "Capstone project following the full design cycle"
+      ]
+    }
+  },
+  "DP": {
+    "Theme A \u2013 Concepts of computer science": [
+      "Computer fundamentals (CPU, memory, processors, OS)",
+      "Networks (architecture, protocols, security)",
+      "Databases (design, SQL, alternative models)",
+      "Machine learning fundamentals and ethics (HL only)"
+    ],
+    "Theme B \u2013 Computational thinking & problem\u2011solving": [
+      "Computational thinking processes",
+      "Programming fundamentals, algorithms and file processing",
+      "Object\u2011oriented programming (single class SL; multi\u2011class HL)",
+      "Abstract data types (queues, stacks, linked lists, trees \u2013 HL)"
+    ],
+    "Practical programme": [
+      "Case study of an evolving real\u2011world computing scenario",
+      "Internal assessment: design, develop and test a software product",
+      "Collaborative sciences project across Group 4 subjects"
+    ]
+  },
+  "enhancements": {
+    "perGradeSuggestions": true,
+    "trackTopicUsage": true,
+    "markTopicComplete": true,
+    "highlightUnseenTopics": true,
+    "allowBookmarks": true
+  }
+}

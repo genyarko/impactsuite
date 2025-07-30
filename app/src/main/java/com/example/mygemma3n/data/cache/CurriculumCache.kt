@@ -6,6 +6,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import timber.log.Timber
+import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -15,6 +16,7 @@ class CurriculumCache @Inject constructor() {
     data class CachedCurriculum(
         val data: JSONObject,
         val timestamp: Long,
+        val contentHash: String,
         val topics: List<CurriculumTopic>
     )
     
@@ -35,18 +37,6 @@ class CurriculumCache @Inject constructor() {
         subject: OfflineRAG.Subject
     ): List<CurriculumTopic> = cacheMutex.withLock {
         
-        val cached = cache[subject]
-        val now = System.currentTimeMillis()
-        
-        // Check if cache is valid
-        if (cached != null && (now - cached.timestamp) < cacheExpirationTime) {
-            Timber.d("Cache hit for subject: ${subject.name}")
-            return@withLock cached.topics
-        }
-        
-        // Cache miss or expired - load from file
-        Timber.d("Cache miss for subject: ${subject.name}, loading from file")
-        
         val fileName = getFileNameForSubject(subject)
         if (fileName == null) {
             Timber.w("No curriculum file for subject: ${subject.name}")
@@ -54,14 +44,38 @@ class CurriculumCache @Inject constructor() {
         }
         
         try {
+            // Read file content to check for changes
             val jsonString = context.assets.open(fileName).bufferedReader().use { it.readText() }
+            val contentHash = calculateHash(jsonString)
+            
+            val cached = cache[subject]
+            val now = System.currentTimeMillis()
+            
+            // Check if cache is valid (not expired AND content hasn't changed)
+            if (cached != null && 
+                (now - cached.timestamp) < cacheExpirationTime && 
+                cached.contentHash == contentHash) {
+                Timber.d("Cache hit for subject: ${subject.name}")
+                return@withLock cached.topics
+            }
+            
+            // Cache miss, expired, or content changed - reload
+            val reason = when {
+                cached == null -> "Cache miss"
+                (now - cached.timestamp) >= cacheExpirationTime -> "Cache expired"
+                cached.contentHash != contentHash -> "Content changed"
+                else -> "Unknown reason"
+            }
+            Timber.d("$reason for subject: ${subject.name}, loading from file")
+            
             val json = JSONObject(jsonString)
             val topics = parseCurriculumJson(json, subject)
             
-            // Cache the result
+            // Cache the result with content hash
             cache[subject] = CachedCurriculum(
                 data = json,
                 timestamp = now,
+                contentHash = contentHash,
                 topics = topics
             )
             
@@ -83,6 +97,7 @@ class CurriculumCache @Inject constructor() {
             OfflineRAG.Subject.HISTORY -> "curriculum/history_curriculum.json"
             OfflineRAG.Subject.GEOGRAPHY -> "curriculum/geography_curriculum.json"
             OfflineRAG.Subject.ECONOMICS -> "curriculum/economics_curriculum.json"
+            OfflineRAG.Subject.COMPUTER_SCIENCE -> "curriculum/computer_science_curriculum.json"
             else -> null
         }
     }
@@ -232,6 +247,12 @@ class CurriculumCache @Inject constructor() {
         return finalTopics.filter { it.isNotEmpty() && it.length >= 3 }
     }
     
+    private fun calculateHash(content: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val hashBytes = digest.digest(content.toByteArray())
+        return hashBytes.joinToString("") { "%02x".format(it) }
+    }
+    
     suspend fun clearCache() = cacheMutex.withLock {
         cache.clear()
         Timber.d("Curriculum cache cleared")
@@ -249,7 +270,8 @@ class CurriculumCache @Inject constructor() {
             mapOf(
                 "topicCount" to cached.topics.size,
                 "cacheAge" to (System.currentTimeMillis() - cached.timestamp),
-                "isExpired" to ((System.currentTimeMillis() - cached.timestamp) > cacheExpirationTime)
+                "isExpired" to ((System.currentTimeMillis() - cached.timestamp) > cacheExpirationTime),
+                "contentHash" to cached.contentHash.take(8) // Show first 8 chars of hash
             )
         }
         return@withLock stats
