@@ -13,9 +13,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -87,6 +90,30 @@ fun LiveCaptionScreen(
                     onLanguageSelected = { viewModel.setTargetLanguage(it) },
                     modifier = Modifier.weight(1f)
                 )
+            }
+
+            // Service mode indicator
+            if (state.isListening && (state.isUsingOnlineService || !state.isUsingOnlineService)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = if (state.isUsingOnlineService) Icons.Default.Cloud else Icons.Default.Computer,
+                        contentDescription = null,
+                        tint = if (state.isUsingOnlineService) Color.Green else Color.Cyan,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = if (state.isUsingOnlineService) "Online Mode" else "Offline Mode",
+                        color = Color.White.copy(alpha = 0.8f),
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
             }
 
             // Scrollable transcript history

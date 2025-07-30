@@ -6,6 +6,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mygemma3n.data.ChatRepository
 import com.example.mygemma3n.data.UnifiedGemmaService
+import com.example.mygemma3n.data.GeminiApiService
+import com.example.mygemma3n.data.GeminiApiConfig
+import com.example.mygemma3n.domain.repository.SettingsRepository
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import dagger.hilt.android.qualifiers.ApplicationContext
 import com.example.mygemma3n.feature.chat.ChatMessage
 import com.example.mygemma3n.service.AudioCaptureService
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -35,8 +42,11 @@ import com.example.mygemma3n.SPEECH_API_KEY
 @HiltViewModel
 class LiveCaptionViewModel @Inject constructor(
     application: Application,
+    @ApplicationContext private val context: Context,
     private val speechService: SpeechRecognitionService,
     private val gemmaService: UnifiedGemmaService,
+    private val geminiApiService: GeminiApiService,
+    private val settingsRepository: SettingsRepository,
     private val translationCache: TranslationCache,
     private val chatRepository: ChatRepository,
 ) : AndroidViewModel(application) {
@@ -60,6 +70,46 @@ class LiveCaptionViewModel @Inject constructor(
     private val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
     private val MAX_UTTERANCE_MS = 2_000L
     private val SILENCE_FRAMES_TO_FLUSH = 4
+    
+    /* ───────── service selection helpers ───────── */
+    private fun hasNetworkConnection(): Boolean {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val activeNetwork = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+    }
+
+    private suspend fun shouldUseOnlineService(): Boolean {
+        return try {
+            val useOnlineService = settingsRepository.useOnlineServiceFlow.first()
+            val hasApiKey = settingsRepository.apiKeyFlow.first().isNotBlank()
+            val hasNetwork = hasNetworkConnection()
+            
+            useOnlineService && hasApiKey && hasNetwork
+        } catch (e: Exception) {
+            Timber.w(e, "Error checking service preference, defaulting to offline")
+            false
+        }
+    }
+
+    private suspend fun initializeApiServiceIfNeeded() {
+        if (!geminiApiService.isInitialized()) {
+            val apiKey = settingsRepository.apiKeyFlow.first()
+            if (apiKey.isNotBlank()) {
+                try {
+                    geminiApiService.initialize(GeminiApiConfig(apiKey = apiKey))
+                    Timber.d("GeminiApiService initialized for Live Caption")
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to initialize GeminiApiService")
+                    throw e
+                }
+            } else {
+                throw IllegalStateException("API key not found")
+            }
+        }
+    }
 
     /* ───────── init engines ───────── */
     init { initialiseEngines(); observeRecorder() }
@@ -76,6 +126,10 @@ class LiveCaptionViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
+            // Update service mode indicator
+            val usingOnline = shouldUseOnlineService()
+            _state.update { it.copy(isUsingOnlineService = usingOnline) }
+            
             /* create a fresh chat session */
             sessionId = chatRepository.createNewSession(
                 title = "Live caption ${sdf.format(Date())}"
@@ -100,7 +154,8 @@ class LiveCaptionViewModel @Inject constructor(
         _state.update { it.copy(
             currentTranscript = "",
             translatedText = "",
-            transcriptHistory = emptyList()
+            transcriptHistory = emptyList(),
+            isUsingOnlineService = false
         ) }
         audioBuffer.clear(); pendingBuffer.clear(); silenceStart = null; silentFrames = 0; audioJob?.cancel()
         sessionId = null
@@ -135,10 +190,7 @@ class LiveCaptionViewModel @Inject constructor(
                 Translate this ${srcLang.displayName} text to ${tgt.displayName}. Give ONLY the direct translation, no explanations or alternatives:
                 "$transcript"
             """.trimIndent()
-            val result = gemmaService.generateTextAsync(
-                prompt,
-                UnifiedGemmaService.GenerationConfig(maxTokens = 50, temperature = 0.1f)
-            ).trim()
+            val result = translateWithService(prompt).trim()
             translationCache.put(key, result)
             result
         }
@@ -314,13 +366,10 @@ class LiveCaptionViewModel @Inject constructor(
                 "$src"
             """.trimIndent()
 
-            Timber.d("Sending prompt to Gemma: $prompt")
+            Timber.d("Sending translation prompt: $prompt")
 
             try {
-                val result = gemmaService.generateTextAsync(
-                    prompt,
-                    UnifiedGemmaService.GenerationConfig(maxTokens = 50, temperature = 0.1f)
-                ).trim()
+                val result = translateWithService(prompt).trim()
                 translationCache.put(key, result)
                 result
             } catch (e: Exception) {
@@ -433,6 +482,26 @@ class LiveCaptionViewModel @Inject constructor(
     private fun durationMs(chunks: List<FloatArray>): Long =
         if (chunks.isEmpty()) 0 else chunks.sumOf { it.size } * 1_000L / sampleRate
 
+    private suspend fun translateWithService(prompt: String): String {
+        return if (shouldUseOnlineService()) {
+            try {
+                initializeApiServiceIfNeeded()
+                geminiApiService.generateTextComplete(prompt)
+            } catch (e: Exception) {
+                Timber.w(e, "Online translation failed, falling back to offline")
+                gemmaService.generateTextAsync(
+                    prompt,
+                    UnifiedGemmaService.GenerationConfig(maxTokens = 50, temperature = 0.1f)
+                )
+            }
+        } else {
+            gemmaService.generateTextAsync(
+                prompt,
+                UnifiedGemmaService.GenerationConfig(maxTokens = 50, temperature = 0.1f)
+            )
+        }
+    }
+    
     private fun shouldTranslate() = _state.value.targetLanguage != _state.value.sourceLanguage
     private fun now() = System.currentTimeMillis()
 

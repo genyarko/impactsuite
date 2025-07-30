@@ -30,7 +30,7 @@ class GeminiApiService @Inject constructor(
     /* IDs published 2025-07-09 */
     companion object {
         const val PRIMARY_GENERATION_MODEL = "gemma-3n-e4b-it"
-        const val GEMINI_PRO_MODEL        = "gemini-1.5-pro"
+        const val GEMINI_PRO_MODEL        = "gemini-2.5-pro"
         const val GEMINI_FLASH_MODEL      = "gemini-2.5-flash"   // vision
         const val EMBEDDING_MODEL         = "embedding-001"
     }

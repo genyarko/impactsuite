@@ -19,7 +19,8 @@ data class CrisisHandbookState(
     val emergencyContacts: List<EmergencyContactInfo> = emptyList(),
     val nearbyFacilities: List<Hospital> = emptyList(),
     val mapState: OfflineMapState? = null,
-    val error: String? = null
+    val error: String? = null,
+    val isUsingOnlineService: Boolean = false
 )
 
 // Emergency Contact Info
