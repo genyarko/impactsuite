@@ -17,6 +17,7 @@ import org.json.JSONObject
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
+import androidx.core.graphics.scale
 
 /* ────────────────────────────────────────────────────────────────────
    SERVICE
@@ -30,7 +31,7 @@ class GeminiApiService @Inject constructor(
     companion object {
         const val PRIMARY_GENERATION_MODEL = "gemma-3n-e4b-it"
         const val GEMINI_PRO_MODEL        = "gemini-1.5-pro"
-        const val GEMINI_FLASH_MODEL      = "gemini-1.5-flash"   // vision
+        const val GEMINI_FLASH_MODEL      = "gemini-2.5-flash"   // vision
         const val EMBEDDING_MODEL         = "embedding-001"
     }
 
@@ -99,7 +100,7 @@ class GeminiApiService @Inject constructor(
     }
 
     suspend fun generateContentWithImage(prompt: String, img: Bitmap): String {
-        val resized = Bitmap.createScaledBitmap(img, 512, 512, true)
+        val resized = img.scale(512, 512)
         return generateContent(content { image(resized); text(prompt) })
     }
 
@@ -135,7 +136,7 @@ class GeminiApiService @Inject constructor(
 
 /* ───── utility extension: sanity-check API key ───── */
 suspend fun GeminiApiService.validateKey(key: String): Boolean = try {
-    initialize(GeminiApiConfig(apiKey = key, maxOutputTokens = 10))
+    initialize(GeminiApiConfig(apiKey = key, maxOutputTokens = 1200))
     generateTextComplete("Say OK")
     true
 } catch (e: Exception) {

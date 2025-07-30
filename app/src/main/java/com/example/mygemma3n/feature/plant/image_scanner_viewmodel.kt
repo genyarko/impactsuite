@@ -5,6 +5,13 @@ import androidx.core.graphics.scale
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mygemma3n.data.UnifiedGemmaService
+import com.example.mygemma3n.data.GeminiApiService
+import com.example.mygemma3n.data.GeminiApiConfig
+import com.example.mygemma3n.domain.repository.SettingsRepository
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import dagger.hilt.android.qualifiers.ApplicationContext
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.framework.image.MPImage
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -12,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import timber.log.Timber
@@ -25,7 +33,10 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class PlantScannerViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val gemma: UnifiedGemmaService,
+    private val geminiApiService: GeminiApiService,
+    private val settingsRepository: SettingsRepository,
     private val plantDatabase: PlantDatabase
 ) : ViewModel() {
 
@@ -33,24 +44,99 @@ class PlantScannerViewModel @Inject constructor(
     private val _scanState = MutableStateFlow(ImageScanState())
     val scanState: StateFlow<ImageScanState> = _scanState.asStateFlow()
 
+    /* ---------- Helper Methods ---------- */
+    
+    private fun hasNetworkConnection(): Boolean {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val activeNetwork = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+    }
+
+    private suspend fun shouldUseOnlineService(): Boolean {
+        return try {
+            val useOnlineService = settingsRepository.useOnlineServiceFlow.first()
+            val hasApiKey = settingsRepository.apiKeyFlow.first().isNotBlank()
+            val hasNetwork = hasNetworkConnection()
+            
+            useOnlineService && hasApiKey && hasNetwork
+        } catch (e: Exception) {
+            Timber.w(e, "Error checking service preference, defaulting to offline")
+            false
+        }
+    }
+
+    private suspend fun initializeApiServiceIfNeeded() {
+        if (!geminiApiService.isInitialized()) {
+            val apiKey = settingsRepository.apiKeyFlow.first()
+            if (apiKey.isNotBlank()) {
+                try {
+                    geminiApiService.initialize(GeminiApiConfig(apiKey = apiKey))
+                    Timber.d("GeminiApiService initialized for image analysis")
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to initialize GeminiApiService")
+                    throw e
+                }
+            } else {
+                throw IllegalStateException("API key not found")
+            }
+        }
+    }
+
+    private suspend fun analyzeImageWithService(bitmap: Bitmap): String {
+        return if (shouldUseOnlineService()) {
+            try {
+                initializeApiServiceIfNeeded()
+                // Use Gemini's vision capabilities
+                val prompt = buildPromptForOnlineService()
+                geminiApiService.generateContentWithImageAndModel(
+                    modelName = GeminiApiService.GEMINI_FLASH_MODEL, // Use vision model
+                    prompt = prompt,
+                    image = bitmap.resizeToGemma(512)
+                )
+            } catch (e: Exception) {
+                Timber.w(e, "Online image analysis failed, falling back to offline")
+                analyzeImageOffline(bitmap)
+            }
+        } else {
+            analyzeImageOffline(bitmap)
+        }
+    }
+
+    private suspend fun analyzeImageOffline(bitmap: Bitmap): String {
+        val square = bitmap.resizeToGemma(512)
+        val mpImage: MPImage = BitmapImageBuilder(square).build()
+        gemma.initialize()
+        val prompt = buildPromptWithImage()
+        return gemma.generateResponse(prompt, mpImage)
+    }
+
+    private fun buildPromptForOnlineService(): String {
+        return "Analyze this image and return JSON with the following structure: " +
+               "{ \"label\": \"main object/subject\", \"confidence\": 0.95, " +
+               "\"plantSpecies\": \"species name or N/A if not a plant\", " +
+               "\"disease\": \"disease name or None if healthy/not applicable\", " +
+               "\"severity\": \"severity level if disease present\", " +
+               "\"recommendations\": [\"list of care recommendations\"] }"
+    }
+
     /* ---------- Public API ---------- */
     fun analyzeImage(bitmap: Bitmap) = viewModelScope.launch {
         // 0 · UI → “busy”
-        _scanState.update { it.copy(isAnalyzing = true, error = null) }
+        val usingOnline = shouldUseOnlineService()
+        _scanState.update { it.copy(isAnalyzing = true, error = null, isUsingOnlineService = usingOnline) }
 
         try {
             /* 1 · Pre‑process --------------------------------------------------- */
-            val square = bitmap.resizeToGemma(512)                         // Gemma‑3n vision sizes: 256/512/768
-            val mpImage: MPImage = BitmapImageBuilder(square).build()      // Convert → MPImage
 
             /* 2 · Lazy‑load local model --------------------------------------- */
-            gemma.initialize()                                             // calls the vision graph setup internally
 
             /* 3 · Compose compact prompt -------------------------------------- */
-            val prompt = buildPromptWithImage()
 
             /* 4 · Generate multimodal answer ---------------------------------- */
-            val raw = gemma.generateResponse(prompt, mpImage)              // `generateResponse()` is the session‑level API
+            val raw = analyzeImageWithService(bitmap)
 
             /* 5 · Parse + enrich --------------------------------------------- */
             val analysis  = parseGeneralAnalysis(raw)
@@ -114,7 +200,8 @@ data class ImageScanState(
     val isAnalyzing: Boolean            = false,
     val currentAnalysis: GeneralAnalysis? = null,
     val scanHistory: List<GeneralAnalysis> = emptyList(),
-    val error: String?                  = null
+    val error: String?                  = null,
+    val isUsingOnlineService: Boolean   = false
 )
 
 data class GeneralAnalysis(

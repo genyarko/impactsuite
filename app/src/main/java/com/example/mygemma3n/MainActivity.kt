@@ -73,6 +73,8 @@ import com.example.mygemma3n.data.validateKey
 import com.example.mygemma3n.di.SpeechRecognitionServiceEntryPoint
 import com.example.mygemma3n.feature.caption.SpeechRecognitionService
 import com.example.mygemma3n.SPEECH_API_KEY
+import com.example.mygemma3n.GEMINI_API_KEY
+import com.example.mygemma3n.USE_ONLINE_SERVICE
 import com.example.mygemma3n.feature.cbt.CBTCoachScreen
 import com.example.mygemma3n.feature.chat.ChatScreen
 import com.example.mygemma3n.feature.crisis.CrisisHandbookScreen
@@ -102,7 +104,6 @@ import kotlinx.coroutines.delay
 
 
 // ───── Preference keys ──────────────────────────────────────────────────────
-val API_KEY        = stringPreferencesKey("gemini_api_key")
 val MAPS_API_KEY   = stringPreferencesKey("google_maps_api_key")
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -171,7 +172,7 @@ class MainActivity : ComponentActivity() {
             // Step 2: Initialize Gemini API and Speech Service if keys exist and Google Services available
             updateInitState("Setting up online features...", 0.5f)
             val apiKeyDeferred = lifecycleScope.async {
-                val geminiKey = dataStore.data.map { it[API_KEY].orEmpty() }.first()
+                val geminiKey = dataStore.data.map { it[GEMINI_API_KEY].orEmpty() }.first()
                 val speechKey = dataStore.data.map { it[SPEECH_API_KEY].orEmpty() }.first()
                 
                 if (geminiKey.isNotBlank()) {
@@ -1030,13 +1031,14 @@ fun ApiSettingsScreen(
     var apiKey by remember { mutableStateOf("") }
     var mapsApiKey by remember { mutableStateOf("") }
     var speechApiKey by remember { mutableStateOf("") }
+    var useOnlineService by remember { mutableStateOf(true) }
     var isLoading by remember { mutableStateOf(false) }
     var validationMessage by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
 
-    // Load existing API keys
+    // Load existing API keys and settings
     LaunchedEffect(Unit) {
-        context.dataStore.data.map { it[API_KEY] }.first()?.let {
+        context.dataStore.data.map { it[GEMINI_API_KEY] }.first()?.let {
             apiKey = it
         }
         context.dataStore.data.map { it[MAPS_API_KEY] }.first()?.let {
@@ -1044,6 +1046,11 @@ fun ApiSettingsScreen(
         }
         context.dataStore.data.map { it[SPEECH_API_KEY] }.first()?.let {
             speechApiKey = it
+        }
+        context.dataStore.data.map { it[USE_ONLINE_SERVICE] }.first()?.let {
+            useOnlineService = it
+        } ?: run {
+            useOnlineService = true // Default to online
         }
     }
 
@@ -1075,9 +1082,51 @@ fun ApiSettingsScreen(
                 .padding(16.dp)
         ) {
             Text(
-                text = "Enter your API keys to enable all features",
+                text = "Configure AI service mode and API keys",
                 style = MaterialTheme.typography.bodyMedium
             )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Online/Offline Toggle
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "AI Service Mode",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = if (useOnlineService) {
+                                    "Online: Uses Gemini API (requires internet & API key)"
+                                } else {
+                                    "Offline: Uses on-device Gemma models (works without internet)"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = useOnlineService,
+                            onCheckedChange = { useOnlineService = it },
+                            enabled = !isLoading
+                        )
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(24.dp))
 
@@ -1139,7 +1188,7 @@ fun ApiSettingsScreen(
                                 // Validate Gemini API key
                                 if (apiKey.isNotBlank()) {
                                     if (geminiApiService.validateKey(apiKey)) {
-                                        context.dataStore.edit { it[API_KEY] = apiKey }
+                                        context.dataStore.edit { it[GEMINI_API_KEY] = apiKey }
                                         messages.add("✓ Gemini API key validated")
                                     } else {
                                         messages.add("✗ Invalid Gemini API key")
@@ -1187,6 +1236,12 @@ fun ApiSettingsScreen(
                                     messages.add("✓ Maps API key saved")
                                 }
 
+                                // Save online/offline preference
+                                context.dataStore.edit { settings ->
+                                    settings[USE_ONLINE_SERVICE] = useOnlineService
+                                }
+                                messages.add("✓ Service mode saved: ${if (useOnlineService) "Online" else "Offline"}")
+
                                 withContext(Dispatchers.Main) {
                                     validationMessage = messages.joinToString("\n")
                                 }
@@ -1219,14 +1274,16 @@ fun ApiSettingsScreen(
                         apiKey = ""
                         mapsApiKey = ""
                         speechApiKey = ""
+                        useOnlineService = true
                         CoroutineScope(Dispatchers.IO).launch {
                             context.dataStore.edit { settings ->
-                                settings.remove(API_KEY)
+                                settings.remove(GEMINI_API_KEY)
                                 settings.remove(MAPS_API_KEY)
                                 settings.remove(SPEECH_API_KEY)
+                                settings.remove(USE_ONLINE_SERVICE)
                             }
                         }
-                        validationMessage = "API keys cleared"
+                        validationMessage = "API keys and settings cleared"
                     },
                     enabled = !isLoading
                 ) {
