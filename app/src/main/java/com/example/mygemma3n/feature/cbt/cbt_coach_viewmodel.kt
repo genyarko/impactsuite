@@ -2,9 +2,14 @@ package com.example.mygemma3n.feature.cbt
 
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mygemma3n.data.UnifiedGemmaService
+import com.example.mygemma3n.data.GeminiApiService
+import com.example.mygemma3n.data.GeminiApiConfig
+import com.example.mygemma3n.domain.repository.SettingsRepository
 import com.example.mygemma3n.feature.caption.SpeechRecognitionService
 import com.example.mygemma3n.service.AudioCaptureService
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -12,6 +17,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlinx.coroutines.withContext
@@ -25,6 +31,8 @@ import kotlin.coroutines.cancellation.CancellationException
 class CBTCoachViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val gemmaService: UnifiedGemmaService,
+    private val geminiApiService: GeminiApiService,
+    private val settingsRepository: SettingsRepository,
     private val emotionDetector: EmotionDetector,
     val cbtTechniques: CBTTechniques,
     private val sessionRepository: SessionRepository,
@@ -42,6 +50,59 @@ class CBTCoachViewModel @Inject constructor(
     private var recordingJob: Job? = null
     private val audioBuffer = mutableListOf<FloatArray>()
     private var isModelInitialized = false
+
+    /* ───────── Online/Offline Service Selection ───────── */
+    private fun hasNetworkConnection(): Boolean {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val activeNetwork = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+    }
+
+    private suspend fun shouldUseOnlineService(): Boolean {
+        return try {
+            val useOnlineService = settingsRepository.useOnlineServiceFlow.first()
+            val hasApiKey = settingsRepository.apiKeyFlow.first().isNotBlank()
+            val hasNetwork = hasNetworkConnection()
+            
+            useOnlineService && hasApiKey && hasNetwork
+        } catch (e: Exception) {
+            Timber.w(e, "Error checking service preference, defaulting to offline")
+            false
+        }
+    }
+
+    private suspend fun initializeApiServiceIfNeeded() {
+        if (!geminiApiService.isInitialized()) {
+            val apiKey = settingsRepository.apiKeyFlow.first()
+            if (apiKey.isNotBlank()) {
+                try {
+                    geminiApiService.initialize(GeminiApiConfig(apiKey = apiKey))
+                    Timber.d("GeminiApiService initialized for CBT Coach")
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to initialize GeminiApiService")
+                    throw e
+                }
+            } else {
+                throw IllegalStateException("API key not found")
+            }
+        }
+    }
+
+    private suspend fun ensureModelInitialized(): Boolean {
+        return try {
+            if (!gemmaService.isInitialized()) {
+                gemmaService.initializeBestAvailable()
+                isModelInitialized = true
+            }
+            true
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to ensure Gemma model initialization")
+            false
+        }
+    }
 
     // Pre-crafted responses for common scenarios
     private val FALLBACK_RESPONSES = mapOf(
@@ -265,7 +326,15 @@ Let's explore what you're experiencing together. Can you tell me more about what
         if (userInput.trim().isEmpty()) return
 
         _isLoading.value = true
-        _sessionState.update { it.copy(error = null) }
+        
+        // Update service mode indicator
+        val usingOnline = shouldUseOnlineService()
+        _sessionState.update { 
+            it.copy(
+                error = null,
+                isUsingOnlineService = usingOnline
+            ) 
+        }
 
         try {
             // Add user message immediately for better UX
@@ -350,11 +419,64 @@ Let's explore what you're experiencing together. Can you tell me more about what
         }
     }
 
-    // Optimized response generation for Gemma's constraints
+    // Enhanced response generation with online/offline support
     private suspend fun generateOptimizedCBTResponse(userInput: String): String {
+        return if (shouldUseOnlineService()) {
+            try {
+                initializeApiServiceIfNeeded()
+                generateCBTResponseOnline(userInput)
+            } catch (e: Exception) {
+                Timber.w(e, "Online CBT response failed, falling back to offline")
+                generateCBTResponseOffline(userInput)
+            }
+        } else {
+            generateCBTResponseOffline(userInput)
+        }
+    }
+
+    private suspend fun generateCBTResponseOnline(userInput: String): String {
+        // Update service indicator
+        _sessionState.update { it.copy(isUsingOnlineService = true) }
+
+        val prompt = """You are a compassionate CBT (Cognitive Behavioral Therapy) therapist. A client has shared: "${userInput.take(200)}"
+
+Respond with:
+1. Validate their feelings empathetically
+2. Ask a thoughtful follow-up question or suggest a CBT technique
+3. Keep response under 100 words
+4. Use a warm, professional tone
+
+Focus on helping them understand the connection between thoughts, feelings, and behaviors."""
+
+        try {
+            val response = withTimeoutOrNull(12_000) { // 12 second timeout for CBT responses
+                geminiApiService.generateTextComplete(prompt)
+            } ?: throw IllegalStateException("Response timeout")
+
+            return if (response.isBlank()) {
+                throw IllegalStateException("Empty response from online service")
+            } else {
+                response
+            }
+
+        } catch (e: Exception) {
+            Timber.e(e, "Error generating online CBT response")
+            throw e
+        }
+    }
+
+    private suspend fun generateCBTResponseOffline(userInput: String): String {
+        // Update service indicator
+        _sessionState.update { it.copy(isUsingOnlineService = false) }
+
         // Check token limit
         if (gemmaService.wouldExceedLimit(userInput)) {
             Timber.w("Input too long, using fallback")
+            return getFallbackResponse(userInput) ?: FALLBACK_RESPONSES["default"]!!
+        }
+
+        // Ensure offline model is ready
+        if (!ensureModelInitialized()) {
             return getFallbackResponse(userInput) ?: FALLBACK_RESPONSES["default"]!!
         }
 

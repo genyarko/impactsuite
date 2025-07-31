@@ -50,18 +50,19 @@ import com.google.android.gms.location.Priority
 import androidx.core.net.toUri
 import com.google.android.gms.tasks.CancellationTokenSource
 import com.example.mygemma3n.util.GoogleServicesUtil
+import com.example.mygemma3n.util.MapsApiHelper
 
 
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun CrisisHandbookScreen(
-    viewModel: CrisisHandbookViewModel = hiltViewModel()
+    viewModel: CrisisHandbookViewModel = hiltViewModel(),
+    onNavigateBack: () -> Unit = {}
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    /* 1️⃣ host state lives here */
     val snackbarHostState = remember { SnackbarHostState() }
 
     // Permission states
@@ -76,6 +77,15 @@ fun CrisisHandbookScreen(
 
     // Location
     var userLocation by remember { mutableStateOf<Location?>(null) }
+
+    // Check if voice recognition is available
+    val packageManager = context.packageManager
+    val voiceRecognitionAvailable = remember {
+        packageManager.queryIntentActivities(
+            Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH),
+            0
+        ).isNotEmpty()
+    }
 
     // Voice input launcher
     val voiceInputLauncher = rememberLauncherForActivityResult(
@@ -95,9 +105,10 @@ fun CrisisHandbookScreen(
                 context = context,
                 block = {
                     val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
-                    @SuppressLint("MissingPermission")   // we *did* check
+                    @SuppressLint("MissingPermission")
                     val loc = fusedLocationClient.getCurrentLocation(
-                        Priority.PRIORITY_HIGH_ACCURACY, null
+                        Priority.PRIORITY_HIGH_ACCURACY,
+                        CancellationTokenSource().token
                     ).await()
 
                     loc?.let {
@@ -115,17 +126,27 @@ fun CrisisHandbookScreen(
     Scaffold(
         topBar = {
             CrisisTopBar(
-                onBackClick = { /* Handle back navigation */ }
+                onBackClick = onNavigateBack
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
-            if (!showMap) {
+            if (!showMap && voiceRecognitionAvailable) {
                 ExtendedFloatingActionButton(
                     onClick = {
                         if (microphonePermission.status.isGranted) {
-                            startVoiceInput(voiceInputLauncher)
-                            isVoiceInputActive = true
+                            try {
+                                startVoiceInput(voiceInputLauncher)
+                                isVoiceInputActive = true
+                            } catch (e: Exception) {
+                                Timber.e(e, "Error starting voice input")
+                                scope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        message = "Voice input not available",
+                                        duration = SnackbarDuration.Short
+                                    )
+                                }
+                            }
                         } else {
                             microphonePermission.launchPermissionRequest()
                         }
@@ -169,7 +190,9 @@ fun CrisisHandbookScreen(
                         queryText = queryText,
                         onQueryChange = { queryText = it },
                         onQuerySubmit = {
-                            viewModel.handleEmergencyQuery(queryText, userLocation)
+                            if (queryText.isNotBlank()) {
+                                viewModel.handleEmergencyQuery(queryText, userLocation)
+                            }
                         },
                         onQuickAction = { action ->
                             action.action()
@@ -177,12 +200,10 @@ fun CrisisHandbookScreen(
                         onContactClick = { contact ->
                             selectedContact = contact
                         },
-                        onShowMap = { 
+                        onShowMap = {
                             if (GoogleServicesUtil.isGooglePlayServicesAvailable(context)) {
                                 showMap = true
                             } else {
-                                // Show snackbar informing user that Maps requires Google Services
-                                // Use rememberCoroutineScope for composable context
                                 scope.launch {
                                     snackbarHostState.showSnackbar(
                                         message = "Map feature requires Google Services (not available on this device)",
@@ -221,9 +242,14 @@ fun CrisisHandbookScreen(
                 }
             }
         }
-        state.error?.let { msg ->
-            LaunchedEffect(msg) {        // runs once per distinct message
-                snackbarHostState.showSnackbar(message = msg)
+
+        // Error handling
+        state.error?.let { errorMessage ->
+            LaunchedEffect(errorMessage) {
+                snackbarHostState.showSnackbar(
+                    message = errorMessage,
+                    duration = SnackbarDuration.Short
+                )
             }
         }
     }
@@ -235,42 +261,7 @@ fun CrisisHandbookScreen(
             onDismiss = { selectedContact = null }
         )
     }
-
-    // Error handling
-    state.error?.let { error ->
-        LaunchedEffect(error) {
-            // Show snackbar or alert
-            Timber.e("Crisis error: $error")
-        }
-    }
 }
-
-suspend fun getFreshLocation(context: Context): Location? {
-    return GoogleServicesUtil.withGoogleServicesSuspend(
-        context = context,
-        block = {
-            val client = LocationServices.getFusedLocationProviderClient(context)
-
-            @SuppressLint("MissingPermission")
-            val loc = client.getCurrentLocation(
-                Priority.PRIORITY_HIGH_ACCURACY,
-                CancellationTokenSource().token
-            ).await()
-
-            val now = System.currentTimeMillis()
-
-            loc?.takeIf {
-                it.accuracy <= 100 &&          // ≤ 100 m
-                now - it.time <= 30_000        // ≤ 30 s old
-            }
-        },
-        onUnavailable = {
-            Timber.w("Cannot get fresh location - Google Services not available")
-        }
-    )
-}
-
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -315,6 +306,8 @@ private fun CrisisMainContent(
     isLocationGranted: Boolean,
     quickActions: List<CrisisHandbookViewModel.QuickAction>
 ) {
+    val context = LocalContext.current
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -326,7 +319,14 @@ private fun CrisisMainContent(
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.errorContainer
                 ),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        val intent = Intent(Intent.ACTION_DIAL).apply {
+                            data = Uri.parse("tel:112")
+                        }
+                        context.startActivity(intent)
+                    }
             ) {
                 Row(
                     modifier = Modifier.padding(16.dp),
@@ -385,7 +385,10 @@ private fun CrisisMainContent(
                 placeholder = { Text("e.g., severe headache, car accident, chest pain") },
                 modifier = Modifier.fillMaxWidth(),
                 trailingIcon = {
-                    IconButton(onClick = onQuerySubmit) {
+                    IconButton(
+                        onClick = onQuerySubmit,
+                        enabled = queryText.isNotBlank()
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Submit")
                     }
                 },
@@ -471,7 +474,7 @@ private fun CrisisMainContent(
                                     fontWeight = FontWeight.Bold
                                 )
                             }
-                            
+
                             // Service mode indicator
                             Row(
                                 verticalAlignment = Alignment.CenterVertically
@@ -697,6 +700,7 @@ private fun CrisisMapView(
     onBackClick: () -> Unit,
     onFacilitySelected: (String) -> Unit
 ) {
+    val context = LocalContext.current
     val cameraPositionState = rememberCameraPositionState {
         mapState.userLocation?.let {
             position = CameraPosition.fromLatLngZoom(
@@ -707,44 +711,98 @@ private fun CrisisMapView(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        GoogleMap(
-            modifier = Modifier.fillMaxSize(),
-            cameraPositionState = cameraPositionState,
-            properties = MapProperties(
-                isMyLocationEnabled = mapState.userLocation != null
-            )
-        ) {
-            // User location marker
-            mapState.userLocation?.let { location ->
-                Marker(
-                    state = MarkerState(position = LatLng(location.latitude, location.longitude)),
-                    title = "Your Location",
-                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_BLUE)
-                )
-            }
+        // Check if Google Maps API key is available
+        val mapsApiAvailable = remember {
+            MapsApiHelper.isApiKeyAvailable(context)
+        }
 
-            // Facility markers
-            mapState.facilities.forEach { marker ->
-                Marker(
-                    state = MarkerState(
-                        position = LatLng(marker.location.latitude, marker.location.longitude)
-                    ),
-                    title = marker.title,
-                    snippet = marker.description,
-                    onClick = {
-                        onFacilitySelected(marker.id)
-                        false
+        if (mapsApiAvailable) {
+            GoogleMap(
+                modifier = Modifier.fillMaxSize(),
+                cameraPositionState = cameraPositionState,
+                properties = MapProperties(
+                    isMyLocationEnabled = mapState.userLocation != null
+                )
+            ) {
+                // User location marker
+                mapState.userLocation?.let { location ->
+                    Marker(
+                        state = MarkerState(position = LatLng(location.latitude, location.longitude)),
+                        title = "Your Location",
+                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_BLUE)
+                    )
+                }
+
+                // Facility markers
+                mapState.facilities.forEach { marker ->
+                    Marker(
+                        state = MarkerState(
+                            position = LatLng(marker.location.latitude, marker.location.longitude)
+                        ),
+                        title = marker.title,
+                        snippet = marker.description,
+                        onClick = {
+                            onFacilitySelected(marker.id)
+                            false
+                        }
+                    )
+                }
+
+                // Route polyline
+                mapState.route?.let { route ->
+                    Polyline(
+                        points = route.map { LatLng(it.latitude, it.longitude) },
+                        color = MaterialTheme.colorScheme.primary,
+                        width = 10f
+                    )
+                }
+            }
+        } else {
+            // Show fallback UI when Maps API is not available
+            Card(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer
+                )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        Icons.Default.Warning,
+                        contentDescription = null,
+                        modifier = Modifier.size(48.dp),
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        "Maps Not Available",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Google Maps API key not configured. Hospital information is still available in the main screen.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = onBackClick,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Text("Back to Crisis Handbook")
                     }
-                )
-            }
-
-            // Route polyline
-            mapState.route?.let { route ->
-                Polyline(
-                    points = route.map { LatLng(it.latitude, it.longitude) },
-                    color = MaterialTheme.colorScheme.primary,
-                    width = 10f
-                )
+                }
             }
         }
 
@@ -795,10 +853,14 @@ private fun EmergencyContactDialog(
     val context = LocalContext.current
 
     fun dialNumber(number: String) {
-        val intent = Intent(Intent.ACTION_DIAL).apply {
-            data = "tel:$number".toUri()
+        try {
+            val intent = Intent(Intent.ACTION_DIAL).apply {
+                data = Uri.parse("tel:$number")
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Timber.e(e, "Error dialing number: $number")
         }
-        context.startActivity(intent)
     }
 
     AlertDialog(
@@ -807,9 +869,7 @@ private fun EmergencyContactDialog(
             Icon(
                 Icons.Default.Phone,
                 contentDescription = null,
-                modifier = Modifier
-                    .size(48.dp)
-                    .clickable { dialNumber(contact.primaryNumber) },
+                modifier = Modifier.size(48.dp),
                 tint = MaterialTheme.colorScheme.primary
             )
         },
@@ -822,7 +882,7 @@ private fun EmergencyContactDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { dialNumber(contact.primaryNumber) }
-                        .padding(vertical = 4.dp),
+                        .padding(vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
@@ -845,7 +905,7 @@ private fun EmergencyContactDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { dialNumber(number) }
-                            .padding(vertical = 4.dp),
+                            .padding(vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
@@ -867,12 +927,16 @@ private fun EmergencyContactDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                val smsIntent = Intent(Intent.ACTION_VIEW).apply {
-                                    data = "sms:$number".toUri()
+                                try {
+                                    val smsIntent = Intent(Intent.ACTION_VIEW).apply {
+                                        data = Uri.parse("sms:$number")
+                                    }
+                                    context.startActivity(smsIntent)
+                                } catch (e: Exception) {
+                                    Timber.e(e, "Error opening SMS to: $number")
                                 }
-                                context.startActivity(smsIntent)
                             }
-                            .padding(vertical = 4.dp),
+                            .padding(vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
@@ -890,7 +954,8 @@ private fun EmergencyContactDialog(
                 Text(
                     "Tap any number to call or SMS directly",
                     style = MaterialTheme.typography.bodySmall,
-                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         },
@@ -912,11 +977,38 @@ private fun getIconForAction(iconName: String): ImageVector {
     }
 }
 
-private fun startVoiceInput(launcher: androidx.activity.result.ActivityResultLauncher<android.content.Intent>) {
-    val intent = android.content.Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+private fun startVoiceInput(launcher: androidx.activity.result.ActivityResultLauncher<Intent>) {
+    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
         putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
         putExtra(RecognizerIntent.EXTRA_PROMPT, "Describe your emergency")
         putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
     }
     launcher.launch(intent)
+}
+
+// Utility function moved from inside the composable
+suspend fun getFreshLocation(context: Context): Location? {
+    return GoogleServicesUtil.withGoogleServicesSuspend(
+        context = context,
+        block = {
+            val client = LocationServices.getFusedLocationProviderClient(context)
+
+            @SuppressLint("MissingPermission")
+            val loc = client.getCurrentLocation(
+                Priority.PRIORITY_HIGH_ACCURACY,
+                CancellationTokenSource().token
+            ).await()
+
+            val now = System.currentTimeMillis()
+
+            loc?.takeIf {
+                it.accuracy <= 100 &&          // ≤ 100 m
+                        now - it.time <= 30_000        // ≤ 30 s old
+            }
+        },
+        onUnavailable = {
+            Timber.w("Cannot get fresh location - Google Services not available")
+            null
+        }
+    )
 }

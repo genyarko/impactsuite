@@ -164,6 +164,7 @@ fun TutorScreen(
                         showFloatingProgressSummary = state.showFloatingProgressSummary,
                         showConceptMasteryCard = state.showConceptMasteryCard,
                         showTutorProgressDisplay = state.showTutorProgressDisplay,
+                        isUsingOnlineService = state.isUsingOnlineService,
                         onMessageDoubleTap = { viewModel.speakText(it) },
                         onTopicSelected = { topic ->
                             viewModel.selectTopic(topic)
@@ -241,6 +242,7 @@ private fun TutorChatInterface(
     showFloatingProgressSummary: Boolean,
     showConceptMasteryCard: Boolean,
     showTutorProgressDisplay: Boolean,
+    isUsingOnlineService: Boolean,
     onMessageDoubleTap: (String) -> Unit,
     onTopicSelected: (String) -> Unit,
     onBookmarkMessage: (String) -> Unit,
@@ -323,6 +325,18 @@ private fun TutorChatInterface(
                         )
                     }
                 }
+            }
+            
+            // Service mode indicator
+            AnimatedVisibility(
+                visible = true, // Always show when in a session
+                enter = slideInVertically() + fadeIn(),
+                exit = slideOutVertically() + fadeOut()
+            ) {
+                ServiceModeIndicator(
+                    isOnline = isUsingOnlineService,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
             }
             
             // Concept mastery indicator
@@ -1304,6 +1318,63 @@ private fun formatTimestamp(timestamp: Long): String {
         else -> {
             val formatter = SimpleDateFormat("MMM d", Locale.getDefault())
             formatter.format(Date(timestamp))
+        }
+    }
+}
+
+@Composable
+private fun ServiceModeIndicator(
+    isOnline: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        tonalElevation = 1.dp,
+        shape = RoundedCornerShape(6.dp),
+        color = if (isOnline) {
+            MaterialTheme.colorScheme.secondaryContainer
+        } else {
+            MaterialTheme.colorScheme.tertiaryContainer
+        }
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(
+                imageVector = if (isOnline) Icons.Default.Cloud else Icons.Default.OfflineBolt,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                tint = if (isOnline) {
+                    MaterialTheme.colorScheme.onSecondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onTertiaryContainer
+                }
+            )
+            
+            Text(
+                text = if (isOnline) "Online Mode" else "Offline Mode",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (isOnline) {
+                    MaterialTheme.colorScheme.onSecondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onTertiaryContainer
+                }
+            )
+            
+            Spacer(modifier = Modifier.weight(1f))
+            
+            Text(
+                text = if (isOnline) "Gemini API" else "On-device AI",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium,
+                color = if (isOnline) {
+                    MaterialTheme.colorScheme.onSecondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onTertiaryContainer
+                }
+            )
         }
     }
 }

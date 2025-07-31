@@ -5,7 +5,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mygemma3n.data.TextEmbeddingServiceExtensions
 import com.example.mygemma3n.data.UnifiedGemmaService
+import com.example.mygemma3n.data.GeminiApiService
+import com.example.mygemma3n.data.GeminiApiConfig
 import com.example.mygemma3n.domain.repository.SettingsRepository
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import com.example.mygemma3n.feature.analytics.LearningAnalyticsRepository
 import com.example.mygemma3n.feature.analytics.InteractionType
 import com.google.gson.Gson
@@ -40,7 +44,9 @@ class QuizGeneratorViewModel @Inject constructor(
     private val enhancedPromptManager: EnhancedPromptManager,
     private val curriculumQuizGenerator: CurriculumAwareQuizGenerator,
     private val studentIntegration: QuizStudentIntegration,
-    private val analyticsRepository: LearningAnalyticsRepository
+    private val analyticsRepository: LearningAnalyticsRepository,
+    private val onlineQuizGenerator: OnlineQuizGenerator,
+    private val geminiApiService: GeminiApiService
 ) : ViewModel() {
 
     /* ───────── UI state ───────── */
@@ -120,6 +126,47 @@ class QuizGeneratorViewModel @Inject constructor(
                 )
             }
             throw e
+        }
+    }
+
+    /* ───────── Online/Offline Service Selection ───────── */
+
+    private fun hasNetworkConnection(): Boolean {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val activeNetwork = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+    }
+
+    private suspend fun shouldUseOnlineService(): Boolean {
+        return try {
+            val useOnlineService = settingsRepo.useOnlineServiceFlow.first()
+            val hasApiKey = settingsRepo.apiKeyFlow.first().isNotBlank()
+            val hasNetwork = hasNetworkConnection()
+            
+            useOnlineService && hasApiKey && hasNetwork
+        } catch (e: Exception) {
+            Timber.w(e, "Error checking service preference, defaulting to offline")
+            false
+        }
+    }
+
+    private suspend fun initializeApiServiceIfNeeded() {
+        if (!geminiApiService.isInitialized()) {
+            val apiKey = settingsRepo.apiKeyFlow.first()
+            if (apiKey.isNotBlank()) {
+                try {
+                    geminiApiService.initialize(GeminiApiConfig(apiKey = apiKey))
+                    Timber.d("GeminiApiService initialized for Quiz Generator")
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to initialize GeminiApiService")
+                    throw e
+                }
+            } else {
+                throw IllegalStateException("API key not found")
+            }
         }
     }
 
@@ -291,16 +338,70 @@ class QuizGeneratorViewModel @Inject constructor(
         )}
 
         try {
-            // Generate curriculum-based questions
-            val questions = curriculumQuizGenerator.generateCurriculumBasedQuestions(
-                subject = subject,
-                gradeLevel = gradeLevel,
-                topic = topic,
-                count = questionCount,
-                difficulty = _state.value.difficulty,
-                country = _state.value.studentCountry,
-                previousQuestions = getRecentQuestionTexts(subject, topic)
-            )
+            // Check if we should use online or offline generation
+            val useOnline = shouldUseOnlineService()
+            val questions = if (useOnline) {
+                _state.update { it.copy(generationPhase = "Generating online quiz...") }
+                try {
+                    initializeApiServiceIfNeeded()
+                    val onlineQuestions = onlineQuizGenerator.generateCurriculumAwareOnlineQuiz(
+                        subject = subject,
+                        gradeLevel = gradeLevel,
+                        topic = topic,
+                        count = questionCount,
+                        country = _state.value.studentCountry,
+                        studentName = _state.value.studentName
+                    )
+                    
+                    // Check if we got any questions from online generation
+                    if (onlineQuestions.isNotEmpty()) {
+                        onlineQuestions
+                    } else {
+                        Timber.w("Online generation returned empty list, falling back to offline")
+                        _state.update { it.copy(generationPhase = "Falling back to offline...") }
+                        // Fallback to offline generation
+                        curriculumQuizGenerator.generateCurriculumBasedQuestions(
+                            subject = subject,
+                            gradeLevel = gradeLevel,
+                            topic = topic,
+                            count = questionCount,
+                            difficulty = _state.value.difficulty,
+                            country = _state.value.studentCountry,
+                            previousQuestions = getRecentQuestionTexts(subject, topic)
+                        )
+                    }
+                } catch (e: Exception) {
+                    Timber.w(e, "Online generation failed, falling back to offline")
+                    _state.update { it.copy(generationPhase = "Falling back to offline...") }
+                    // Fallback to offline generation
+                    curriculumQuizGenerator.generateCurriculumBasedQuestions(
+                        subject = subject,
+                        gradeLevel = gradeLevel,
+                        topic = topic,
+                        count = questionCount,
+                        difficulty = _state.value.difficulty,
+                        country = _state.value.studentCountry,
+                        previousQuestions = getRecentQuestionTexts(subject, topic)
+                    )
+                }
+            } else {
+                _state.update { it.copy(generationPhase = "Generating offline quiz...") }
+                // Use offline generation
+                curriculumQuizGenerator.generateCurriculumBasedQuestions(
+                    subject = subject,
+                    gradeLevel = gradeLevel,
+                    topic = topic,
+                    count = questionCount,
+                    difficulty = _state.value.difficulty,
+                    country = _state.value.studentCountry,
+                    previousQuestions = getRecentQuestionTexts(subject, topic)
+                )
+            }
+
+            // Final safety check - ensure we have questions
+            if (questions.isEmpty()) {
+                throw Exception("No questions were generated for $subject - $topic")
+            }
 
             // Create quiz
             val quiz = Quiz(
@@ -881,58 +982,54 @@ class QuizGeneratorViewModel @Inject constructor(
 
         repeat(maxRetries) { attempt ->
             try {
-                val prompt = createStructuredPrompt(
-                    questionType = questionType,
-                    subject = subject,
-                    topic = topic,
-                    difficulty = difficulty,
-                    learnerProfile = learnerProfile,
-                    previousQuestions = previousQuestions,
-                    attemptNumber = attempt
-                )
-
-                // Use higher token limit to avoid truncation
-                val response = gemmaService.generateTextAsync(
-                    prompt,
-                    UnifiedGemmaService.GenerationConfig(
-                        maxTokens = 400, // Increased from 350
-                        temperature = 0.8f + (attempt * 0.05f),
-                        topK = 50,
-                        randomSeed = (System.currentTimeMillis() + attempt * 1000).toInt()
-                    )
-                )
-
-                // Validate response isn't truncated
-                if (response.trim().endsWith("...") || !response.contains("}")) {
-                    Timber.w("Response appears truncated, retrying...")
-                    delay(200)
-                    lastError = Exception("Response truncated")
+                // Check if we should use online or offline generation
+                val useOnline = shouldUseOnlineService()
+                val question = if (useOnline) {
+                    try {
+                        initializeApiServiceIfNeeded()
+                        val onlineQuestions = onlineQuizGenerator.generateQuestionsOnline(
+                            subject = subject,
+                            topic = topic,
+                            difficulty = difficulty,
+                            questionTypes = listOf(questionType),
+                            count = 1,
+                            previousQuestions = previousQuestions,
+                            studentName = _state.value.studentName,
+                            gradeLevel = _state.value.studentGrade,
+                            country = _state.value.studentCountry
+                        )
+                        onlineQuestions.firstOrNull() ?: throw Exception("No question generated online")
+                    } catch (e: Exception) {
+                        Timber.w(e, "Online generation failed, falling back to offline")
+                        // Fallback to offline generation
+                        generateOfflineQuestion(subject, topic, difficulty, questionType, learnerProfile, previousQuestions, attempt)
+                    }
                 } else {
-                    val question = parseAndValidateQuestion(response, questionType, difficulty)
+                    generateOfflineQuestion(subject, topic, difficulty, questionType, learnerProfile, previousQuestions, attempt)
+                }
 
-                    // Validate question quality
-                    if (question.questionText.lowercase().contains("sample") ||
-                        question.questionText.length < 10 ||
-                        question.correctAnswer.lowercase().contains("sample")) {
-                        Timber.w("Low quality question detected, retrying...")
-                        delay(200)
-                        lastError = Exception("Low quality question")
+                // Validate question quality
+                if (question.questionText.lowercase().contains("sample") ||
+                    question.questionText.length < 10 ||
+                    question.correctAnswer.lowercase().contains("sample")) {
+                    Timber.w("Low quality question detected, retrying...")
+                    delay(200)
+                    lastError = Exception("Low quality question")
+                } else {
+                    // Check similarity
+                    val similarities = previousQuestions.map { prev ->
+                        prev to calculateEnhancedSimilarity(question.questionText.lowercase(), prev.lowercase())
+                    }
+                    val maxSimilarity = similarities.maxOfOrNull { it.second } ?: 0f
+                    val isTooSimilar = maxSimilarity > 0.7f
+
+                    if (!isTooSimilar) {
+                        Timber.d("Question accepted, max similarity: $maxSimilarity")
+                        return@withContext question
                     } else {
-                        // Check similarity
-                        val similarities = previousQuestions.map { prev ->
-                            prev to calculateEnhancedSimilarity(question.questionText.lowercase(), prev.lowercase())
-                        }
-                        val maxSimilarity = similarities.maxOfOrNull { it.second } ?: 0f
-                        val isTooSimilar = maxSimilarity > 0.7f
-
-                        if (!isTooSimilar) {
-                            Timber.d("Question accepted, max similarity: $maxSimilarity")
-                            return@withContext question
-                        } else {
-                            val mostSimilar = similarities.maxByOrNull { it.second }
-                            Timber.w("Question too similar (${maxSimilarity}): '${question.questionText.take(50)}...' vs '${mostSimilar?.first?.take(50)}...'")
-                            lastError = Exception("Question too similar")
-                        }
+                        val mostSimilar = similarities.maxByOrNull { it.second }
+                        Timber.w("Question too similar (${maxSimilarity}): '${question.questionText.take(50)}...' vs '${mostSimilar?.first?.take(50)}...'")
+                        lastError = Exception("Question too similar")
                     }
                 }
 
@@ -948,6 +1045,44 @@ class QuizGeneratorViewModel @Inject constructor(
 
         Timber.e(lastError, "All attempts failed, using quality fallback")
         return@withContext generateFallbackQuestionForType(questionType, difficulty)
+    }
+
+    private suspend fun generateOfflineQuestion(
+        subject: Subject,
+        topic: String,
+        difficulty: Difficulty,
+        questionType: QuestionType,
+        learnerProfile: LearnerProfile,
+        previousQuestions: List<String>,
+        attempt: Int
+    ): Question = withContext(Dispatchers.IO) {
+        val prompt = createStructuredPrompt(
+            questionType = questionType,
+            subject = subject,
+            topic = topic,
+            difficulty = difficulty,
+            learnerProfile = learnerProfile,
+            previousQuestions = previousQuestions,
+            attemptNumber = attempt
+        )
+
+        // Use higher token limit to avoid truncation
+        val response = gemmaService.generateTextAsync(
+            prompt,
+            UnifiedGemmaService.GenerationConfig(
+                maxTokens = 400, // Increased from 350
+                temperature = 0.8f + (attempt * 0.05f),
+                topK = 50,
+                randomSeed = (System.currentTimeMillis() + attempt * 1000).toInt()
+            )
+        )
+
+        // Validate response isn't truncated
+        if (response.trim().endsWith("...") || !response.contains("}")) {
+            throw Exception("Response truncated")
+        }
+
+        return@withContext parseAndValidateQuestion(response, questionType, difficulty)
     }
 
     private fun generateVariedFallback(

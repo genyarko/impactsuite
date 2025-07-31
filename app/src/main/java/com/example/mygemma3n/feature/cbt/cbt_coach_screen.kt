@@ -113,7 +113,7 @@ fun CBTCoachScreen(
                                 )
                             }
 
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = "CBT Coach",
                                     style = MaterialTheme.typography.headlineMedium,
@@ -126,6 +126,11 @@ fun CBTCoachScreen(
                                     fontWeight = FontWeight.Medium
                                 )
                             }
+                            
+                            // Service mode indicator
+                            ServiceModeIndicatorCBT(
+                                isOnline = sessionState.isUsingOnlineService
+                            )
                         }
 
                         AnimatedVisibility(
@@ -957,5 +962,49 @@ fun getEmotionColor(emotion: Emotion?): Color {
         Emotion.DISGUSTED -> Color(0xFF795548)
         Emotion.NEUTRAL -> Color(0xFF607D8B)
         null -> Color.Gray
+    }
+}
+
+@Composable
+private fun ServiceModeIndicatorCBT(
+    isOnline: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        tonalElevation = 2.dp,
+        shape = RoundedCornerShape(8.dp),
+        color = if (isOnline) {
+            MaterialTheme.colorScheme.secondaryContainer
+        } else {
+            MaterialTheme.colorScheme.tertiaryContainer
+        }
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(
+                imageVector = if (isOnline) Icons.Default.Cloud else Icons.Default.OfflineBolt,
+                contentDescription = null,
+                modifier = Modifier.size(12.dp),
+                tint = if (isOnline) {
+                    MaterialTheme.colorScheme.onSecondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onTertiaryContainer
+                }
+            )
+            
+            Text(
+                text = if (isOnline) "Online" else "Offline",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (isOnline) {
+                    MaterialTheme.colorScheme.onSecondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onTertiaryContainer
+                }
+            )
+        }
     }
 }

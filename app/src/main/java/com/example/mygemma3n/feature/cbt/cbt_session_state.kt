@@ -17,6 +17,6 @@ data class CBTSessionState(
        add any existing fields you already had below; e.g.:
     -------------------------------------------------------------------------*/
     val error: String? = null,
-    val someOtherField: Int = 0
+    val isUsingOnlineService: Boolean = false
 
 )

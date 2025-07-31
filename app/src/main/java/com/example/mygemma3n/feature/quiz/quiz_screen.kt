@@ -607,6 +607,43 @@ fun EnhancedQuizTakingScreen(
     modifier: Modifier = Modifier
 ) {
     var index by remember { mutableIntStateOf(0) }
+    
+    // Handle empty questions list
+    if (quiz.questions.isEmpty()) {
+        Card(
+            modifier = modifier.fillMaxWidth().padding(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    Icons.Default.Warning,
+                    contentDescription = "Error",
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(48.dp)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "No questions available",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+                Text(
+                    "There was an issue generating questions. Please try again.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(onClick = onQuizComplete) {
+                    Text("Go Back")
+                }
+            }
+        }
+        return
+    }
+    
     val q = quiz.questions[index]
     var chosenAnswer by remember(q.id) { mutableStateOf<String?>(null) }
     var showHint by remember(q.id) { mutableStateOf(false) }
