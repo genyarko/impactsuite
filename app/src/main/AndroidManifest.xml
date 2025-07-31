@@ -102,12 +102,10 @@
             android:name="firebase_analytics_collection_enabled"
             android:value="true" />
 
-        <!-- Google Maps API Key (if using maps) -->
-        <!--
+        <!-- Google Maps API Key -->
         <meta-data
             android:name="com.google.android.geo.API_KEY"
-            android:value="YOUR_MAPS_API_KEY" />
-        -->
+            android:value="${MAPS_API_KEY}" />
 
         <!-- Model Download Service -->
         <service

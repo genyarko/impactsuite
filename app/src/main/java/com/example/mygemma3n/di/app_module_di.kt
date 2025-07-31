@@ -29,7 +29,9 @@ import com.example.mygemma3n.feature.plant.PlantDatabase
 import com.example.mygemma3n.feature.progress.LearningProgressTracker
 import com.example.mygemma3n.feature.quiz.EducationalContentRepository
 import com.example.mygemma3n.feature.quiz.EnhancedPromptManager
+import com.example.mygemma3n.feature.quiz.OnlineQuizGenerator
 import com.example.mygemma3n.feature.quiz.PerformanceOptimizedQuizGenerator
+import com.example.mygemma3n.feature.chat.OnlineChatService
 import com.example.mygemma3n.feature.quiz.QuizDatabase
 import com.example.mygemma3n.feature.quiz.QuizRepository
 import com.example.mygemma3n.feature.tutor.TutorProgressIntegrationService
@@ -316,6 +318,24 @@ object AppModule {
         gemmaService,
         performanceMonitor,
         promptManager
+    )
+
+    @Provides
+    @Singleton
+    fun provideOnlineQuizGenerator(
+        geminiApiService: GeminiApiService,
+        gson: Gson
+    ): OnlineQuizGenerator = OnlineQuizGenerator(
+        geminiApiService,
+        gson
+    )
+
+    @Provides
+    @Singleton
+    fun provideOnlineChatService(
+        geminiApiService: GeminiApiService
+    ): OnlineChatService = OnlineChatService(
+        geminiApiService
     )
 
     @Module

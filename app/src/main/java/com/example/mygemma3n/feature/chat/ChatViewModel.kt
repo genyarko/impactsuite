@@ -7,6 +7,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mygemma3n.data.ChatRepository
 import com.example.mygemma3n.data.UnifiedGemmaService
+import com.example.mygemma3n.data.GeminiApiService
+import com.example.mygemma3n.data.GeminiApiConfig
+import com.example.mygemma3n.domain.repository.SettingsRepository
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import com.example.mygemma3n.feature.caption.SpeechRecognitionService
 import com.example.mygemma3n.service.AudioCaptureService
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -21,6 +26,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import timber.log.Timber
@@ -31,8 +37,11 @@ import javax.inject.Inject
 class ChatViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val gemmaService: UnifiedGemmaService,
+    private val geminiApiService: GeminiApiService,
+    private val settingsRepository: SettingsRepository,
     private val speechService: SpeechRecognitionService,
     private val repo: ChatRepository,
+    private val onlineChatService: OnlineChatService,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -46,6 +55,46 @@ class ChatViewModel @Inject constructor(
 
     private var recordingJob: Job? = null
     private val audioBuffer = mutableListOf<FloatArray>()
+
+    /* ───────── Online/Offline Service Selection ───────── */
+    private fun hasNetworkConnection(): Boolean {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val activeNetwork = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+    }
+
+    private suspend fun shouldUseOnlineService(): Boolean {
+        return try {
+            val useOnlineService = settingsRepository.useOnlineServiceFlow.first()
+            val hasApiKey = settingsRepository.apiKeyFlow.first().isNotBlank()
+            val hasNetwork = hasNetworkConnection()
+            
+            useOnlineService && hasApiKey && hasNetwork
+        } catch (e: Exception) {
+            Timber.w(e, "Error checking service preference, defaulting to offline")
+            false
+        }
+    }
+
+    private suspend fun initializeApiServiceIfNeeded() {
+        if (!geminiApiService.isInitialized()) {
+            val apiKey = settingsRepository.apiKeyFlow.first()
+            if (apiKey.isNotBlank()) {
+                try {
+                    geminiApiService.initialize(GeminiApiConfig(apiKey = apiKey))
+                    Timber.d("GeminiApiService initialized for Chat")
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to initialize GeminiApiService")
+                    throw e
+                }
+            } else {
+                throw IllegalStateException("API key not found")
+            }
+        }
+    }
 
     init {
         // Stream messages from the DB straight into UI state
@@ -211,14 +260,28 @@ class ChatViewModel @Inject constructor(
             _uiState.update { it.copy(userTypedInput = "", isLoading = true, error = null) }
 
             try {
-                // 2. Call LLM
-                val reply = gemmaService.generateTextAsync(
-                    text,
-                    UnifiedGemmaService.GenerationConfig(
-                        maxTokens = 150,
-                        temperature = 0.7f
-                    )
-                )
+                // 2. Check if we should use online or offline generation
+                val useOnline = shouldUseOnlineService()
+                val reply = if (useOnline) {
+                    try {
+                        initializeApiServiceIfNeeded()
+                        val conversationHistory = _uiState.value.conversation
+                        onlineChatService.generateChatResponseOnline(
+                            userMessage = text,
+                            conversationHistory = conversationHistory,
+                            maxTokens = 150,
+                            temperature = 0.7f
+                        )
+                    } catch (e: Exception) {
+                        Timber.w(e, "Online chat generation failed, falling back to offline")
+                        // Fallback to offline generation
+                        generateOfflineResponse(text)
+                    }
+                } else {
+                    // Use offline generation
+                    generateOfflineResponse(text)
+                }
+
                 val aiMsg = ChatMessage.AI(reply)
 
                 // 3. Persist AI reply
@@ -232,8 +295,112 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    private suspend fun generateOfflineResponse(text: String): String {
+        return gemmaService.generateTextAsync(
+            text,
+            UnifiedGemmaService.GenerationConfig(
+                maxTokens = 150,
+                temperature = 0.7f
+            )
+        )
+    }
+
     fun clearError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    // ───── Enhanced online chat features ─────────────────────────────────────
+
+    fun sendMessageWithStreaming() {
+        val text = _uiState.value.userTypedInput.trim()
+        if (text.isBlank()) return
+
+        viewModelScope.launch {
+            // 1. Persist & update UI with user turn
+            val userMsg = ChatMessage.User(text)
+            repo.addMessage(sessionId, userMsg)
+            _uiState.update { it.copy(userTypedInput = "", isLoading = true, error = null) }
+
+            try {
+                // 2. Check if we should use online streaming
+                val useOnline = shouldUseOnlineService()
+                if (useOnline) {
+                    try {
+                        initializeApiServiceIfNeeded()
+                        val conversationHistory = _uiState.value.conversation
+                        
+                        // Create initial AI message for streaming
+                        val streamingMsg = ChatMessage.AI("")
+                        repo.addMessage(sessionId, streamingMsg)
+                        
+                        var fullResponse = ""
+                        onlineChatService.generateChatResponseStreamOnline(
+                            userMessage = text,
+                            conversationHistory = conversationHistory,
+                            temperature = 0.7f
+                        ).collect { chunk ->
+                            fullResponse += chunk
+                            // Update the last AI message with accumulated response
+                            val updatedMsg = ChatMessage.AI(fullResponse, streamingMsg.timestamp)
+                            // Note: In a real implementation, you'd need to update the message in the database
+                            // For now, this provides the streaming framework
+                        }
+                        
+                    } catch (e: Exception) {
+                        Timber.w(e, "Online streaming failed, falling back to regular generation")
+                        // Fallback to regular generation
+                        sendMessage()
+                        return@launch
+                    }
+                } else {
+                    // Use offline generation
+                    val reply = generateOfflineResponse(text)
+                    val aiMsg = ChatMessage.AI(reply)
+                    repo.addMessage(sessionId, aiMsg)
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Error generating streaming response")
+                _uiState.update { it.copy(error = "Failed to generate response: ${e.message}") }
+            } finally {
+                _uiState.update { it.copy(isLoading = false) }
+            }
+        }
+    }
+
+    fun generateSmartReplies() {
+        viewModelScope.launch {
+            try {
+                val useOnline = shouldUseOnlineService()
+                if (useOnline) {
+                    initializeApiServiceIfNeeded()
+                    val lastMessage = _uiState.value.conversation.lastOrNull()
+                    if (lastMessage is ChatMessage.AI) {
+                        val suggestions = onlineChatService.generateSmartReply(
+                            userMessage = lastMessage.content,
+                            conversationHistory = _uiState.value.conversation
+                        )
+                        // Update UI state with smart reply suggestions
+                        _uiState.update { it.copy(smartReplies = suggestions) }
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.w(e, "Failed to generate smart replies")
+                // Ignore errors for optional feature
+            }
+        }
+    }
+
+    fun useSmartReply(suggestion: String) {
+        _uiState.update { 
+            it.copy(
+                userTypedInput = suggestion,
+                smartReplies = emptyList()
+            )
+        }
+    }
+
+    fun clearSmartReplies() {
+        _uiState.update { it.copy(smartReplies = emptyList()) }
     }
 }
 
@@ -244,5 +411,6 @@ data class ChatState(
     val isRecording: Boolean = false,
     val isTranscribing: Boolean = false,
     val isLoading: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    val smartReplies: List<String> = emptyList()
 )

@@ -2,10 +2,13 @@ package com.example.mygemma3n.feature.tutor
 
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mygemma3n.data.*
+import com.example.mygemma3n.domain.repository.SettingsRepository
 import com.example.mygemma3n.feature.caption.SpeechRecognitionService
 import com.example.mygemma3n.feature.quiz.Difficulty
 import com.example.mygemma3n.service.AudioCaptureService
@@ -24,6 +27,7 @@ import kotlinx.coroutines.flow.map
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
@@ -38,6 +42,8 @@ class TutorViewModel @Inject constructor(
     private val tutorRepository: TutorRepository,
     private val chatRepository: ChatRepository,
     private val gemmaService: UnifiedGemmaService,
+    private val geminiApiService: GeminiApiService,
+    private val settingsRepository: SettingsRepository,
     private val offlineRAG: OfflineRAG,
     private val speechService: SpeechRecognitionService,
     private val promptManager: TutorPromptManager,
@@ -76,6 +82,58 @@ class TutorViewModel @Inject constructor(
     // Retry configuration
     private val MAX_RETRIES = 3
     private val RETRY_DELAY_MS = 1000L
+
+    /* ───────── Online/Offline Service Selection ───────── */
+    private fun hasNetworkConnection(): Boolean {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val activeNetwork = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+    }
+
+    private suspend fun shouldUseOnlineService(): Boolean {
+        return try {
+            val useOnlineService = settingsRepository.useOnlineServiceFlow.first()
+            val hasApiKey = settingsRepository.apiKeyFlow.first().isNotBlank()
+            val hasNetwork = hasNetworkConnection()
+            
+            useOnlineService && hasApiKey && hasNetwork
+        } catch (e: Exception) {
+            Timber.w(e, "Error checking service preference, defaulting to offline")
+            false
+        }
+    }
+
+    private suspend fun initializeApiServiceIfNeeded() {
+        if (!geminiApiService.isInitialized()) {
+            val apiKey = settingsRepository.apiKeyFlow.first()
+            if (apiKey.isNotBlank()) {
+                try {
+                    geminiApiService.initialize(GeminiApiConfig(apiKey = apiKey))
+                    Timber.d("GeminiApiService initialized for AI Tutor")
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to initialize GeminiApiService")
+                    throw e
+                }
+            } else {
+                throw IllegalStateException("API key not found")
+            }
+        }
+    }
+
+    private suspend fun ensureModelInitialized(): Boolean {
+        return try {
+            if (!gemmaService.isInitialized()) {
+                gemmaService.initializeBestAvailable()
+            }
+            true
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to ensure Gemma model initialization")
+            false
+        }
+    }
 
     init {
         setupDebouncing()
@@ -204,6 +262,12 @@ class TutorViewModel @Inject constructor(
             val student = currentStudent ?: throw IllegalStateException("No student profile")
             val subject = _state.value.currentSubject ?: throw IllegalStateException("No subject selected")
             val sessionType = _state.value.sessionType ?: throw IllegalStateException("No session type")
+
+            // Update service mode indicator
+            val usingOnline = shouldUseOnlineService()
+            _state.update {
+                it.copy(isUsingOnlineService = usingOnline)
+            }
 
         // Context management
         val currentTopic = _state.value.conversationTopic
@@ -428,6 +492,113 @@ private suspend fun generateAdaptiveResponse(
     originalQuestion: String = "",
     isFollowUp: Boolean = false
 ): String {
+    return if (shouldUseOnlineService()) {
+        try {
+            initializeApiServiceIfNeeded()
+            generateAdaptiveResponseOnline(
+                student = student,
+                userInput = userInput,
+                approach = approach,
+                studentNeed = studentNeed,
+                relevantContent = relevantContent,
+                concept = concept,
+                subject = subject,
+                sessionType = sessionType,
+                conversationTopic = conversationTopic,
+                originalQuestion = originalQuestion,
+                isFollowUp = isFollowUp
+            )
+        } catch (e: Exception) {
+            Timber.w(e, "Online tutoring response failed, falling back to offline")
+            generateAdaptiveResponseOffline(
+                student = student,
+                userInput = userInput,
+                approach = approach,
+                studentNeed = studentNeed,
+                relevantContent = relevantContent,
+                concept = concept,
+                subject = subject,
+                sessionType = sessionType,
+                conversationTopic = conversationTopic,
+                originalQuestion = originalQuestion,
+                isFollowUp = isFollowUp
+            )
+        }
+    } else {
+        generateAdaptiveResponseOffline(
+            student = student,
+            userInput = userInput,
+            approach = approach,
+            studentNeed = studentNeed,
+            relevantContent = relevantContent,
+            concept = concept,
+            subject = subject,
+            sessionType = sessionType,
+            conversationTopic = conversationTopic,
+            originalQuestion = originalQuestion,
+            isFollowUp = isFollowUp
+        )
+    }
+}
+
+private suspend fun generateAdaptiveResponseOnline(
+    student: StudentProfileEntity,
+    userInput: String,
+    approach: TeachingApproach,
+    studentNeed: StudentNeed,
+    relevantContent: String,
+    concept: String,
+    subject: OfflineRAG.Subject,
+    sessionType: TutorSessionType,
+    conversationTopic: String = "",
+    originalQuestion: String = "",
+    isFollowUp: Boolean = false
+): String {
+    // Build comprehensive prompt for online AI tutor
+    val fullPrompt = buildTutorPrompt(
+        student = student,
+        userInput = userInput,
+        approach = approach,
+        studentNeed = studentNeed,
+        relevantContent = relevantContent,
+        concept = concept,
+        subject = subject,
+        sessionType = sessionType,
+        conversationTopic = conversationTopic,
+        originalQuestion = originalQuestion,
+        isFollowUp = isFollowUp
+    )
+
+    try {
+        val response = withTimeoutOrNull(10_000) { // 10 second timeout
+            geminiApiService.generateTextComplete(fullPrompt)
+        } ?: throw IllegalStateException("Response timeout")
+
+        return if (response.isBlank()) {
+            throw IllegalStateException("Empty response from online service")
+        } else {
+            response
+        }
+
+    } catch (e: Exception) {
+        Timber.e(e, "Error generating online response")
+        throw e
+    }
+}
+
+private suspend fun generateAdaptiveResponseOffline(
+    student: StudentProfileEntity,
+    userInput: String,
+    approach: TeachingApproach,
+    studentNeed: StudentNeed,
+    relevantContent: String,
+    concept: String,
+    subject: OfflineRAG.Subject,
+    sessionType: TutorSessionType,
+    conversationTopic: String = "",
+    originalQuestion: String = "",
+    isFollowUp: Boolean = false
+): String {
     // Get appropriate max tokens for grade
     val maxTokens = getMaxTokensForGrade(student.gradeLevel)
 
@@ -447,6 +618,11 @@ private suspend fun generateAdaptiveResponse(
     )
 
     try {
+        // Ensure offline model is ready
+        if (!ensureModelInitialized()) {
+            return "I'm having trouble with the offline model right now. Could you please try again or check your settings?"
+        }
+
         // Generate response with proper config
         val response = gemmaService.generateTextAsync(
             fullPrompt,
@@ -481,7 +657,7 @@ private suspend fun generateAdaptiveResponse(
         return response
 
     } catch (e: Exception) {
-        Timber.e(e, "Error generating response")
+        Timber.e(e, "Error generating offline response")
         // Return a fallback response instead of throwing
         return "I'm having trouble generating a response right now. Could you please rephrase your question or try asking about a different aspect of ${subject.name}?"
     }
@@ -967,7 +1143,8 @@ private fun ensureCompleteResponse(response: String, grade: Int): String {
         val speechRate: Float = 1.0f,
         val showFloatingProgressSummary: Boolean = false,
         val showConceptMasteryCard: Boolean = true,
-        val showTutorProgressDisplay: Boolean = true
+        val showTutorProgressDisplay: Boolean = true,
+        val isUsingOnlineService: Boolean = false
     )
 
     data class TutorMessage(
