@@ -71,6 +71,7 @@ firebase-perf = "21.0.2"
 firebaseCrashlyticsBuildtools = "3.0.5"
 uiTestAndroid = "1.8.3"
 junitKtx = "1.2.1"
+coil = "2.7.0"
 
 [libraries]
 accompanist-permissions = { module = "com.google.accompanist:accompanist-permissions", version.ref = "accompanistPermissions" }
@@ -155,6 +156,7 @@ firebase-perf = { module = "com.google.firebase:firebase-perf", version.ref = "f
 firebase-crashlytics-buildtools = { group = "com.google.firebase", name = "firebase-crashlytics-buildtools", version.ref = "firebaseCrashlyticsBuildtools" }
 androidx-ui-test-android = { group = "androidx.compose.ui", name = "ui-test-android", version.ref = "uiTestAndroid" }
 androidx-junit-ktx = { group = "androidx.test.ext", name = "junit-ktx", version.ref = "junitKtx" }
+coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 
 
 [plugins]

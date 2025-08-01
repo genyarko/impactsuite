@@ -128,6 +128,9 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
 
+// Image Loading
+    implementation(libs.coil.compose)
+
 // Navigation
     implementation(libs.androidx.hilt.navigation.compose)
 
@@ -237,6 +240,8 @@ dependencies {
 
     //Lifecycle
     implementation("androidx.lifecycle:lifecycle-process:2.9.2")
+
+    implementation("io.coil-kt:coil-compose:2.6.0")
 
 //    // Coqui STT (formerly Mozilla DeepSpeech)
 //    implementation("ai.coqui.stt:libstt:1.4.0")

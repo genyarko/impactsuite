@@ -71,6 +71,8 @@ class SummarizerViewModel @Inject constructor(
             val hasApiKey = settingsRepository.apiKeyFlow.first().isNotBlank()
             val hasNetwork = hasNetworkConnection()
             
+            Timber.d("shouldUseOnlineService: useOnlineService=$useOnlineService, hasApiKey=$hasApiKey, hasNetwork=$hasNetwork")
+            
             useOnlineService && hasApiKey && hasNetwork
         } catch (e: Exception) {
             Timber.w(e, "Error checking service preference, defaulting to offline")
@@ -96,18 +98,24 @@ class SummarizerViewModel @Inject constructor(
     }
 
     private suspend fun generateSummaryWithService(text: String): String {
-        return if (shouldUseOnlineService()) {
+        val useOnline = shouldUseOnlineService()
+        Timber.d("generateSummaryWithService: shouldUseOnlineService = $useOnline")
+        
+        return if (useOnline) {
             try {
+                Timber.d("Using online service for summarization")
                 initializeApiServiceIfNeeded()
                 geminiApiService.generateTextComplete(
                     "Summarize the following text in a clear, concise manner. " +
-                    "Focus on the main points and key information:\n\n$text"
+                    "Focus on the main points and key information:\n\n$text",
+                    "summarizer"
                 )
             } catch (e: Exception) {
                 Timber.w(e, "Online service failed, falling back to offline")
                 generateSummaryOffline(text)
             }
         } else {
+            Timber.d("Using offline service for summarization")
             generateSummaryOffline(text)
         }
     }

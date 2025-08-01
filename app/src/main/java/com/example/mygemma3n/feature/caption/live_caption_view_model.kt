@@ -486,7 +486,7 @@ class LiveCaptionViewModel @Inject constructor(
         return if (shouldUseOnlineService()) {
             try {
                 initializeApiServiceIfNeeded()
-                geminiApiService.generateTextComplete(prompt)
+                geminiApiService.generateTextComplete(prompt, "caption")
             } catch (e: Exception) {
                 Timber.w(e, "Online translation failed, falling back to offline")
                 gemmaService.generateTextAsync(

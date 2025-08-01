@@ -94,7 +94,8 @@ class PlantScannerViewModel @Inject constructor(
                 geminiApiService.generateContentWithImageAndModel(
                     modelName = GeminiApiService.GEMINI_FLASH_MODEL, // Use vision model
                     prompt = prompt,
-                    image = bitmap.resizeToGemma(512)
+                    image = bitmap.resizeToGemma(512),
+                    serviceType = "plant"
                 )
             } catch (e: Exception) {
                 Timber.w(e, "Online image analysis failed, falling back to offline")
@@ -114,12 +115,59 @@ class PlantScannerViewModel @Inject constructor(
     }
 
     private fun buildPromptForOnlineService(): String {
-        return "Analyze this image and return JSON with the following structure: " +
-               "{ \"label\": \"main object/subject\", \"confidence\": 0.95, " +
-               "\"plantSpecies\": \"species name or N/A if not a plant\", " +
-               "\"disease\": \"disease name or None if healthy/not applicable\", " +
-               "\"severity\": \"severity level if disease present\", " +
-               "\"recommendations\": [\"list of care recommendations\"] }"
+        return """
+            Analyze this image and determine if it contains plants or food. Return JSON with this structure:
+            
+            If it's a plant:
+            {
+                "label": "main object/subject",
+                "confidence": 0.95,
+                "analysisType": "PLANT",
+                "plantSpecies": "species name or N/A",
+                "disease": "disease name or None if healthy",
+                "severity": "severity level if disease present",
+                "recommendations": ["list of care recommendations"]
+            }
+            
+            If it's food:
+            {
+                "label": "main food type",
+                "confidence": 0.95,
+                "analysisType": "FOOD",
+                "foodItems": [
+                    {
+                        "name": "food item name",
+                        "confidence": 0.9,
+                        "estimatedWeight": 150,
+                        "caloriesPer100g": 250,
+                        "totalCalories": 375,
+                        "macros": {
+                            "carbs": 45.0,
+                            "protein": 12.0,
+                            "fat": 8.5,
+                            "fiber": 3.2
+                        }
+                    }
+                ],
+                "totalCalories": 375,
+                "nutritionalInfo": {
+                    "totalCarbs": 45.0,
+                    "totalProtein": 12.0,
+                    "totalFat": 8.5,
+                    "totalFiber": 3.2,
+                    "servingSize": "1 serving"
+                },
+                "recommendations": ["nutritional advice or serving suggestions"]
+            }
+            
+            If neither plant nor food:
+            {
+                "label": "object description",
+                "confidence": 0.95,
+                "analysisType": "GENERAL",
+                "recommendations": ["general observations"]
+            }
+        """.trimIndent()
     }
 
     /* ---------- Public API ---------- */
@@ -164,33 +212,96 @@ class PlantScannerViewModel @Inject constructor(
     private fun Bitmap.resizeToGemma(target: Int): Bitmap =
         if (width == target && height == target) this else scale(target, target)
 
-    /* ---------- Lightweight JSON parser ---------- */
+    /* ---------- Enhanced JSON parser ---------- */
     private fun parseGeneralAnalysis(raw: String): GeneralAnalysis {
         val cleaned = raw.trim()
             .removePrefix("```json")
             .removeSuffix("```")
             .trim()
         val obj = JSONObject(cleaned)
+        
+        val analysisTypeStr = obj.optString("analysisType", "GENERAL")
+        val analysisType = try {
+            AnalysisType.valueOf(analysisTypeStr)
+        } catch (e: Exception) {
+            AnalysisType.GENERAL
+        }
+        
+        val foodItems = if (analysisType == AnalysisType.FOOD) {
+            parseFoodItems(obj.optJSONArray("foodItems"))
+        } else {
+            emptyList()
+        }
+        
+        val nutritionalInfo = if (analysisType == AnalysisType.FOOD) {
+            parseNutritionalInfo(obj.optJSONObject("nutritionalInfo"))
+        } else {
+            null
+        }
+        
         return GeneralAnalysis(
             id             = UUID.randomUUID().toString(),
             timestamp      = System.currentTimeMillis(),
             label          = obj.optString("label"),
             confidence     = obj.optDouble("confidence", 0.0).toFloat(),
-            plantSpecies   = obj.optString("plantSpecies").takeIf { it != "N/A" },
-            disease        = obj.optString("disease").takeIf { it != "None" && it != "N/A" },
+            plantSpecies   = obj.optString("plantSpecies").takeIf { it != "N/A" && it.isNotBlank() },
+            disease        = obj.optString("disease").takeIf { it != "None" && it != "N/A" && it.isNotBlank() },
             severity       = obj.optString("severity"),
             recommendations= obj.optJSONArray("recommendations")?.let { arr ->
                 List(arr.length()) { i -> arr.getString(i) }
             } ?: emptyList(),
-            additionalInfo = null
+            additionalInfo = null,
+            foodItems      = foodItems,
+            totalCalories  = obj.optInt("totalCalories", 0),
+            nutritionalInfo = nutritionalInfo,
+            analysisType   = analysisType
+        )
+    }
+    
+    private fun parseFoodItems(jsonArray: org.json.JSONArray?): List<FoodItem> {
+        if (jsonArray == null) return emptyList()
+        
+        return List(jsonArray.length()) { i ->
+            val item = jsonArray.getJSONObject(i)
+            val macros = item.optJSONObject("macros")?.let { macrosObj ->
+                Macronutrients(
+                    carbs = macrosObj.optDouble("carbs", 0.0).toFloat(),
+                    protein = macrosObj.optDouble("protein", 0.0).toFloat(),
+                    fat = macrosObj.optDouble("fat", 0.0).toFloat(),
+                    fiber = macrosObj.optDouble("fiber", 0.0).toFloat()
+                )
+            } ?: Macronutrients(0f, 0f, 0f, 0f)
+            
+            FoodItem(
+                name = item.optString("name", "Unknown food"),
+                confidence = item.optDouble("confidence", 0.0).toFloat(),
+                estimatedWeight = item.optInt("estimatedWeight", 0),
+                caloriesPer100g = item.optInt("caloriesPer100g", 0),
+                totalCalories = item.optInt("totalCalories", 0),
+                macros = macros
+            )
+        }
+    }
+    
+    private fun parseNutritionalInfo(jsonObj: JSONObject?): NutritionalInfo? {
+        if (jsonObj == null) return null
+        
+        return NutritionalInfo(
+            totalCarbs = jsonObj.optDouble("totalCarbs", 0.0).toFloat(),
+            totalProtein = jsonObj.optDouble("totalProtein", 0.0).toFloat(),
+            totalFat = jsonObj.optDouble("totalFat", 0.0).toFloat(),
+            totalFiber = jsonObj.optDouble("totalFiber", 0.0).toFloat(),
+            servingSize = jsonObj.optString("servingSize", "1 serving")
         )
     }
 
     companion object {
-        /** Minimal schema to stay well below the 512‑token mobile context window. */
+        /** Enhanced prompt for food and plant analysis with minimal tokens. */
         private const val BASE_PROMPT =
-            "Return JSON: label, confidence(0‑1), plantSpecies|N/A, disease|None, " +
-                    "severity, recommendations[]. If not a plant leave plantSpecies=\\\"N/A\\\"."
+            "Analyze image. Return JSON with: label, confidence(0-1), analysisType(PLANT/FOOD/GENERAL). " +
+            "If PLANT: plantSpecies, disease|None, severity, recommendations[]. " +
+            "If FOOD: foodItems[{name, estimatedWeight, totalCalories, macros{carbs,protein,fat}}], totalCalories, recommendations[]. " +
+            "If GENERAL: recommendations[]."
     }
 }
 
@@ -213,5 +324,38 @@ data class GeneralAnalysis(
     val disease: String?               = null,
     val severity: String?              = null,
     val recommendations: List<String>  = emptyList(),
-    val additionalInfo: PlantInfo?     = null
+    val additionalInfo: PlantInfo?     = null,
+    // Food analysis fields
+    val foodItems: List<FoodItem>      = emptyList(),
+    val totalCalories: Int             = 0,
+    val nutritionalInfo: NutritionalInfo? = null,
+    val analysisType: AnalysisType     = AnalysisType.GENERAL
+)
+
+enum class AnalysisType {
+    GENERAL, PLANT, FOOD
+}
+
+data class FoodItem(
+    val name: String,
+    val confidence: Float,
+    val estimatedWeight: Int, // in grams
+    val caloriesPer100g: Int,
+    val totalCalories: Int,
+    val macros: Macronutrients
+)
+
+data class Macronutrients(
+    val carbs: Float,     // grams
+    val protein: Float,   // grams  
+    val fat: Float,       // grams
+    val fiber: Float = 0f // grams
+)
+
+data class NutritionalInfo(
+    val totalCarbs: Float,
+    val totalProtein: Float,
+    val totalFat: Float,
+    val totalFiber: Float,
+    val servingSize: String = "1 serving"
 )

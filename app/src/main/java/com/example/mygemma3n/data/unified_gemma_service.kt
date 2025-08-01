@@ -130,6 +130,12 @@ class UnifiedGemmaService @Inject constructor(
                     config
                 )
             } catch (e: Exception) {
+                // Handle cancellation separately from other errors
+                if (e is kotlinx.coroutines.CancellationException) {
+                    Timber.d("Text generation cancelled")
+                    throw e // Re-throw cancellation to stop processing
+                }
+                
                 Timber.e(e, "Generation failed, attempting recovery")
 
                 // Try to recover by recreating the inference session
@@ -154,6 +160,11 @@ class UnifiedGemmaService @Inject constructor(
                         )
                     }
                 } catch (recoveryError: Exception) {
+                    // Handle cancellation in recovery too
+                    if (recoveryError is kotlinx.coroutines.CancellationException) {
+                        Timber.d("Recovery cancelled")
+                        throw recoveryError
+                    }
                     Timber.e(recoveryError, "Recovery attempt failed")
                 }
 

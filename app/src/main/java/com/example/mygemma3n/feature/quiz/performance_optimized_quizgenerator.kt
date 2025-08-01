@@ -75,6 +75,9 @@ class PerformanceOptimizedQuizGenerator @Inject constructor(
                 UnifiedGemmaService.GenerationConfig(maxTokens = 1, temperature = 0.1f)
             )
             Timber.d("Model pre-warmed successfully")
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            Timber.d("Model pre-warming cancelled")
+            throw e
         } catch (e: Exception) {
             Timber.w(e, "Failed to pre-warm model")
         }

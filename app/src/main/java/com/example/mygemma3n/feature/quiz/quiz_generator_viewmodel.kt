@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 import timber.log.Timber
 import javax.inject.Inject
 import kotlin.random.Random
@@ -92,6 +93,9 @@ class QuizGeneratorViewModel @Inject constructor(
 
                 // Load initial progress data
                 loadUserProgress()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                Timber.d("Quiz initialization cancelled")
+                throw e
             } catch (e: Exception) {
                 Timber.e(e, "Initialization failed")
                 _state.update { it.copy(error = "Failed to initialize: ${e.message}") }

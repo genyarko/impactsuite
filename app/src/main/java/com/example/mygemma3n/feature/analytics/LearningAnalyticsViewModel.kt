@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import timber.log.Timber
 import javax.inject.Inject
 
@@ -32,30 +33,76 @@ class LearningAnalyticsViewModel @Inject constructor(
     private fun loadAnalytics() {
         viewModelScope.launch {
             try {
-                _uiState.value = _uiState.value.copy(isLoading = true)
+                _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+                
+                // Initialize demo data in a separate job that won't block
+                launch {
+                    try {
+                        analyticsRepository.initializeDemoData(currentStudentId)
+                    } catch (e: Exception) {
+                        Timber.w(e, "Failed to initialize demo data, continuing anyway")
+                    }
+                }
                 
                 analyticsRepository.getLearningAnalytics(currentStudentId)
                     .catch { error ->
-                        Timber.e(error, "Failed to load analytics")
-                        _uiState.value = _uiState.value.copy(
-                            isLoading = false,
-                            error = "Failed to load analytics: ${error.message}"
-                        )
+                        if (error is kotlinx.coroutines.CancellationException) {
+                            // Don't log cancellation as error - it's expected during navigation
+                            Timber.d("Analytics loading cancelled")
+                            throw error // Re-throw to stop collection
+                        } else {
+                            Timber.e(error, "Failed to load analytics")
+                            _uiState.value = _uiState.value.copy(
+                                isLoading = false,
+                                error = "Failed to load analytics: ${error.message}"
+                            )
+                        }
                     }
                     .collect { analytics ->
-                        _uiState.value = _uiState.value.copy(
-                            isLoading = false,
-                            analytics = analytics,
-                            error = null
-                        )
+                        if (isActive) { // Only update if coroutine is still active
+                            _uiState.value = _uiState.value.copy(
+                                isLoading = false,
+                                analytics = analytics,
+                                error = null
+                            )
+                        }
+                    }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // Expected during navigation - don't log as error
+                Timber.d("Analytics loading was cancelled")
+            } catch (e: Exception) {
+                if (isActive) { // Only update if coroutine is still active
+                    Timber.e(e, "Error loading analytics")
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        error = "Error loading analytics: ${e.message}"
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun initializeDemoDataIfNeeded() {
+        try {
+            // Check if we have any data by looking at a simple count
+            val hasData = try {
+                // Use a more direct approach to check for data
+                analyticsRepository.getLearningAnalytics(currentStudentId)
+                    .first()
+                    .let { analytics ->
+                        analytics.subjectProgress.isNotEmpty() || analytics.knowledgeGaps.isNotEmpty()
                     }
             } catch (e: Exception) {
-                Timber.e(e, "Error loading analytics")
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    error = "Error loading analytics: ${e.message}"
-                )
+                false
             }
+
+            if (!hasData) {
+                Timber.d("No analytics data found, initializing demo data")
+                analyticsRepository.initializeDemoData(currentStudentId)
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Could not check for existing data, initializing demo data anyway")
+            analyticsRepository.initializeDemoData(currentStudentId)
         }
     }
 
@@ -147,6 +194,34 @@ class LearningAnalyticsViewModel @Inject constructor(
                 Timber.e(e, "Failed to end learning session")
             }
         }
+    }
+
+    fun initializeDemoData() {
+        viewModelScope.launch {
+            try {
+                _uiState.value = _uiState.value.copy(isLoading = true)
+                analyticsRepository.initializeDemoData(currentStudentId)
+                if (isActive) {
+                    refreshAnalytics()
+                    Timber.d("Demo data initialized successfully")
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                Timber.d("Demo data initialization cancelled")
+            } catch (e: Exception) {
+                if (isActive) {
+                    Timber.e(e, "Failed to initialize demo data")
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        error = "Failed to initialize demo data: ${e.message}"
+                    )
+                }
+            }
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        Timber.d("LearningAnalyticsViewModel cleared")
     }
 }
 

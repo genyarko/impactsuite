@@ -19,6 +19,8 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -470,65 +472,190 @@ fun LanguagePickerDialog(
     onLanguageSelected: (Language) -> Unit,
     onDismiss: () -> Unit
 ) {
+    var searchQuery by remember { mutableStateOf("") }
+    
+    val filteredLanguages = remember(searchQuery) {
+        if (searchQuery.isBlank()) {
+            Language.entries
+        } else {
+            Language.entries.filter { language ->
+                language.displayName.contains(searchQuery, ignoreCase = true) ||
+                language.code.contains(searchQuery, ignoreCase = true)
+            }
+        }
+    }
+    
+    val popularLanguages = remember {
+        listOf(
+            Language.AUTO,
+            Language.ENGLISH,
+            Language.SPANISH,
+            Language.FRENCH,
+            Language.GERMAN,
+            Language.CHINESE,
+            Language.JAPANESE,
+            Language.KOREAN,
+            Language.HINDI,
+            Language.ARABIC,
+            Language.PORTUGUESE,
+            Language.RUSSIAN,
+            Language.ITALIAN
+        )
+    }
+
     Dialog(onDismissRequest = onDismiss) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(max = 400.dp)
+                .fillMaxHeight(0.8f)
         ) {
             Column {
+                // Header
                 Text(
-                    text = "Select Language",
+                    text = "Select Language (${Language.entries.size} languages)",
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.padding(16.dp)
                 )
 
-                HorizontalDivider()
+                // Search field
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    placeholder = { Text("Search languages...") },
+                    leadingIcon = {
+                        Icon(Icons.Default.Search, contentDescription = "Search")
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Clear")
+                            }
+                        }
+                    },
+                    singleLine = true
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
                 LazyColumn(
                     modifier = Modifier.weight(1f)
                 ) {
-                    items(Language.entries) { language ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onLanguageSelected(language) }
-                                .background(
-                                    if (language == currentLanguage)
-                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                                    else
-                                        Color.Transparent
-                                )
-                                .padding(16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                    // Show popular languages first if no search
+                    if (searchQuery.isBlank()) {
+                        item {
                             Text(
-                                text = language.displayName,
-                                style = MaterialTheme.typography.bodyLarge
+                                text = "Popular Languages",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                             )
-                            if (language == currentLanguage) {
-                                Text(
-                                    text = "✓",
-                                    color = MaterialTheme.colorScheme.primary,
-                                    style = MaterialTheme.typography.bodyLarge
-                                )
-                            }
+                        }
+                        
+                        items(popularLanguages) { language ->
+                            LanguageItem(
+                                language = language,
+                                isSelected = language == currentLanguage,
+                                onClick = { onLanguageSelected(language) }
+                            )
+                        }
+                        
+                        item {
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                            Text(
+                                text = "All Languages",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            )
+                        }
+                    }
+                    
+                    // Show filtered languages
+                    items(filteredLanguages) { language ->
+                        LanguageItem(
+                            language = language,
+                            isSelected = language == currentLanguage,
+                            onClick = { onLanguageSelected(language) }
+                        )
+                    }
+                    
+                    if (filteredLanguages.isEmpty()) {
+                        item {
+                            Text(
+                                text = "No languages found",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(16.dp)
+                            )
                         }
                     }
                 }
 
                 HorizontalDivider()
 
-                TextButton(
-                    onClick = onDismiss,
+                // Footer with stats and cancel button
+                Row(
                     modifier = Modifier
-                        .align(Alignment.End)
-                        .padding(8.dp)
+                        .fillMaxWidth()
+                        .padding(8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Cancel")
+                    Text(
+                        text = "${filteredLanguages.size} languages",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel")
+                    }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun LanguageItem(
+    language: Language,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .background(
+                if (isSelected)
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                else
+                    Color.Transparent
+            )
+            .padding(16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = language.displayName,
+                style = MaterialTheme.typography.bodyLarge
+            )
+            Text(
+                text = language.code,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            )
+        }
+        if (isSelected) {
+            Text(
+                text = "✓",
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.bodyLarge
+            )
         }
     }
 }

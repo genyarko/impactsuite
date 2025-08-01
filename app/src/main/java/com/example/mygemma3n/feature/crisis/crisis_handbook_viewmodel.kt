@@ -534,7 +534,7 @@ Provide step-by-step first aid instructions:
         
 Be clear, accurate, and prioritize safety. If unsure, recommend calling emergency services."""
 
-        val response = geminiApiService.generateTextComplete(prompt)
+        val response = geminiApiService.generateTextComplete(prompt, "crisis")
         return if (response.isBlank()) genericFallback else response
     }
     
@@ -604,7 +604,7 @@ Provide a clear, actionable response with:
                 
 Keep response brief but comprehensive. Focus on safety."""
 
-                val response = geminiApiService.generateTextComplete(prompt)
+                val response = geminiApiService.generateTextComplete(prompt, "crisis")
                 if (response.isBlank()) noResponseFallback else response
             } ?: timeoutFallback
         } catch (e: Exception) {
@@ -806,7 +806,8 @@ Provide emergency medical guidance:
                             2. Emergency contact numbers for ${nearestCapital.country}
                             3. When to seek evacuation to ${nearestCapital.capital}
                             
-Keep response brief and practical."""
+Keep response brief and practical.""",
+                            "crisis"
                         )
                     }
                     
