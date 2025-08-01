@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Grass
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material3.*
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ProgressIndicatorDefaults
@@ -97,7 +98,7 @@ fun PlantScannerScreen(
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
-                        text = "Image Scanner",
+                        text = "Plant & Food Scanner",
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
@@ -250,7 +251,7 @@ private fun CameraScanningOverlay(
 
         // Instruction text
         Text(
-            text = if (isScanning) "Analyzing..." else "Position plant in frame",
+            text = if (isScanning) "Analyzing..." else "Position object in frame",
             color = Color.White,
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier
@@ -333,7 +334,11 @@ private fun AnalysisResultCard(
             modifier = Modifier.padding(horizontal = 4.dp)
         ) {
             Icon(
-                imageVector = if (isUsingOnlineService) Icons.Default.Info else Icons.Default.Grass,
+                imageVector = if (isUsingOnlineService) Icons.Default.Info else when (analysis.analysisType) {
+                    AnalysisType.FOOD -> Icons.Default.Restaurant
+                    AnalysisType.PLANT -> Icons.Default.Grass
+                    else -> Icons.Default.Info
+                },
                 contentDescription = null,
                 tint = if (isUsingOnlineService) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary,
                 modifier = Modifier.size(16.dp)
@@ -360,7 +365,11 @@ private fun AnalysisResultCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
-                    imageVector = Icons.Default.Grass,
+                    imageVector = when (analysis.analysisType) {
+                        AnalysisType.FOOD -> Icons.Default.Restaurant
+                        AnalysisType.PLANT -> Icons.Default.Grass
+                        else -> Icons.Default.Info
+                    },
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(24.dp)
@@ -391,33 +400,228 @@ private fun AnalysisResultCard(
             }
         }
 
-        // Plant-specific details
-        analysis.plantSpecies?.let { species ->
+        // Content based on analysis type
+        when (analysis.analysisType) {
+            AnalysisType.FOOD -> {
+                FoodAnalysisContent(analysis)
+            }
+            AnalysisType.PLANT -> {
+                PlantAnalysisContent(analysis)
+            }
+            else -> {
+                GeneralAnalysisContent(analysis)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FoodAnalysisContent(analysis: GeneralAnalysis) {
+    // Total calories card
+    if (analysis.totalCalories > 0) {
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer
+            ),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Restaurant,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Total Calories",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    Text(
+                        text = "${analysis.totalCalories} kcal",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+            }
+        }
+    }
+
+    // Nutritional information
+    analysis.nutritionalInfo?.let { nutritionInfo ->
+        NutritionalInfoCard(nutritionInfo)
+    }
+
+    // Food items breakdown
+    if (analysis.foodItems.isNotEmpty()) {
+        FoodItemsCard(analysis.foodItems)
+    }
+
+    // Recommendations
+    if (analysis.recommendations.isNotEmpty()) {
+        RecommendationsCard(recommendations = analysis.recommendations)
+    }
+}
+
+@Composable
+private fun PlantAnalysisContent(analysis: GeneralAnalysis) {
+    // Plant-specific details
+    analysis.plantSpecies?.let { species ->
+        DetailCard(
+            icon = Icons.Default.Info,
+            title = "Plant Species",
+            content = species
+        )
+
+        analysis.disease?.let { disease ->
+            DetailCard(
+                icon = Icons.Default.Warning,
+                title = "Disease Detected",
+                content = "$disease\nSeverity: ${analysis.severity ?: "N/A"}",
+                isWarning = true
+            )
+        }
+
+        if (analysis.recommendations.isNotEmpty()) {
+            RecommendationsCard(recommendations = analysis.recommendations)
+        }
+
+        analysis.additionalInfo?.let { info ->
             DetailCard(
                 icon = Icons.Default.Info,
-                title = "Plant Species",
-                content = species
+                title = "Care Instructions",
+                content = "Watering: ${info.wateringNeeds}\nSunlight: ${info.sunlightNeeds}"
             )
+        }
+    }
+}
 
-            analysis.disease?.let { disease ->
-                DetailCard(
-                    icon = Icons.Default.Warning,
-                    title = "Disease Detected",
-                    content = "$disease\nSeverity: ${analysis.severity ?: "N/A"}",
-                    isWarning = true
-                )
+@Composable
+private fun GeneralAnalysisContent(analysis: GeneralAnalysis) {
+    if (analysis.recommendations.isNotEmpty()) {
+        RecommendationsCard(recommendations = analysis.recommendations)
+    }
+}
+
+@Composable
+private fun NutritionalInfoCard(nutritionInfo: NutritionalInfo) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Text(
+                text = "Nutritional Information",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                NutrientColumn("Carbs", "${nutritionInfo.totalCarbs.roundToInt()}g")
+                NutrientColumn("Protein", "${nutritionInfo.totalProtein.roundToInt()}g")
+                NutrientColumn("Fat", "${nutritionInfo.totalFat.roundToInt()}g")
+                NutrientColumn("Fiber", "${nutritionInfo.totalFiber.roundToInt()}g")
             }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Serving size: ${nutritionInfo.servingSize}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            )
+        }
+    }
+}
 
-            if (analysis.recommendations.isNotEmpty()) {
-                RecommendationsCard(recommendations = analysis.recommendations)
-            }
+@Composable
+private fun NutrientColumn(label: String, value: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+        )
+    }
+}
 
-            analysis.additionalInfo?.let { info ->
-                DetailCard(
-                    icon = Icons.Default.Info,
-                    title = "Care Instructions",
-                    content = "Watering: ${info.wateringNeeds}\nSunlight: ${info.sunlightNeeds}"
-                )
+@Composable
+private fun FoodItemsCard(foodItems: List<FoodItem>) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Text(
+                text = "Food Items",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            foodItems.forEach { item ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = item.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "${item.estimatedWeight}g • ${(item.confidence * 100).roundToInt()}% confidence",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
+                    }
+                    Text(
+                        text = "${item.totalCalories} kcal",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+                if (item != foodItems.last()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
             }
         }
     }

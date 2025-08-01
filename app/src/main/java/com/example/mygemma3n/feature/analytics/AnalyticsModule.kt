@@ -68,4 +68,15 @@ object AnalyticsModule {
             .fallbackToDestructiveMigration() // For development - remove in production
             .build()
     }
+
+    @Provides
+    @Singleton
+    fun provideKnowledgeGapAnalyzer(
+        interactionDao: LearningInteractionDao,
+        masteryDao: TopicMasteryDao,
+        progressDao: SubjectProgressDao,
+        gapDao: KnowledgeGapDao
+    ): KnowledgeGapAnalyzer {
+        return KnowledgeGapAnalyzer(interactionDao, masteryDao, progressDao, gapDao)
+    }
 }

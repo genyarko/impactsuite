@@ -450,7 +450,7 @@ Focus on helping them understand the connection between thoughts, feelings, and 
 
         try {
             val response = withTimeoutOrNull(12_000) { // 12 second timeout for CBT responses
-                geminiApiService.generateTextComplete(prompt)
+                geminiApiService.generateTextComplete(prompt, "cbt")
             } ?: throw IllegalStateException("Response timeout")
 
             return if (response.isBlank()) {

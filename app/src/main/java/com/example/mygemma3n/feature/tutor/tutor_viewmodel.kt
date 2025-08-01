@@ -571,7 +571,7 @@ private suspend fun generateAdaptiveResponseOnline(
 
     try {
         val response = withTimeoutOrNull(10_000) { // 10 second timeout
-            geminiApiService.generateTextComplete(fullPrompt)
+            geminiApiService.generateTextComplete(fullPrompt, "tutor")
         } ?: throw IllegalStateException("Response timeout")
 
         return if (response.isBlank()) {

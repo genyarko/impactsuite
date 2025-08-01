@@ -20,26 +20,132 @@ import kotlin.coroutines.coroutineContext
 // Language support
 enum class Language(val code: String, val displayName: String) {
     AUTO("auto", "Auto-detect"),
+    
+    // Major World Languages
     ENGLISH("en", "English"),
+    CHINESE("zh", "Chinese (Mandarin)"),
+    HINDI("hi", "Hindi"),
     SPANISH("es", "Spanish"),
     FRENCH("fr", "French"),
-    GERMAN("de", "German"),
-    CHINESE("zh", "Chinese"),
-    JAPANESE("ja", "Japanese"),
-    KOREAN("ko", "Korean"),
-    HINDI("hi", "Hindi"),
     ARABIC("ar", "Arabic"),
+    BENGALI("bn", "Bengali"),
     PORTUGUESE("pt", "Portuguese"),
     RUSSIAN("ru", "Russian"),
+    JAPANESE("ja", "Japanese"),
+    
+    // European Languages
+    GERMAN("de", "German"),
     ITALIAN("it", "Italian"),
     DUTCH("nl", "Dutch"),
     SWEDISH("sv", "Swedish"),
     POLISH("pl", "Polish"),
     TURKISH("tr", "Turkish"),
-    INDONESIAN("id", "Indonesian"),
+    GREEK("el", "Greek"),
+    CZECH("cs", "Czech"),
+    HUNGARIAN("hu", "Hungarian"),
+    ROMANIAN("ro", "Romanian"),
+    BULGARIAN("bg", "Bulgarian"),
+    CROATIAN("hr", "Croatian"),
+    SERBIAN("sr", "Serbian"),
+    SLOVAK("sk", "Slovak"),
+    SLOVENIAN("sl", "Slovenian"),
+    LITHUANIAN("lt", "Lithuanian"),
+    LATVIAN("lv", "Latvian"),
+    ESTONIAN("et", "Estonian"),
+    FINNISH("fi", "Finnish"),
+    DANISH("da", "Danish"),
+    NORWEGIAN("no", "Norwegian"),
+    ICELANDIC("is", "Icelandic"),
+    IRISH("ga", "Irish"),
+    WELSH("cy", "Welsh"),
+    BASQUE("eu", "Basque"),
+    CATALAN("ca", "Catalan"),
+    GALICIAN("gl", "Galician"),
+    MALTESE("mt", "Maltese"),
+    
+    // Asian Languages
+    KOREAN("ko", "Korean"),
     VIETNAMESE("vi", "Vietnamese"),
     THAI("th", "Thai"),
-    HEBREW("he", "Hebrew")
+    INDONESIAN("id", "Indonesian"),
+    MALAY("ms", "Malay"),
+    FILIPINO("tl", "Filipino"),
+    BURMESE("my", "Burmese"),
+    KHMER("km", "Khmer"),
+    LAO("lo", "Lao"),
+    MONGOLIAN("mn", "Mongolian"),
+    NEPALI("ne", "Nepali"),
+    SINHALA("si", "Sinhala"),
+    TAMIL("ta", "Tamil"),
+    TELUGU("te", "Telugu"),
+    KANNADA("kn", "Kannada"),
+    MALAYALAM("ml", "Malayalam"),
+    MARATHI("mr", "Marathi"),
+    GUJARATI("gu", "Gujarati"),
+    PUNJABI("pa", "Punjabi"),
+    URDU("ur", "Urdu"),
+    PERSIAN("fa", "Persian"),
+    PASHTO("ps", "Pashto"),
+    DARI("prs", "Dari"),
+    KURDISH("ku", "Kurdish"),
+    ARMENIAN("hy", "Armenian"),
+    GEORGIAN("ka", "Georgian"),
+    AZERBAIJANI("az", "Azerbaijani"),
+    KAZAKH("kk", "Kazakh"),
+    KYRGYZ("ky", "Kyrgyz"),
+    TAJIK("tg", "Tajik"),
+    TURKMEN("tk", "Turkmen"),
+    UZBEK("uz", "Uzbek"),
+    
+    // Middle Eastern & African Languages
+    HEBREW("he", "Hebrew"),
+    AMHARIC("am", "Amharic"),
+    HAUSA("ha", "Hausa"),
+    YORUBA("yo", "Yoruba"),
+    IGBO("ig", "Igbo"),
+    SWAHILI("sw", "Swahili"),
+    SOMALI("so", "Somali"),
+    AFRIKAANS("af", "Afrikaans"),
+    ZULU("zu", "Zulu"),
+    XHOSA("xh", "Xhosa"),
+    
+    // Latin American Languages
+    QUECHUA("qu", "Quechua"),
+    GUARANI("gn", "Guarani"),
+    
+    // Pacific Languages
+    HAWAIIAN("haw", "Hawaiian"),
+    MAORI("mi", "Māori"),
+    SAMOAN("sm", "Samoan"),
+    TONGAN("to", "Tongan"),
+    FIJIAN("fj", "Fijian"),
+    
+    // Additional European Regional Languages
+    CORSICAN("co", "Corsican"),
+    BRETON("br", "Breton"),
+    OCCITAN("oc", "Occitan"),
+    SARDINIAN("sc", "Sardinian"),
+    LUXEMBOURGISH("lb", "Luxembourgish"),
+    FAROESE("fo", "Faroese"),
+    
+    // Additional Asian Languages
+    TIBETAN("bo", "Tibetan"),
+    DZONGKHA("dz", "Dzongkha"),
+    ASSAMESE("as", "Assamese"),
+    ORIYA("or", "Odia"),
+    SANSKRIT("sa", "Sanskrit"),
+    
+    // Sign Languages (where supported)
+    ASL("ase", "American Sign Language"),
+    BSL("bfi", "British Sign Language"),
+    
+    // Constructed Languages
+    ESPERANTO("eo", "Esperanto"),
+    INTERLINGUA("ia", "Interlingua"),
+    
+    // Historical Languages (where supported)
+    LATIN("la", "Latin"),
+    ANCIENT_GREEK("grc", "Ancient Greek")
 }
 
 // Audio capture service
