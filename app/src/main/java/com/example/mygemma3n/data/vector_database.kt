@@ -18,6 +18,19 @@ import com.example.mygemma3n.data.StudentProfileEntity
 import com.example.mygemma3n.data.TutorSessionEntity
 import com.example.mygemma3n.data.LearningPreferenceEntity
 import com.example.mygemma3n.data.ConceptMasteryEntity
+import com.example.mygemma3n.feature.story.StoryEntity
+import com.example.mygemma3n.feature.story.StoryReadingSession
+import com.example.mygemma3n.feature.story.StoryDao
+import com.example.mygemma3n.feature.story.StoryReadingSessionDao
+import com.example.mygemma3n.feature.story.StoryConverters
+import com.example.mygemma3n.data.local.entities.TokenUsageEntity  
+import com.example.mygemma3n.data.local.TokenUsageDao
+import com.example.mygemma3n.data.local.entities.UserQuotaEntity
+import com.example.mygemma3n.data.local.entities.PricingConfigEntity
+import com.example.mygemma3n.data.local.UserQuotaDao
+import com.example.mygemma3n.data.local.PricingConfigDao
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 
 // Room Entity for vector storage
@@ -62,6 +75,16 @@ class Converters {
             }
         }
     }
+
+    @TypeConverter
+    fun fromLocalDateTime(value: LocalDateTime?): String? {
+        return value?.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+    }
+
+    @TypeConverter
+    fun toLocalDateTime(value: String?): LocalDateTime? {
+        return value?.let { LocalDateTime.parse(it, DateTimeFormatter.ISO_LOCAL_DATE_TIME) }
+    }
 }
 
 // DAO for vector operations
@@ -101,17 +124,28 @@ interface VectorDao {
         StudentProfileEntity::class,
         TutorSessionEntity::class,
         LearningPreferenceEntity::class,
-        ConceptMasteryEntity::class
+        ConceptMasteryEntity::class,
+        StoryEntity::class,
+        StoryReadingSession::class,
+        TokenUsageEntity::class,
+        UserQuotaEntity::class,
+        PricingConfigEntity::class
     ],
-    version = 3,
+    version = 7,
     exportSchema = false
+
 )
-@TypeConverters(Converters::class)
+@TypeConverters(Converters::class, StoryConverters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
     abstract fun vectorDao(): VectorDao
     abstract fun subjectDao(): SubjectDao
     abstract fun tutorDao(): TutorDao
+    abstract fun storyDao(): StoryDao
+    abstract fun storyReadingSessionDao(): StoryReadingSessionDao
+    abstract fun tokenUsageDao(): TokenUsageDao
+    abstract fun userQuotaDao(): UserQuotaDao
+    abstract fun pricingConfigDao(): PricingConfigDao
 }
 
 

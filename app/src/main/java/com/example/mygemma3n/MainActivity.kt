@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Summarize
 import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material3.*
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.*
@@ -69,8 +70,13 @@ import androidx.navigation.navArgument
 import com.example.mygemma3n.data.GeminiApiConfig
 import com.example.mygemma3n.data.GeminiApiService
 import com.example.mygemma3n.data.UnifiedGemmaService
+import com.example.mygemma3n.data.repository.TokenUsageRepository
+import com.example.mygemma3n.data.local.entities.TokenUsageSummary
 import com.example.mygemma3n.data.validateKey
 import com.example.mygemma3n.di.SpeechRecognitionServiceEntryPoint
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.components.SingletonComponent
 import com.example.mygemma3n.feature.caption.SpeechRecognitionService
 import com.example.mygemma3n.SPEECH_API_KEY
 import com.example.mygemma3n.GEMINI_API_KEY
@@ -91,10 +97,13 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import javax.inject.Inject
+import java.text.NumberFormat
+import java.util.*
 import com.example.mygemma3n.di.GemmaServiceEntryPoint
 import com.example.mygemma3n.feature.chat.ChatListScreen
 import com.example.mygemma3n.feature.tutor.TutorScreen
 import com.example.mygemma3n.feature.analytics.AnalyticsDashboardScreen
+import com.example.mygemma3n.feature.story.StoryScreen
 import com.example.mygemma3n.ui.components.InitializationScreen
 import com.example.mygemma3n.ui.settings.QuizSettingsScreen
 import com.example.mygemma3n.service.ModelDownloadService
@@ -105,6 +114,13 @@ import kotlinx.coroutines.delay
 
 // ───── Preference keys ──────────────────────────────────────────────────────
 val MAPS_API_KEY   = stringPreferencesKey("google_maps_api_key")
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface TokenUsageRepositoryEntryPoint {
+    fun tokenUsageRepository(): TokenUsageRepository
+}
+
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
@@ -532,6 +548,9 @@ fun Gemma3nNavigation(
                 onNavigateBack = { navController.popBackStack() }
             )
         }
+        composable("story_mode") {
+            StoryScreen()
+        }
         composable("api_settings") {
             val context = LocalContext.current
             val speechService = remember {
@@ -540,9 +559,16 @@ fun Gemma3nNavigation(
                     SpeechRecognitionServiceEntryPoint::class.java
                 ).speechRecognitionService()
             }
+            val tokenUsageRepository = remember {
+                EntryPointAccessors.fromApplication(
+                    context.applicationContext,
+                    TokenUsageRepositoryEntryPoint::class.java
+                ).tokenUsageRepository()
+            }
             ApiSettingsScreen(
                 geminiApiService = geminiApiService,
                 speechService = speechService,
+                tokenUsageRepository = tokenUsageRepository,
                 onNavigateBack = { navController.popBackStack() }
             )
         }
@@ -872,6 +898,12 @@ private fun getFeatureItems(isGemmaInitialized: Boolean, isModelReady: Boolean) 
         route = "analytics",
         icon = Icons.Default.Analytics,
         enabled = true // Analytics works independently of Gemma models
+    ),
+    FeatureItem(
+        title = "Story Mode",
+        route = "story_mode",
+        icon = Icons.Default.MenuBook,
+        enabled = isGemmaInitialized
     )
 )
 
@@ -1025,7 +1057,8 @@ private fun FeatureButton(
 @Composable
 fun ApiSettingsScreen(
     geminiApiService: GeminiApiService,
-    speechService: SpeechRecognitionService, // <-- Inject this!
+    speechService: SpeechRecognitionService,
+    tokenUsageRepository: TokenUsageRepository? = null,
     onNavigateBack: () -> Unit = {}
 ) {
     var apiKey by remember { mutableStateOf("") }
@@ -1383,6 +1416,12 @@ fun ApiSettingsScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // Token usage display section
+            if (useOnlineService && tokenUsageRepository != null) {
+                TokenUsageSection(tokenUsageRepository = tokenUsageRepository)
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -1401,6 +1440,201 @@ fun ApiSettingsScreen(
                         text = "Enable the Cloud Speech-to-Text API in your Google Cloud Console and create an API key with Speech-to-Text permissions.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun TokenUsageSection(tokenUsageRepository: TokenUsageRepository) {
+    var todayUsage by remember { mutableStateOf<TokenUsageSummary?>(null) }
+    var monthlyUsage by remember { mutableStateOf<TokenUsageSummary?>(null) }
+    var selectedPeriod by remember { mutableStateOf("Today") }
+    var isLoading by remember { mutableStateOf(true) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        try {
+            Timber.d("TokenUsageSection: Loading token usage data...")
+            val today = tokenUsageRepository.getTodayTokenUsage()
+            val monthly = tokenUsageRepository.getMonthlyTokenUsage()
+            Timber.d("TokenUsageSection: Today tokens: ${today?.totalTokens ?: 0}, Monthly tokens: ${monthly?.totalTokens ?: 0}")
+            todayUsage = today
+            monthlyUsage = monthly
+            isLoading = false
+        } catch (e: Exception) {
+            Timber.e(e, "TokenUsageSection: Error loading token usage")
+            errorMessage = e.message
+            isLoading = false
+        }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "📊 API Token Usage",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            when {
+                errorMessage != null -> {
+                    Text(
+                        text = "Error loading token usage: $errorMessage",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                todayUsage != null || monthlyUsage != null -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        // Period selector
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            FilterChip(
+                                onClick = { selectedPeriod = "Today" },
+                                label = { Text("Today") },
+                                selected = selectedPeriod == "Today",
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            FilterChip(
+                                onClick = { selectedPeriod = "Month" },
+                                label = { Text("This Month") },
+                                selected = selectedPeriod == "Month",
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        
+                        // Display selected usage data
+                        val summary = when (selectedPeriod) {
+                            "Today" -> todayUsage
+                            "Month" -> monthlyUsage
+                            else -> todayUsage
+                        }
+                        
+                        if (summary != null) {
+                            val numberFormat = NumberFormat.getNumberInstance(Locale.getDefault())
+                            
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    text = "${selectedPeriod}'s Usage",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = "Input Tokens",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = numberFormat.format(summary.totalInputTokens),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                    
+                                    Column {
+                                        Text(
+                                            text = "Output Tokens",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = numberFormat.format(summary.totalOutputTokens),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                    
+                                    Column {
+                                        Text(
+                                            text = "Total Tokens",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = numberFormat.format(summary.totalTokens),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                                
+                                if (summary.serviceBreakdown.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "By Feature",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    
+                                    summary.serviceBreakdown.entries.forEach { (service, usage) ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = service.replaceFirstChar { it.uppercase() },
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = "${numberFormat.format(usage.totalTokens)} tokens",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            Text(
+                                text = "No ${selectedPeriod.lowercase()} usage data available yet.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                else -> {
+                    Text(
+                        text = "No usage data available yet. Start using online features to see token usage.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }

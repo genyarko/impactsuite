@@ -18,13 +18,20 @@ import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 import androidx.core.graphics.scale
+import okhttp3.Request
+import org.json.JSONArray
+import java.util.Base64
+import com.example.mygemma3n.data.local.entities.TokenUsage
+import com.example.mygemma3n.data.repository.TokenUsageRepository
+import javax.inject.Provider
 
 /* ────────────────────────────────────────────────────────────────────
    SERVICE
    ─────────────────────────────────────────────────────────────────── */
 @Singleton
 class GeminiApiService @Inject constructor(
-    private val context: Context
+    private val context: Context,
+    private val tokenUsageRepositoryProvider: Provider<TokenUsageRepository>
 ) {
 
     /* IDs published 2025-07-09 */
@@ -33,6 +40,7 @@ class GeminiApiService @Inject constructor(
         const val GEMINI_PRO_MODEL        = "gemini-2.5-pro"
         const val GEMINI_FLASH_MODEL      = "gemini-2.5-flash"   // vision
         const val EMBEDDING_MODEL         = "embedding-001"
+        const val GEMINI_IMAGE_MODEL = "gemini-2.0-flash-preview-image-generation"
     }
 
     /* state */
@@ -90,8 +98,94 @@ class GeminiApiService @Inject constructor(
             .collect(::emit)
     }.flowOn(Dispatchers.IO)
 
-    suspend fun generateTextComplete(prompt: String): String = withContext(Dispatchers.IO) {
-        checkInit().generateContent(prompt).text ?: ""
+    suspend fun generateTextComplete(prompt: String, serviceType: String = "unknown"): String = withContext(Dispatchers.IO) {
+        val result = checkInit().generateContent(prompt)
+        val response = result.text ?: ""
+        
+        // Try to get actual token counts from usage metadata
+        val actualTokenUsage = extractTokenUsageFromResult(result, prompt, response)
+        
+        try {
+            val tokenUsageRepository = tokenUsageRepositoryProvider.get()
+            Timber.d("Recording token usage: service=$serviceType, input=${actualTokenUsage.inputTokens}, output=${actualTokenUsage.outputTokens}")
+            tokenUsageRepository.recordTokenUsage(
+                serviceType = serviceType,
+                modelName = model?.modelName ?: "unknown",
+                inputTokens = actualTokenUsage.inputTokens,
+                outputTokens = actualTokenUsage.outputTokens
+            )
+            Timber.d("Token usage recorded successfully")
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to record token usage")
+        }
+        
+        response
+    }
+    
+    suspend fun generateTextCompleteWithTokens(prompt: String, serviceType: String = "unknown"): Pair<String, TokenUsage> = withContext(Dispatchers.IO) {
+        val result = checkInit().generateContent(prompt)
+        val response = result.text ?: ""
+        
+        // Try to get actual token counts from usage metadata
+        val actualTokenUsage = extractTokenUsageFromResult(result, prompt, response)
+        
+        try {
+            val tokenUsageRepository = tokenUsageRepositoryProvider.get()
+            Timber.d("Recording token usage: service=$serviceType, input=${actualTokenUsage.inputTokens}, output=${actualTokenUsage.outputTokens}")
+            tokenUsageRepository.recordTokenUsage(
+                serviceType = serviceType,
+                modelName = model?.modelName ?: "unknown",
+                inputTokens = actualTokenUsage.inputTokens,
+                outputTokens = actualTokenUsage.outputTokens
+            )
+            Timber.d("Token usage recorded successfully")
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to record token usage")
+        }
+        
+        response to actualTokenUsage
+    }
+    
+    // Enhanced token extraction from API response
+    private fun extractTokenUsageFromResult(
+        result: com.google.ai.client.generativeai.type.GenerateContentResponse,
+        prompt: String,
+        response: String,
+        hasImage: Boolean = false
+    ): TokenUsage {
+        return try {
+            // Try to extract actual token counts from usageMetadata if available
+            val usageMetadata = result.usageMetadata
+            if (usageMetadata != null) {
+                val inputTokens = usageMetadata.promptTokenCount ?: estimateTokens(prompt, hasImage)
+                val outputTokens = usageMetadata.candidatesTokenCount ?: estimateTokens(response)
+                
+                Timber.d("Extracted actual token counts: input=$inputTokens, output=$outputTokens")
+                TokenUsage(inputTokens, outputTokens)
+            } else {
+                // Fallback to estimation if usage metadata not available
+                Timber.d("UsageMetadata not available, using estimation")
+                val inputTokens = estimateTokens(prompt, hasImage)
+                val outputTokens = estimateTokens(response)
+                TokenUsage(inputTokens, outputTokens)
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Error extracting token usage, falling back to estimation")
+            val inputTokens = estimateTokens(prompt, hasImage)
+            val outputTokens = estimateTokens(response)
+            TokenUsage(inputTokens, outputTokens)
+        }
+    }
+
+    // Improved token estimation function
+    private fun estimateTokens(text: String, hasImage: Boolean = false): Int {
+        // Basic estimation: ~4 characters per token for English text
+        val baseTokens = (text.length / 4).coerceAtLeast(1)
+        
+        // Add estimated tokens for image processing if present
+        val imageTokens = if (hasImage) 258 else 0 // Gemini typically uses ~258 tokens for image processing
+        
+        return baseTokens + imageTokens
     }
 
     /* ───── multimodal helpers ───── */
@@ -108,17 +202,83 @@ class GeminiApiService @Inject constructor(
     suspend fun generateContentWithImageAndModel(
         modelName: String,
         prompt: String,
-        image: Bitmap
+        image: Bitmap,
+        serviceType: String = "unknown"
     ): String = withContext(Dispatchers.IO) {
         val key  = apiKey ?: error("Service not initialised")
         val cfg  = model?.generationConfig
             ?: generationConfig { maxOutputTokens = 512 }
 
         val visionModel = GenerativeModel(modelName, key, cfg)
-        visionModel.generateContent(
+        val result = visionModel.generateContent(
             content { image(image); text(prompt) }
-        ).text ?: ""
+        )
+        val response = result.text ?: ""
+        
+        
+        // Try to get actual token counts from usage metadata
+        val actualTokenUsage = extractTokenUsageFromResult(result, prompt, response, hasImage = true)
+        
+        try {
+            val tokenUsageRepository = tokenUsageRepositoryProvider.get()
+            Timber.d("Recording vision token usage: service=$serviceType, input=${actualTokenUsage.inputTokens}, output=${actualTokenUsage.outputTokens}")
+            tokenUsageRepository.recordTokenUsage(
+                serviceType = serviceType,
+                modelName = modelName,
+                inputTokens = actualTokenUsage.inputTokens,
+                outputTokens = actualTokenUsage.outputTokens
+            )
+            Timber.d("Vision token usage recorded successfully")
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to record vision token usage")
+        }
+        
+        response
     }
+
+
+
+    // GeminiApiService.kt
+    suspend fun generateImageBytes(prompt: String): ByteArray = withContext(Dispatchers.IO) {
+        val key = apiKey ?: error("Service not initialised")
+
+        val url =
+            "https://generativelanguage.googleapis.com/v1beta/models/$GEMINI_IMAGE_MODEL:generateContent?key=$key"
+
+        val body = JSONObject().apply {
+            put("contents", JSONArray().put(JSONObject().apply {
+                put("parts", JSONArray().put(JSONObject().put("text", prompt)))
+            }))
+            put("generationConfig", JSONObject().apply {
+                put("responseModalities", JSONArray().put("TEXT").put("IMAGE"))
+            })
+        }
+
+        val req = Request.Builder()
+            .url(url)
+            .post(body.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+
+        http.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) error("Image generation failed: HTTP ${resp.code}")
+            val parts = JSONObject(resp.body.string())
+                .getJSONArray("candidates")
+                .getJSONObject(0)
+                .getJSONObject("content")
+                .getJSONArray("parts")
+
+
+            val b64 = (0 until parts.length())
+                .asSequence()
+                .map { parts.getJSONObject(it).optJSONObject("inlineData")?.optString("data") }
+                .firstOrNull { !it.isNullOrEmpty() }
+                ?: error("No image data returned")
+
+            Base64.getDecoder().decode(b64)
+        }
+    }
+
+
 
     /* ───── quick template ───── */
     suspend fun translate(
@@ -137,7 +297,7 @@ class GeminiApiService @Inject constructor(
 /* ───── utility extension: sanity-check API key ───── */
 suspend fun GeminiApiService.validateKey(key: String): Boolean = try {
     initialize(GeminiApiConfig(apiKey = key, maxOutputTokens = 1200))
-    generateTextComplete("Say OK")
+    generateTextComplete("Say OK", "validation")
     true
 } catch (e: Exception) {
     Timber.e(e, "Key validation failed")
