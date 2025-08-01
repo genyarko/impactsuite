@@ -18,6 +18,11 @@ import com.example.mygemma3n.data.UnifiedGemmaService
 import com.example.mygemma3n.data.VectorDatabase
 import com.example.mygemma3n.data.local.*
 import com.example.mygemma3n.data.local.dao.SubjectDao
+import com.example.mygemma3n.data.repository.TokenUsageRepository
+import com.example.mygemma3n.service.QuotaService
+import com.example.mygemma3n.service.CostCalculationService
+import com.example.mygemma3n.data.local.UserQuotaDao
+import com.example.mygemma3n.data.local.PricingConfigDao
 import com.example.mygemma3n.dataStore
 import com.example.mygemma3n.feature.analytics.LearningAnalyticsRepository
 import com.example.mygemma3n.feature.analytics.LearningInteractionDao
@@ -34,6 +39,11 @@ import com.example.mygemma3n.feature.quiz.PerformanceOptimizedQuizGenerator
 import com.example.mygemma3n.feature.chat.OnlineChatService
 import com.example.mygemma3n.feature.quiz.QuizDatabase
 import com.example.mygemma3n.feature.quiz.QuizRepository
+import com.example.mygemma3n.feature.story.StoryRepository
+import com.example.mygemma3n.feature.story.OnlineStoryGenerator
+import com.example.mygemma3n.feature.story.StoryImageGenerator
+import com.example.mygemma3n.feature.story.StoryDao
+import com.example.mygemma3n.feature.story.StoryReadingSessionDao
 import com.example.mygemma3n.feature.tutor.TutorProgressIntegrationService
 import com.example.mygemma3n.feature.tutor.TutorPromptManager
 import com.example.mygemma3n.remote.EmergencyDatabase
@@ -82,7 +92,7 @@ object AppModule {
             context,
             AppDatabase::class.java,
             "vector_database"
-        ).fallbackToDestructiveMigration(false)
+        ).fallbackToDestructiveMigration() // Allow migration for token tracking feature
             .build()
     }
 
@@ -226,6 +236,17 @@ object AppModule {
     fun provideSubjectRepository(dao: SubjectDao): SubjectRepository =
         SubjectRepository(dao)
 
+    @Provides
+    @Singleton
+    fun provideTokenUsageRepository(
+        tokenUsageDao: TokenUsageDao
+    ): TokenUsageRepository = TokenUsageRepository(tokenUsageDao)
+
+    @Provides
+    @Singleton
+    fun provideTokenUsageDao(database: AppDatabase): TokenUsageDao =
+        database.tokenUsageDao()
+
 
 
     @Provides
@@ -296,8 +317,9 @@ object AppModule {
     @Provides
     @Singleton
     fun provideGeminiApiService(
-        @ApplicationContext context: Context
-    ): GeminiApiService = GeminiApiService(context)
+        @ApplicationContext context: Context,
+        tokenUsageRepositoryProvider: javax.inject.Provider<TokenUsageRepository>
+    ): GeminiApiService = GeminiApiService(context, tokenUsageRepositoryProvider)
 
     @Provides
     @Singleton
@@ -337,6 +359,38 @@ object AppModule {
     ): OnlineChatService = OnlineChatService(
         geminiApiService
     )
+
+    // Story Feature
+    @Provides
+    @Singleton
+    fun provideStoryDao(db: AppDatabase): StoryDao = db.storyDao()
+
+    @Provides
+    @Singleton
+    fun provideStoryReadingSessionDao(db: AppDatabase): StoryReadingSessionDao = db.storyReadingSessionDao()
+
+    @Provides
+    @Singleton
+    fun provideStoryRepository(
+        storyDao: StoryDao,
+        sessionDao: StoryReadingSessionDao,
+        gson: Gson
+    ): StoryRepository = StoryRepository(storyDao, sessionDao, gson)
+
+    @Provides
+    @Singleton
+    fun provideStoryImageGenerator(
+        geminiApiService: GeminiApiService,
+        @ApplicationContext context: Context
+    ): StoryImageGenerator = StoryImageGenerator(geminiApiService, context)
+
+    @Provides
+    @Singleton
+    fun provideOnlineStoryGenerator(
+        geminiApiService: GeminiApiService,
+        gson: Gson,
+        storyImageGenerator: StoryImageGenerator
+    ): OnlineStoryGenerator = OnlineStoryGenerator(geminiApiService, gson, storyImageGenerator)
 
     @Module
     @InstallIn(SingletonComponent::class)
@@ -401,6 +455,38 @@ object AppModule {
         vectorDB,
         embeddingService,
         context
+    )
+
+    // New billing-related DAOs
+    @Provides
+    @Singleton
+    fun provideUserQuotaDao(database: AppDatabase): UserQuotaDao =
+        database.userQuotaDao()
+
+    @Provides
+    @Singleton
+    fun providePricingConfigDao(database: AppDatabase): PricingConfigDao =
+        database.pricingConfigDao()
+
+    // New billing-related services
+    @Provides
+    @Singleton
+    fun provideCostCalculationService(
+        pricingConfigDao: PricingConfigDao
+    ): CostCalculationService = CostCalculationService(pricingConfigDao)
+
+    @Provides
+    @Singleton
+    fun provideQuotaService(
+        userQuotaDao: UserQuotaDao,
+        pricingConfigDao: PricingConfigDao,
+        costCalculationService: CostCalculationService,
+        tokenUsageRepository: TokenUsageRepository
+    ): QuotaService = QuotaService(
+        userQuotaDao,
+        pricingConfigDao,
+        costCalculationService,
+        tokenUsageRepository
     )
 
 }
