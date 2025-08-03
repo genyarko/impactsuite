@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
@@ -91,6 +92,16 @@ class CBTCoachViewModel @Inject constructor(
         }
     }
 
+    private suspend fun warmUpApiService() {
+        try {
+            val warmupPrompt = "Hi" // Minimal prompt
+            geminiApiService.generateTextComplete(warmupPrompt, "cbt_warmup")
+            Timber.d("CBT API service warmed up successfully")
+        } catch (e: Exception) {
+            Timber.w(e, "CBT API warmup failed, but service should still work")
+        }
+    }
+
     private suspend fun ensureModelInitialized(): Boolean {
         return try {
             if (!gemmaService.isInitialized()) {
@@ -148,6 +159,20 @@ Let's explore what you're experiencing together. Can you tell me more about what
                 initializeModel()
                 // Initialize knowledge base after model is ready
                 sessionManager.initializeKnowledgeBase()
+
+                // Preload API service for faster CBT responses
+                launch {
+                    delay(1000) // Give settings time to load
+                    if (shouldUseOnlineService()) {
+                        try {
+                            Timber.d("Preloading API service for CBT Coach")
+                            initializeApiServiceIfNeeded()
+                            warmUpApiService()
+                        } catch (e: Exception) {
+                            Timber.w(e, "Failed to preload API service for CBT Coach")
+                        }
+                    }
+                }
             } catch (e: Exception) {
                 Timber.e(e, "Failed to initialize Gemma model or knowledge base")
                 _sessionState.update {

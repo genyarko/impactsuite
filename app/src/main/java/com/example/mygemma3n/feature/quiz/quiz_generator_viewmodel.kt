@@ -93,6 +93,20 @@ class QuizGeneratorViewModel @Inject constructor(
 
                 // Load initial progress data
                 loadUserProgress()
+
+                // Preload API service for faster quiz generation
+                launch {
+                    delay(1000) // Give settings time to load
+                    if (shouldUseOnlineService()) {
+                        try {
+                            Timber.d("Preloading API service for Quiz Generator")
+                            initializeApiServiceIfNeeded()
+                            warmUpApiService()
+                        } catch (e: Exception) {
+                            Timber.w(e, "Failed to preload API service for Quiz Generator")
+                        }
+                    }
+                }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 Timber.d("Quiz initialization cancelled")
                 throw e
@@ -171,6 +185,16 @@ class QuizGeneratorViewModel @Inject constructor(
             } else {
                 throw IllegalStateException("API key not found")
             }
+        }
+    }
+
+    private suspend fun warmUpApiService() {
+        try {
+            val warmupPrompt = "Hi" // Minimal prompt
+            geminiApiService.generateTextComplete(warmupPrompt, "quiz_warmup")
+            Timber.d("Quiz API service warmed up successfully")
+        } catch (e: Exception) {
+            Timber.w(e, "Quiz API warmup failed, but service should still work")
         }
     }
 

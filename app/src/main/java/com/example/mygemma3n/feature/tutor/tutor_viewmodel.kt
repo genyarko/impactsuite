@@ -123,6 +123,16 @@ class TutorViewModel @Inject constructor(
         }
     }
 
+    private suspend fun warmUpApiService() {
+        try {
+            val warmupPrompt = "Hi" // Minimal prompt
+            geminiApiService.generateTextComplete(warmupPrompt, "warmup")
+            Timber.d("API service warmed up successfully")
+        } catch (e: Exception) {
+            Timber.w(e, "API warmup failed, but service should still work")
+        }
+    }
+
     private suspend fun ensureModelInitialized(): Boolean {
         return try {
             if (!gemmaService.isInitialized()) {
@@ -140,15 +150,31 @@ class TutorViewModel @Inject constructor(
         restoreStateIfNeeded(savedStateHandle)
         
         viewModelScope.launch {
-            initializeSpeechServiceIfNeeded()
-            loadMostRecentStudent()
+            // Start these in parallel for faster initialization
+            launch { initializeSpeechServiceIfNeeded() }
+            launch { loadMostRecentStudent() }
+            launch { 
+                // Wait a bit for settings to load, then preload API service
+                delay(1000) // Give settings time to load
+                if (shouldUseOnlineService()) {
+                    try {
+                        Timber.d("Preloading API service after settings loaded")
+                        initializeApiServiceIfNeeded()
+                        warmUpApiService()
+                    } catch (e: Exception) {
+                        Timber.w(e, "Failed to preload API service during init")
+                    }
+                } else {
+                    Timber.d("Online service not available during init - will check again on first interaction")
+                }
+            }
         }
     }
 
     @OptIn(FlowPreview::class)
     private fun setupDebouncing() {
         inputDebouncer
-            .debounce(300) // Wait 300ms after user stops typing
+            .debounce(150) // Wait 150ms after user stops typing for faster response
             .filter { it.isNotBlank() }
             .onEach { debouncedInput ->
                 processUserInputInternal(debouncedInput)
@@ -265,8 +291,22 @@ class TutorViewModel @Inject constructor(
 
             // Update service mode indicator
             val usingOnline = shouldUseOnlineService()
+            val wasUsingOnline = _state.value.isUsingOnlineService
             _state.update {
                 it.copy(isUsingOnlineService = usingOnline)
+            }
+            
+            // If switching from offline to online, initialize API service immediately
+            // (warmup will happen in parallel with the actual request)
+            if (usingOnline && !wasUsingOnline) {
+                viewModelScope.launch {
+                    try {
+                        Timber.d("Switching to online mode - initializing API service")
+                        initializeApiServiceIfNeeded()
+                    } catch (e: Exception) {
+                        Timber.w(e, "Failed to initialize API service on mode switch")
+                    }
+                }
             }
 
         // Context management
@@ -307,10 +347,18 @@ class TutorViewModel @Inject constructor(
             recentHistory = conversationContext.takeLast(3)
         )
 
-        val relevantContent = offlineRAG.queryWithContext(
-            query = input,
-            subject = subject
-        )
+        // For online mode, only get context - don't run offline generation
+        val relevantContent = if (usingOnline) {
+            offlineRAG.getRelevantContext(
+                query = input,
+                subject = subject
+            )
+        } else {
+            offlineRAG.queryWithContext(
+                query = input,
+                subject = subject
+            )
+        }
 
         val response = generateAdaptiveResponse(
             student = student,
@@ -554,6 +602,17 @@ private suspend fun generateAdaptiveResponseOnline(
     originalQuestion: String = "",
     isFollowUp: Boolean = false
 ): String {
+    // Check if this might be the first online request - if so, warm up first
+    val isLikelyFirstRequest = _state.value.messages.count { !it.isUser } <= 1
+    if (isLikelyFirstRequest) {
+        try {
+            Timber.d("First online request detected - warming up API service")
+            warmUpApiService()
+        } catch (e: Exception) {
+            Timber.w(e, "Warmup failed, proceeding with main request")
+        }
+    }
+
     // Build comprehensive prompt for online AI tutor
     val fullPrompt = buildTutorPrompt(
         student = student,
@@ -570,7 +629,7 @@ private suspend fun generateAdaptiveResponseOnline(
     )
 
     try {
-        val response = withTimeoutOrNull(10_000) { // 10 second timeout
+        val response = withTimeoutOrNull(12_000) { // 12 second timeout
             geminiApiService.generateTextComplete(fullPrompt, "tutor")
         } ?: throw IllegalStateException("Response timeout")
 
@@ -922,7 +981,7 @@ private fun ensureCompleteResponse(response: String, grade: Int): String {
                 )
             }
 
-            val welcomeMessage = generateEnhancedWelcomeMessage(student, subject, sessionType, currentProgress)
+            val welcomeMessage = generateFastWelcomeMessage(student, subject, sessionType, currentProgress)
             addTutorMessage(welcomeMessage, isUser = false)
 
         } catch (e: Exception) {
@@ -1443,6 +1502,44 @@ private fun ensureCompleteResponse(response: String, grade: Int): String {
         } catch (e: Exception) {
             Timber.e(e, "Failed to track learning interaction")
         }
+    }
+
+    private fun generateFastWelcomeMessage(
+        student: StudentProfileEntity,
+        subject: OfflineRAG.Subject,
+        sessionType: TutorSessionType,
+        progress: LearningProgressTracker.LearningProgress?
+    ): String {
+        val progressInfo = progress?.let {
+            val masteredCount = it.conceptMasteries.count { mastery ->
+                mastery.value.level == LearningProgressTracker.MasteryLevel.MASTERED
+            }
+            val totalConcepts = it.conceptMasteries.size
+
+            when {
+                it.streakDays > 0 -> " Great to see you back for day ${it.streakDays} in a row!"
+                masteredCount > 0 -> " You've mastered $masteredCount out of $totalConcepts concepts so far!"
+                totalConcepts > 0 -> " You've explored $totalConcepts concepts. Keep going!"
+                else -> ""
+            }
+        } ?: ""
+
+        // Hardcoded welcome messages for instant response
+        val baseMessage = when (sessionType) {
+            TutorSessionType.HOMEWORK_HELP -> "Hi ${student.name}! Ready to tackle some ${subject.name} homework together?"
+            TutorSessionType.CONCEPT_EXPLANATION -> "Hello ${student.name}! Let's explore some ${subject.name} concepts today."
+            TutorSessionType.EXAM_PREP -> "Hey ${student.name}! Let's prepare for your ${subject.name} exam together."
+            TutorSessionType.PRACTICE_PROBLEMS -> "Hello ${student.name}! Ready to practice some ${subject.name} problems?"
+            else -> "Hello ${student.name}! I'm here to help you with ${subject.name}."
+        }
+
+        val encouragement = when {
+            student.gradeLevel <= 3 -> " What would you like to learn about?"
+            student.gradeLevel <= 6 -> " What topic interests you most today?"
+            else -> " What would you like to dive into today?"
+        }
+
+        return "$baseMessage$progressInfo$encouragement"
     }
 
     private suspend fun generateEnhancedWelcomeMessage(

@@ -21,12 +21,17 @@ class OfflineRAG @Inject constructor(
     private val embedderService: TextEmbeddingService,
     private val embedderServiceExtensions: TextEmbeddingServiceExtensions
 ) {
+    
+    // Simple embedding cache for frequent queries
+    private val embeddingCache = mutableMapOf<String, FloatArray>()
+    private val contextCache = mutableMapOf<String, String>()
 
     companion object {
         private const val CHUNK_SIZE = 512
         private const val CHUNK_OVERLAP = 128
         const val MAX_CONTEXT_LENGTH = 2048
         private const val TOP_K = 5
+        private const val MAX_CACHE_SIZE = 50 // Limit cache size
     }
 
     enum class Subject { MATHEMATICS, SCIENCE, HISTORY, LANGUAGE_ARTS, GEOGRAPHY, ENGLISH, GENERAL, ECONOMICS, COMPUTER_SCIENCE }
@@ -98,7 +103,49 @@ class OfflineRAG @Inject constructor(
         return words.takeLast(overlapWords).joinToString(" ")
     }
 
-    /** Runs query with optional subject filter */
+    /** Fast context retrieval - only gets relevant content without offline generation */
+    suspend fun getRelevantContext(
+        query: String,
+        subject: Subject? = null
+    ): String = withContext(Dispatchers.Default) {
+        val cacheKey = "${query}_${subject?.name ?: "null"}"
+        
+        // Check context cache first
+        contextCache[cacheKey]?.let { 
+            Timber.d("Context cache hit for: ${query.take(20)}...")
+            return@withContext it 
+        }
+        
+        // Check embedding cache first
+        val qEmb = embeddingCache[query] ?: run {
+            val embedding = embedderService.embed(query)
+            
+            // Limit cache size
+            if (embeddingCache.size >= MAX_CACHE_SIZE) {
+                val oldestKey = embeddingCache.keys.first()
+                embeddingCache.remove(oldestKey)
+                contextCache.remove(oldestKey)
+            }
+            
+            embeddingCache[query] = embedding
+            Timber.d("Cached embedding for: ${query.take(20)}...")
+            embedding
+        }
+        
+        val results = vectorDB.searchOptimized(
+            queryEmbedding = qEmb,
+            k = TOP_K,
+            filter = subject?.let { mapOf("subject" to it.name) },
+            threshold = 0.0f
+        )
+        
+        val context = buildContext(results)
+        contextCache[cacheKey] = context
+        
+        return@withContext context
+    }
+
+    /** Runs query with optional subject filter - includes offline generation */
     suspend fun queryWithContext(
         query: String,
         subject: Subject? = null
@@ -106,15 +153,7 @@ class OfflineRAG @Inject constructor(
         // Ensure model is initialized
         ensureModelInitialized()
 
-        val qEmb = embedderService.embed(query)
-        val results = vectorDB.searchOptimized(
-            queryEmbedding = qEmb,
-            k = TOP_K,
-            filter = subject?.let { mapOf("subject" to it.name) },
-            threshold = 0.0f
-        )
-
-        val context = buildContext(results)
+        val context = getRelevantContext(query, subject)
         val prompt = """
             You are an educational assistant.
             Use the following context to answer:
