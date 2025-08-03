@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
+import kotlinx.coroutines.delay
 import timber.log.Timber
 import javax.inject.Inject
 
@@ -96,6 +97,16 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    private suspend fun warmUpApiService() {
+        try {
+            val warmupPrompt = "Hi" // Minimal prompt
+            geminiApiService.generateTextComplete(warmupPrompt, "chat_warmup")
+            Timber.d("Chat API service warmed up successfully")
+        } catch (e: Exception) {
+            Timber.w(e, "Chat API warmup failed, but service should still work")
+        }
+    }
+
     init {
         // Stream messages from the DB straight into UI state
         viewModelScope.launch {
@@ -114,6 +125,20 @@ class ChatViewModel @Inject constructor(
                 }
             } else {
                 Timber.d("SpeechRecognitionService is initialized and ready")
+            }
+        }
+
+        // Preload API service for faster first response
+        viewModelScope.launch {
+            delay(1000) // Give settings time to load
+            if (shouldUseOnlineService()) {
+                try {
+                    Timber.d("Preloading API service for Chat")
+                    initializeApiServiceIfNeeded()
+                    warmUpApiService()
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to preload API service for Chat")
+                }
             }
         }
     }
