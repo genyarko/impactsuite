@@ -700,14 +700,23 @@ class QuizGeneratorViewModel @Inject constructor(
 
             // For multiple choice, check if user answer matches any option
             if (!correct && q.questionType == QuestionType.MULTIPLE_CHOICE) {
-                // Check if user typed an option instead of selecting it
-                val normalizedOptions = q.options.map { normalizeAnswer(it) }
-                correct = normalizedOptions.contains(normalizedUserAnswer) && 
-                         normalizedUserAnswer == normalizedCorrectAnswer
-                
-                // If user typed something that's not an option, check if it's semantically similar to correct answer
-                if (!correct && !normalizedOptions.contains(normalizedUserAnswer)) {
-                    correct = checkAnswerVariations(normalizedUserAnswer, normalizedCorrectAnswer, q)
+                // Check if user selected the correct option by letter (a, b, c, d)
+                if (normalizedUserAnswer in listOf("a", "b", "c", "d")) {
+                    correct = normalizedUserAnswer == normalizedCorrectAnswer
+                } else {
+                    // User selected full text - find which option index it matches
+                    val normalizedOptions = q.options.map { normalizeAnswer(it) }
+                    val userOptionIndex = normalizedOptions.indexOf(normalizedUserAnswer)
+                    
+                    if (userOptionIndex != -1) {
+                        // Convert option index to letter (0->a, 1->b, 2->c, 3->d)
+                        val userSelectionLetter = ('a' + userOptionIndex).toString()
+                        correct = userSelectionLetter == normalizedCorrectAnswer
+                        Timber.d("Multiple choice - User selected option $userOptionIndex ('$userSelectionLetter'), correct is '$normalizedCorrectAnswer'")
+                    } else {
+                        // User typed something not in options - check semantic similarity
+                        correct = checkAnswerVariations(normalizedUserAnswer, normalizedCorrectAnswer, q)
+                    }
                 }
             }
             
@@ -777,7 +786,8 @@ class QuizGeneratorViewModel @Inject constructor(
                     if (it.id == qId) it.copy(
                         userAnswer = answer,
                         feedback = feedback,
-                        isAnswered = true
+                        isAnswered = true,
+                        isCorrect = correct
                     ) else it
                 }
             )
