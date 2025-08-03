@@ -3,14 +3,12 @@ package com.example.mygemma3n.offline
 import android.content.Context
 import androidx.room.withTransaction
 import com.example.mygemma3n.data.AppDatabase
-import com.example.mygemma3n.feature.chat.ChatMessage
 import com.example.mygemma3n.feature.tutor.TutorViewModel
 import com.example.mygemma3n.shared_utilities.OfflineRAG
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.withContext
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken

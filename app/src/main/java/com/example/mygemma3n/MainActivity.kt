@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ClosedCaption
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Summarize
 import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material3.*
 import androidx.compose.material3.LinearProgressIndicator
@@ -110,6 +112,7 @@ import com.example.mygemma3n.service.ModelDownloadService
 import com.example.mygemma3n.util.GoogleServicesUtil
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import com.example.mygemma3n.ui.components.ModelDownloadViewModel
 
 
 // ───── Preference keys ──────────────────────────────────────────────────────
@@ -281,23 +284,10 @@ class MainActivity : ComponentActivity() {
                 return true
             }
 
-            // Need to download Gemma models from Dropbox
-            updateInitState("Downloading AI models...", 0.3f)
-            Timber.d("Gemma models not found, starting download from Dropbox")
-            
-            val downloadResult = modelDownloadService.downloadModel { progress ->
-                // Update initialization state with download progress
-                val progressPercent = 0.3f + (progress.overallProgress * 0.4f) // Map to 30%-70% range
-                val statusMessage = when {
-                    progress.error != null -> "Download error: ${progress.error}"
-                    progress.isComplete -> "Models downloaded successfully"
-                    progress.currentFile != null -> "Downloading ${progress.currentFile}... (${progress.currentFileIndex}/${progress.totalFiles})"
-                    else -> "Preparing download..."
-                }
-                updateInitState(statusMessage, progressPercent)
-            }
-            
-            downloadResult.isSuccess
+            // No models available - app will continue with limited functionality
+            Timber.d("No Gemma models found. App will continue with limited AI features.")
+            Timber.d("Users can manually download models via Settings > AI Model Management")
+            return true // Continue initialization, models can be downloaded manually later
             
         } catch (e: Exception) {
             Timber.e(e, "Failed to ensure models are available")
@@ -347,10 +337,8 @@ class MainActivity : ComponentActivity() {
                 // Check available models first
                 val availableModels = unifiedGemmaService.getAvailableModels()
                 if (availableModels.isEmpty()) {
-                    Timber.d("No Gemma models found in assets or cache - checking if download needed")
-                    // Models should have been downloaded in checkAndEnsureModelsAvailable()
-                    // If still not available, it's a real error
-                    throw IllegalStateException("No Gemma models available after download attempt")
+                    Timber.d("No Gemma models found - skipping initialization. Models can be downloaded manually via Settings.")
+                    return // Skip initialization, app will continue with limited functionality
                 }
 
                 Timber.d("Available models: ${availableModels.map { it.displayName }}")
@@ -902,7 +890,7 @@ private fun getFeatureItems(isGemmaInitialized: Boolean, isModelReady: Boolean) 
     FeatureItem(
         title = "Story Mode",
         route = "story_mode",
-        icon = Icons.Default.MenuBook,
+        icon = Icons.AutoMirrored.Filled.MenuBook,
         enabled = isGemmaInitialized
     )
 )
@@ -1416,6 +1404,11 @@ fun ApiSettingsScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // Model Download Section
+            ModelDownloadSection()
+
+            Spacer(modifier = Modifier.height(24.dp))
+
             // Token usage display section
             if (useOnlineService && tokenUsageRepository != null) {
                 TokenUsageSection(tokenUsageRepository = tokenUsageRepository)
@@ -1636,6 +1629,163 @@ fun TokenUsageSection(tokenUsageRepository: TokenUsageRepository) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ModelDownloadSection(
+    viewModel: ModelDownloadViewModel = hiltViewModel()
+) {
+    val downloadState by viewModel.downloadState.collectAsState()
+    
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "AI Model Management",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = when {
+                            downloadState.isComplete -> "Models are ready and available"
+                            downloadState.isDownloading -> "Downloading models..."
+                            downloadState.isError -> "Model download failed"
+                            else -> "Download AI models for offline functionality"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                
+                // Status icon
+                when {
+                    downloadState.isComplete -> {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = "Complete",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    downloadState.isError -> {
+                        Icon(
+                            imageVector = Icons.Default.Error,
+                            contentDescription = "Error",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    downloadState.isDownloading -> {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.dp
+                        )
+                    }
+                }
+            }
+            
+            // Progress bar when downloading
+            if (downloadState.isDownloading && downloadState.totalFiles > 0) {
+                Spacer(modifier = Modifier.height(12.dp))
+
+                LinearProgressIndicator(
+                progress = { downloadState.overallProgress },
+                modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(6.dp),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                strokeCap = ProgressIndicatorDefaults.LinearStrokeCap,
+                )
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "${(downloadState.overallProgress * 100).toInt()}%",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "${downloadState.currentFileIndex}/${downloadState.totalFiles} files",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                
+                // Cancel button during download
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedButton(
+                    onClick = { viewModel.cancelDownload() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Cancel Download")
+                }
+            }
+            
+            // Status message
+            if (downloadState.statusMessage.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = downloadState.statusMessage,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (downloadState.isError) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+            }
+            
+            // Error message
+            if (downloadState.isError && downloadState.errorMessage != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = downloadState.errorMessage!!,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+            
+            // Download button
+            if (!downloadState.isComplete && !downloadState.isDownloading) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = { viewModel.startModelDownload() },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = true
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CloudDownload,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(if (downloadState.isError) "Retry Download" else "Download Models")
+                    }
                 }
             }
         }

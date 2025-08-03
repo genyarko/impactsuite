@@ -42,7 +42,7 @@ android {
         buildConfigField("Boolean", "ENABLE_MODEL_BINDING", "true")
         buildConfigField("Integer", "KV_CACHE_SIZE", "4096")
         buildConfigField("Integer", "MAX_BATCH_SIZE", "1")
-        
+
         // Maps API Key - will be replaced at build time
         manifestPlaceholders["MAPS_API_KEY"] = project.findProperty("MAPS_API_KEY") ?: "PLACEHOLDER_MAPS_API_KEY"
     }
@@ -187,7 +187,7 @@ dependencies {
 
 // JSON Parsing
     implementation(libs.gson)
-    
+
     // DOCX Processing
     implementation(libs.poi.ooxml)
 
