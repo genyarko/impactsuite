@@ -46,6 +46,7 @@ data class Question(
     val points: Int = 1,
     val userAnswer: String? = null,
     val isAnswered: Boolean = false,
+    val isCorrect: Boolean = false,
     val feedback: String? = null,
     val timeSpentSeconds: Int = 0,
     val lastSeenAt: Long? = null
