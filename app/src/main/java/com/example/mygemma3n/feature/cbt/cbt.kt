@@ -192,6 +192,18 @@ interface CBTSessionDao {
 
     @Query("UPDATE cbt_sessions SET completed = :completed, effectiveness = :effectiveness WHERE id = :sessionId")
     suspend fun updateSession(sessionId: String, completed: Boolean, effectiveness: Float?)
+
+    @Query("DELETE FROM cbt_sessions WHERE id = :sessionId")
+    suspend fun deleteSession(sessionId: String)
+
+    @Query("DELETE FROM cbt_sessions")
+    suspend fun deleteAllSessions()
+
+    @Query("DELETE FROM cbt_sessions WHERE timestamp < :beforeTimestamp")
+    suspend fun deleteSessionsOlderThan(beforeTimestamp: Long)
+
+    @Query("SELECT * FROM cbt_sessions WHERE id = :sessionId")
+    suspend fun getSessionById(sessionId: String): CBTSession?
 }
 
 @Database(
@@ -240,6 +252,23 @@ class SessionRepository @Inject constructor(
     suspend fun getSessionWithTechnique(sessionId: String): CBTSession? {
         // You'd implement this to fetch the session and resolve its technique
         return null
+    }
+
+    suspend fun getSessionById(sessionId: String): CBTSession? {
+        return database.sessionDao().getSessionById(sessionId)
+    }
+
+    suspend fun deleteSession(sessionId: String) {
+        database.sessionDao().deleteSession(sessionId)
+    }
+
+    suspend fun deleteAllSessions() {
+        database.sessionDao().deleteAllSessions()
+    }
+
+    suspend fun deleteSessionsOlderThan(daysOld: Int) {
+        val cutoffTime = System.currentTimeMillis() - (daysOld * 24 * 60 * 60 * 1000L)
+        database.sessionDao().deleteSessionsOlderThan(cutoffTime)
     }
 }
 

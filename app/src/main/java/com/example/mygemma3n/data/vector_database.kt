@@ -20,8 +20,14 @@ import com.example.mygemma3n.data.LearningPreferenceEntity
 import com.example.mygemma3n.data.ConceptMasteryEntity
 import com.example.mygemma3n.feature.story.StoryEntity
 import com.example.mygemma3n.feature.story.StoryReadingSession
+import com.example.mygemma3n.feature.story.ReadingStreakEntity
+import com.example.mygemma3n.feature.story.ReadingGoalEntity
+import com.example.mygemma3n.feature.story.AchievementBadgeEntity
 import com.example.mygemma3n.feature.story.StoryDao
 import com.example.mygemma3n.feature.story.StoryReadingSessionDao
+import com.example.mygemma3n.feature.story.ReadingStreakDao
+import com.example.mygemma3n.feature.story.ReadingGoalDao
+import com.example.mygemma3n.feature.story.AchievementBadgeDao
 import com.example.mygemma3n.feature.story.StoryConverters
 import com.example.mygemma3n.data.local.entities.TokenUsageEntity  
 import com.example.mygemma3n.data.local.TokenUsageDao
@@ -127,11 +133,14 @@ interface VectorDao {
         ConceptMasteryEntity::class,
         StoryEntity::class,
         StoryReadingSession::class,
+        ReadingStreakEntity::class,
+        ReadingGoalEntity::class,
+        AchievementBadgeEntity::class,
         TokenUsageEntity::class,
         UserQuotaEntity::class,
         PricingConfigEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 
 )
@@ -143,6 +152,9 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun tutorDao(): TutorDao
     abstract fun storyDao(): StoryDao
     abstract fun storyReadingSessionDao(): StoryReadingSessionDao
+    abstract fun readingStreakDao(): ReadingStreakDao
+    abstract fun readingGoalDao(): ReadingGoalDao
+    abstract fun achievementBadgeDao(): AchievementBadgeDao
     abstract fun tokenUsageDao(): TokenUsageDao
     abstract fun userQuotaDao(): UserQuotaDao
     abstract fun pricingConfigDao(): PricingConfigDao
@@ -271,6 +283,21 @@ class VectorDatabase @Inject constructor(
 
     suspend fun deleteById(id: String) = withContext(Dispatchers.IO) {
         roomDatabase.vectorDao().getById(id)?.let { entity ->
+            roomDatabase.vectorDao().delete(entity)
+        }
+    }
+
+    suspend fun deleteByPrefix(prefix: String) = withContext(Dispatchers.IO) {
+        val entities = roomDatabase.vectorDao().getByMetadataPattern("%$prefix%")
+        entities.forEach { entity ->
+            roomDatabase.vectorDao().delete(entity)
+        }
+    }
+
+    suspend fun deleteByMetadata(filter: Map<String, String>) = withContext(Dispatchers.IO) {
+        val pattern = filter.entries.joinToString("%") { "${it.key}:${it.value}" }
+        val entities = roomDatabase.vectorDao().getByMetadataPattern("%$pattern%")
+        entities.forEach { entity ->
             roomDatabase.vectorDao().delete(entity)
         }
     }

@@ -76,7 +76,17 @@ fun StoryScreen(
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
+                ),
+                actions = {
+                    if (state.showStoryList) {
+                        IconButton(onClick = { viewModel.showStreakScreen() }) {
+                            Icon(
+                                Icons.Default.EmojiEvents,
+                                contentDescription = "Reading Streaks & Achievements"
+                            )
+                        }
+                    }
+                }
             )
         }
     ) { paddingValues ->
@@ -86,6 +96,14 @@ fun StoryScreen(
                 .padding(paddingValues)
         ) {
             when {
+                state.showStreakScreen -> {
+                    ReadingStreakScreen(
+                        readingStats = state.readingStats,
+                        currentGoal = state.currentGoal,
+                        onBackClick = { viewModel.hideStreakScreen() },
+                        onUpdateGoal = { goal -> viewModel.updateReadingGoal(goal) }
+                    )
+                }
                 state.isGenerating -> {
                     StoryGenerationProgress(
                         progress = state.generationProgress,
@@ -96,6 +114,7 @@ fun StoryScreen(
                     StoryListScreen(
                         stories = state.allStories,
                         isLoading = state.isLoading,
+                        readingStats = state.readingStats,
                         onCreateNewStory = { request ->
                             viewModel.generateStory(request)
                         },
@@ -123,6 +142,15 @@ fun StoryScreen(
                 }
             }
 
+            // Badge notification overlay
+            state.showBadgeNotification?.let { badge ->
+                BadgeUnlockedNotification(
+                    badge = badge,
+                    onDismiss = { viewModel.dismissBadgeNotification() },
+                    modifier = Modifier.align(Alignment.Center)
+                )
+            }
+
             // Error display
             state.error?.let { error ->
                 Snackbar(
@@ -144,6 +172,7 @@ fun StoryScreen(
 fun StoryListScreen(
     stories: List<Story>,
     isLoading: Boolean,
+    readingStats: ReadingStats,
     onCreateNewStory: (StoryRequest) -> Unit,
     onSelectStory: (String) -> Unit,
     onDeleteStory: (String) -> Unit
@@ -155,6 +184,15 @@ fun StoryListScreen(
             .fillMaxSize()
             .padding(16.dp)
     ) {
+        // Reading streak summary card
+        if (readingStats.currentStreak > 0 || readingStats.unlockedBadges.isNotEmpty()) {
+            ReadingStatsSummaryCard(
+                readingStats = readingStats,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
         // Create new story button
         Button(
             onClick = { showCreateDialog = true },
@@ -1109,5 +1147,552 @@ fun AnimatedStoryText(
                 // Subtle parallax effect for text
                 translationY = -scrollOffset * 0.1f
             }
+    )
+}
+
+@Composable
+fun ReadingStatsSummaryCard(
+    readingStats: ReadingStats,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Current streak
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    Icons.Default.Rocket,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
+                )
+                Text(
+                    "${readingStats.currentStreak}",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    "day streak",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+
+            // Stories read
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    Icons.Default.MenuBook,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.size(24.dp)
+                )
+                Text(
+                    "${readingStats.totalStoriesRead}",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "stories",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+
+            // Latest badge
+            if (readingStats.unlockedBadges.isNotEmpty()) {
+                val latestBadge = readingStats.unlockedBadges.maxByOrNull { it.unlockedAt ?: 0 }
+                if (latestBadge != null) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Default.EmojiEvents,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.tertiary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Text(
+                            latestBadge.name,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            "latest badge",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ReadingStreakScreen(
+    readingStats: ReadingStats,
+    currentGoal: ReadingGoal,
+    onBackClick: () -> Unit,
+    onUpdateGoal: (ReadingGoal) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp)
+    ) {
+        // Header with back button
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBackClick) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            }
+            Text(
+                "Reading Streaks & Achievements",
+                style = MaterialTheme.typography.headlineMedium,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Current streak highlight
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer
+            )
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    Icons.Default.Rocket,
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "${readingStats.currentStreak}",
+                    style = MaterialTheme.typography.displayLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    "Day Reading Streak",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                if (readingStats.longestStreak > readingStats.currentStreak) {
+                    Text(
+                        "Best: ${readingStats.longestStreak} days",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Reading statistics
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            StatCard(
+                title = "Stories",
+                value = "${readingStats.totalStoriesRead}",
+                icon = Icons.Default.MenuBook,
+                modifier = Modifier.weight(1f)
+            )
+            StatCard(
+                title = "Pages",
+                value = "${readingStats.totalPagesRead}",
+                icon = Icons.Default.Description,
+                modifier = Modifier.weight(1f)
+            )
+            StatCard(
+                title = "Hours",
+                value = "${readingStats.totalTimeMinutes / 60}",
+                icon = Icons.Default.Schedule,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Daily goal section
+        Text(
+            "Daily Reading Goal",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        DailyGoalCard(
+            goal = currentGoal,
+            onUpdateGoal = onUpdateGoal
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Achievement badges
+        Text(
+            "Achievement Badges",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        if (readingStats.unlockedBadges.isNotEmpty()) {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(horizontal = 4.dp)
+            ) {
+                items(readingStats.unlockedBadges) { badge ->
+                    BadgeCard(badge = badge, isUnlocked = true)
+                }
+            }
+        } else {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Text(
+                    "No badges unlocked yet. Keep reading to earn your first badge!",
+                    modifier = Modifier.padding(16.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Next badge to unlock
+        readingStats.nextBadge?.let { nextBadge ->
+            Text(
+                "Next Badge",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            BadgeCard(badge = nextBadge, isUnlocked = false)
+        }
+    }
+}
+
+@Composable
+fun StatCard(
+    title: String,
+    value: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                value,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                title,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+fun DailyGoalCard(
+    goal: ReadingGoal,
+    onUpdateGoal: (ReadingGoal) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var showEditDialog by remember { mutableStateOf(false) }
+    
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Current Goal",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                IconButton(onClick = { showEditDialog = true }) {
+                    Icon(Icons.Default.Edit, contentDescription = "Edit goal")
+                }
+            }
+            
+            Text(
+                "Read ${goal.dailyPagesGoal} pages OR ${goal.dailyTimeGoalMinutes} minutes daily",
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+    }
+
+    if (showEditDialog) {
+        EditGoalDialog(
+            currentGoal = goal,
+            onDismiss = { showEditDialog = false },
+            onSaveGoal = { newGoal ->
+                onUpdateGoal(newGoal)
+                showEditDialog = false
+            }
+        )
+    }
+}
+
+@Composable
+fun BadgeCard(
+    badge: AchievementBadge,
+    isUnlocked: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.width(120.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isUnlocked) 
+                MaterialTheme.colorScheme.tertiaryContainer 
+            else 
+                MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                Icons.Default.EmojiEvents,
+                contentDescription = null,
+                modifier = Modifier.size(32.dp),
+                tint = if (isUnlocked) 
+                    MaterialTheme.colorScheme.onTertiaryContainer 
+                else 
+                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                badge.name,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                color = if (isUnlocked) 
+                    MaterialTheme.colorScheme.onTertiaryContainer 
+                else 
+                    MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                badge.description,
+                style = MaterialTheme.typography.labelSmall,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                color = if (isUnlocked) 
+                    MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
+                else 
+                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            )
+        }
+    }
+}
+
+@Composable
+fun BadgeUnlockedNotification(
+    badge: AchievementBadge,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth(0.9f)
+            .clip(RoundedCornerShape(16.dp)),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Animated badge icon
+            val infiniteTransition = rememberInfiniteTransition(label = "badge_celebration")
+            val scale by infiniteTransition.animateFloat(
+                initialValue = 1f,
+                targetValue = 1.2f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(600, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "badge_scale"
+            )
+            
+            Icon(
+                Icons.Default.EmojiEvents,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(64.dp)
+                    .scale(scale),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            Text(
+                "Badge Unlocked!",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Text(
+                badge.name,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+            
+            Text(
+                badge.description,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Text("Awesome!")
+            }
+        }
+    }
+}
+
+@Composable
+fun EditGoalDialog(
+    currentGoal: ReadingGoal,
+    onDismiss: () -> Unit,
+    onSaveGoal: (ReadingGoal) -> Unit
+) {
+    var pagesGoal by remember { mutableFloatStateOf(currentGoal.dailyPagesGoal.toFloat()) }
+    var timeGoal by remember { mutableFloatStateOf(currentGoal.dailyTimeGoalMinutes.toFloat()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit Daily Reading Goal") },
+        text = {
+            Column {
+                Text(
+                    "Pages Goal: ${pagesGoal.toInt()} pages",
+                    style = MaterialTheme.typography.labelMedium
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Slider(
+                    value = pagesGoal,
+                    onValueChange = { pagesGoal = it },
+                    valueRange = 1f..20f,
+                    steps = 18
+                )
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Text(
+                    "Time Goal: ${timeGoal.toInt()} minutes",
+                    style = MaterialTheme.typography.labelMedium
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Slider(
+                    value = timeGoal,
+                    onValueChange = { timeGoal = it },
+                    valueRange = 5f..60f,
+                    steps = 10
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val newGoal = currentGoal.copy(
+                        dailyPagesGoal = pagesGoal.toInt(),
+                        dailyTimeGoalMinutes = timeGoal.toInt(),
+                        lastUpdated = System.currentTimeMillis()
+                    )
+                    onSaveGoal(newGoal)
+                }
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
     )
 }

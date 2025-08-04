@@ -800,4 +800,67 @@ Would you like to start with the first step?"""
             }
         }
     }
+
+    // Privacy functions for session data management
+    fun deleteSession(sessionId: String) {
+        viewModelScope.launch {
+            try {
+                sessionManager.deleteSession(sessionId)
+            } catch (e: Exception) {
+                Timber.e(e, "Error deleting session")
+                _sessionState.update {
+                    it.copy(error = "Failed to delete session: ${e.message}")
+                }
+            }
+        }
+    }
+
+    fun deleteAllSessions() {
+        viewModelScope.launch {
+            try {
+                sessionManager.deleteAllSessions()
+                _sessionState.update {
+                    it.copy(
+                        conversation = emptyList(),
+                        sessionInsights = null,
+                        thoughtRecord = null
+                    )
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Error deleting all sessions")
+                _sessionState.update {
+                    it.copy(error = "Failed to delete all sessions: ${e.message}")
+                }
+            }
+        }
+    }
+
+    fun deleteOldSessions(daysOld: Int) {
+        viewModelScope.launch {
+            try {
+                sessionManager.deleteOldSessions(daysOld)
+            } catch (e: Exception) {
+                Timber.e(e, "Error deleting old sessions")
+                _sessionState.update {
+                    it.copy(error = "Failed to delete old sessions: ${e.message}")
+                }
+            }
+        }
+    }
+
+    fun clearAllCBTData() {
+        viewModelScope.launch {
+            try {
+                sessionManager.clearAllData()
+                _sessionState.update {
+                    CBTSessionState() // Reset to empty state
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Error clearing all CBT data")
+                _sessionState.update {
+                    it.copy(error = "Failed to clear all data: ${e.message}")
+                }
+            }
+        }
+    }
 }
