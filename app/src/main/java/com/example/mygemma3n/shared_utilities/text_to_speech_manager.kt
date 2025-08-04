@@ -34,8 +34,32 @@ class TextToSpeechManager @Inject constructor(
     }
 
     fun speak(text: String) {
-        if (!isReady) return
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, text.hashCode().toString())
+        if (!isReady || text.isBlank()) return
+        
+        // Chunk large text to prevent memory issues
+        val maxChunkSize = 4000 // TTS has limits on text length
+        val chunks = if (text.length > maxChunkSize) {
+            text.chunked(maxChunkSize)
+        } else {
+            listOf(text)
+        }
+        
+        // Speak first chunk immediately, queue others
+        chunks.forEachIndexed { index, chunk ->
+            val queueMode = if (index == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+            try {
+                tts?.speak(chunk.trim(), queueMode, null, "${text.hashCode()}_$index")
+            } catch (e: Exception) {
+                Timber.e(e, "Error speaking text chunk $index")
+                // Stop on error to prevent further issues
+                stop()
+                return
+            }
+        }
+    }
+    
+    fun stop() {
+        tts?.stop()
     }
 
     override fun onStop(owner: LifecycleOwner) {

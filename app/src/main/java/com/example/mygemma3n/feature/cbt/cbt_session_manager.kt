@@ -238,6 +238,89 @@ class CBTSessionManager @Inject constructor(
     }
 
     /**
+     * Delete session data including vector embeddings
+     */
+    suspend fun deleteSession(sessionId: String) = withContext(Dispatchers.IO) {
+        try {
+            // Delete from Room database
+            sessionRepository.deleteSession(sessionId)
+            
+            // Delete from vector database
+            vectorDatabase.deleteById("${CBT_SESSION_PREFIX}$sessionId")
+            
+            Timber.d("Successfully deleted session: $sessionId")
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to delete session: $sessionId")
+        }
+    }
+
+    /**
+     * Delete all CBT session data for privacy
+     */
+    suspend fun deleteAllSessions() = withContext(Dispatchers.IO) {
+        try {
+            // Delete all sessions from Room database
+            sessionRepository.deleteAllSessions()
+            
+            // Delete all session embeddings from vector database
+            vectorDatabase.deleteByMetadata(mapOf("type" to "session"))
+            
+            Timber.d("Successfully deleted all CBT sessions")
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to delete all sessions")
+        }
+    }
+
+    /**
+     * Delete sessions older than specified days
+     */
+    suspend fun deleteOldSessions(daysOld: Int) = withContext(Dispatchers.IO) {
+        try {
+            // Delete old sessions from Room database
+            sessionRepository.deleteSessionsOlderThan(daysOld)
+            
+            // For vector database, we need to find and delete old session embeddings
+            val cutoffTimestamp = System.currentTimeMillis() - (daysOld * 24 * 60 * 60 * 1000L)
+            
+            // This is a simplified approach - in practice you might want to
+            // add a more sophisticated query to the vector database
+            val allSessionDocuments = vectorDatabase.search(
+                FloatArray(512) { 0f }, // dummy embedding for metadata search
+                k = 1000,
+                filter = mapOf("type" to "session")
+            )
+            
+            allSessionDocuments.forEach { result ->
+                val timestamp = result.document.metadata["timestamp"]?.toLongOrNull() ?: 0L
+                if (timestamp < cutoffTimestamp) {
+                    vectorDatabase.deleteById(result.document.id)
+                }
+            }
+            
+            Timber.d("Successfully deleted sessions older than $daysOld days")
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to delete old sessions")
+        }
+    }
+
+    /**
+     * Clear all CBT data including knowledge base (for complete privacy reset)
+     */
+    suspend fun clearAllData() = withContext(Dispatchers.IO) {
+        try {
+            // Delete all sessions
+            deleteAllSessions()
+            
+            // Delete CBT knowledge base from vector database
+            vectorDatabase.deleteByPrefix(CBT_CONTENT_PREFIX)
+            
+            Timber.d("Successfully cleared all CBT data")
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to clear all CBT data")
+        }
+    }
+
+    /**
      * Get personalized recommendations based on past sessions
      */
     suspend fun getPersonalizedRecommendations(

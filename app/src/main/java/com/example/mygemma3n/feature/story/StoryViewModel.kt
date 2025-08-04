@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import timber.log.Timber
 import javax.inject.Inject
 
@@ -32,7 +34,12 @@ class StoryViewModel @Inject constructor(
         val readingSessionStartTime: Long? = null,
         val isReadingAloud: Boolean = false,
         val autoReadAloud: Boolean = false,
-        val speechRate: Float = 1.0f
+        val speechRate: Float = 1.0f,
+        // Reading streak and badge features
+        val readingStats: ReadingStats = ReadingStats(),
+        val currentGoal: ReadingGoal = ReadingGoal(),
+        val showBadgeNotification: AchievementBadge? = null,
+        val showStreakScreen: Boolean = false
     )
 
     private val _state = MutableStateFlow(StoryState())
@@ -40,6 +47,7 @@ class StoryViewModel @Inject constructor(
 
     init {
         loadAllStories()
+        initializeReadingFeatures()
     }
 
     private fun loadAllStories() {
@@ -180,6 +188,12 @@ class StoryViewModel @Inject constructor(
                             completedAt = System.currentTimeMillis()
                         )
                         _state.value = _state.value.copy(currentStory = updatedStory)
+                        
+                        // Update reading progress for completing a story
+                        updateReadingProgress(storiesCompleted = 1)
+                    } else {
+                        // Update reading progress for reading a page
+                        updateReadingProgress(pagesRead = 1)
                     }
                 } catch (e: Exception) {
                     Timber.e(e, "Failed to update page progress")
@@ -230,6 +244,11 @@ class StoryViewModel @Inject constructor(
     }
 
     fun backToStoryList() {
+        // Stop any ongoing TTS when navigating away
+        if (_state.value.isReadingAloud) {
+            stopReadingAloud()
+        }
+        
         _state.value = _state.value.copy(
             showStoryList = true,
             currentStory = null,
@@ -339,7 +358,7 @@ class StoryViewModel @Inject constructor(
 
     fun stopReadingAloud() {
         _state.value = _state.value.copy(isReadingAloud = false)
-        // The TextToSpeechManager will handle stopping in its lifecycle methods
+        textToSpeechManager.stop()
     }
 
     fun toggleAutoReadAloud() {
@@ -361,6 +380,130 @@ class StoryViewModel @Inject constructor(
     private fun autoReadPageIfEnabled() {
         if (_state.value.autoReadAloud) {
             startReadingAloud()
+        }
+    }
+
+    // Reading Streak and Achievement Methods
+    private fun initializeReadingFeatures() {
+        viewModelScope.launch {
+            try {
+                // Initialize default badges if not already done
+                storyRepository.initializeDefaultBadges()
+                
+                // Load current reading stats and goal
+                val stats = storyRepository.getOverallReadingStats()
+                val goal = storyRepository.getReadingGoal()
+                
+                _state.value = _state.value.copy(
+                    readingStats = stats,
+                    currentGoal = goal
+                )
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to initialize reading features")
+            }
+        }
+    }
+
+    fun updateReadingProgress(pagesRead: Int = 0, timeMinutes: Int = 0, storiesCompleted: Int = 0) {
+        viewModelScope.launch {
+            try {
+                val today = java.time.LocalDate.now().toString()
+                
+                // Update daily streak - use background dispatcher for DB operations
+                withContext(Dispatchers.IO) {
+                    storyRepository.updateDailyStreak(
+                        date = today,
+                        pagesRead = pagesRead,
+                        timeMinutes = timeMinutes,
+                        storiesRead = storiesCompleted
+                    )
+                }
+                
+                // Refresh stats only if significant change or every 10th update to reduce memory pressure
+                val shouldRefreshStats = storiesCompleted > 0 || pagesRead >= 5
+                if (shouldRefreshStats) {
+                    val updatedStats = withContext(Dispatchers.IO) {
+                        storyRepository.getOverallReadingStats()
+                    }
+                    
+                    // Check if any new badges were unlocked
+                    val previousBadgeCount = _state.value.readingStats.unlockedBadges.size
+                    val newBadgeCount = updatedStats.unlockedBadges.size
+                    
+                    _state.value = _state.value.copy(readingStats = updatedStats)
+                    
+                    // Show badge notification if new badge was unlocked
+                    if (newBadgeCount > previousBadgeCount) {
+                        val newBadge = updatedStats.unlockedBadges.maxByOrNull { it.unlockedAt ?: 0 }
+                        if (newBadge != null) {
+                            showBadgeNotification(newBadge)
+                        }
+                    }
+                }
+                
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to update reading progress")
+            }
+        }
+    }
+
+    fun updateReadingGoal(goal: ReadingGoal) {
+        viewModelScope.launch {
+            try {
+                storyRepository.updateReadingGoal(goal)
+                _state.value = _state.value.copy(currentGoal = goal)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to update reading goal")
+                _state.value = _state.value.copy(
+                    error = "Failed to update reading goal: ${e.message}"
+                )
+            }
+        }
+    }
+
+    fun showStreakScreen() {
+        viewModelScope.launch {
+            try {
+                // Refresh stats before showing - use IO dispatcher to avoid blocking UI
+                val stats = withContext(Dispatchers.IO) {
+                    storyRepository.getOverallReadingStats()
+                }
+                _state.value = _state.value.copy(
+                    showStreakScreen = true,
+                    readingStats = stats
+                )
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to load reading stats")
+                _state.value = _state.value.copy(
+                    showStreakScreen = true,
+                    error = "Failed to load reading statistics"
+                )
+            }
+        }
+    }
+
+    fun hideStreakScreen() {
+        _state.value = _state.value.copy(showStreakScreen = false)
+    }
+
+    private fun showBadgeNotification(badge: AchievementBadge) {
+        _state.value = _state.value.copy(showBadgeNotification = badge)
+    }
+
+    fun dismissBadgeNotification() {
+        _state.value = _state.value.copy(showBadgeNotification = null)
+    }
+
+    fun getTodayProgress(): Pair<ReadingStreak?, ReadingGoal> {
+        // This would typically be called to get today's progress for UI display
+        return Pair(null, _state.value.currentGoal) // Implementation would get today's streak
+    }
+    
+    override fun onCleared() {
+        super.onCleared()
+        // Stop TTS and cleanup when ViewModel is destroyed
+        if (_state.value.isReadingAloud) {
+            textToSpeechManager.stop()
         }
     }
 }

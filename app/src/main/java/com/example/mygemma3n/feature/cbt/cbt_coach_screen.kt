@@ -9,8 +9,11 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.NavigateNext
+import androidx.compose.material.icons.automirrored.filled.Note
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -41,6 +44,7 @@ fun CBTCoachScreen(
 
     var userInput by remember { mutableStateOf("") }
     var showThoughtRecord by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
 
     // Animation states
     val headerExpanded by remember { derivedStateOf { sessionState.isActive } }
@@ -126,7 +130,7 @@ fun CBTCoachScreen(
                                     fontWeight = FontWeight.Medium
                                 )
                             }
-                            
+
                             // Service mode indicator
                             ServiceModeIndicatorCBT(
                                 isOnline = sessionState.isUsingOnlineService
@@ -348,7 +352,7 @@ fun CBTCoachScreen(
                         label = { Text("Thought Record") },
                         leadingIcon = {
                             Icon(
-                                imageVector = Icons.Default.Note,
+                                imageVector = Icons.AutoMirrored.Filled.Note,
                                 contentDescription = null,
                                 modifier = Modifier.size(18.dp)
                             )
@@ -363,7 +367,7 @@ fun CBTCoachScreen(
                         enabled = sessionState.suggestedTechnique != null,
                         leadingIcon = {
                             Icon(
-                                imageVector = Icons.Default.NavigateNext,
+                                imageVector = Icons.AutoMirrored.Filled.NavigateNext,
                                 contentDescription = null,
                                 modifier = Modifier.size(18.dp)
                             )
@@ -533,14 +537,15 @@ fun CBTCoachScreen(
                         }
                     }
                 } else {
-                    // Welcome state input
+                    // Welcome state input - with start and delete buttons
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(24.dp),
-                        horizontalArrangement = Arrangement.Center,
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // Start session button (aligned to start)
                         Button(
                             onClick = {
                                 coroutineScope.launch {
@@ -558,7 +563,31 @@ fun CBTCoachScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Start Your Session",
+                                text = "Start Session",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                        }
+
+                        // Delete sessions button (aligned to end)
+                        OutlinedButton(
+                            onClick = {
+                                showDeleteDialog = true
+                            },
+                            modifier = Modifier.height(56.dp),
+                            shape = RoundedCornerShape(28.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error
+                            ),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Delete",
                                 style = MaterialTheme.typography.titleMedium
                             )
                         }
@@ -615,6 +644,25 @@ fun CBTCoachScreen(
         EnhancedSessionInsightsDialog(
             insights = insights,
             onDismiss = { viewModel.clearSessionInsights() }
+        )
+    }
+
+    // Delete Sessions Dialog
+    if (showDeleteDialog) {
+        DeleteSessionsDialog(
+            onDismiss = { showDeleteDialog = false },
+            onDeleteAll = {
+                viewModel.deleteAllSessions()
+                showDeleteDialog = false
+            },
+            onDeleteOld = { days ->
+                viewModel.deleteOldSessions(days)
+                showDeleteDialog = false
+            },
+            onClearAll = {
+                viewModel.clearAllCBTData()
+                showDeleteDialog = false
+            }
         )
     }
 }
@@ -741,7 +789,7 @@ fun EnhancedThoughtRecordDialog(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Default.Note,
+                    imageVector = Icons.AutoMirrored.Filled.Note,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary
                 )
@@ -804,8 +852,6 @@ fun EnhancedThoughtRecordDialog(
     )
 }
 
-
-
 fun getIntensityColor(intensity: Float): Color {
     val t = intensity.coerceIn(0f, 1f)
     val start = Color(0xFF4CAF50)
@@ -820,8 +866,6 @@ fun getIntensityColor(intensity: Float): Color {
         alpha = 1f               // fully opaque
     )
 }
-
-
 
 @Composable
 fun EnhancedSessionInsightsDialog(
@@ -882,7 +926,7 @@ fun EnhancedSessionInsightsDialog(
                                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                                 )
                             ) {
-                                Text("• $insight", Modifier.padding(8.dp))
+                                Text("• $insight", Modifier.padding(8.dp))
                             }
                         }
                     }
@@ -924,7 +968,7 @@ fun EnhancedSessionInsightsDialog(
                                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                                 )
                             ) {
-                                Text("• $hw", Modifier.padding(8.dp))
+                                Text("• $hw", Modifier.padding(8.dp))
                             }
                         }
                     }
@@ -951,6 +995,230 @@ fun EnhancedSessionInsightsDialog(
         }
     )
 }
+
+@Composable
+fun DeleteSessionsDialog(
+    onDismiss: () -> Unit,
+    onDeleteAll: () -> Unit,
+    onDeleteOld: (Int) -> Unit,
+    onClearAll: () -> Unit
+) {
+    var selectedDays by remember { mutableIntStateOf(30) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error
+                )
+                Text(
+                    text = "Delete CBT Sessions",
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        },
+        text = {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.heightIn(max = 400.dp)
+            ) {
+                item {
+                    Text(
+                        text = "Choose what you'd like to delete:",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                // Delete all sessions option
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DeleteSweep,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    text = "Delete All Sessions",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            Text(
+                                text = "Remove all your therapy sessions but keep CBT knowledge",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                            Button(
+                                onClick = onDeleteAll,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.error
+                                )
+                            ) {
+                                Text("Delete All Sessions")
+                            }
+                        }
+                    }
+                }
+
+                // Delete old sessions option
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Schedule,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    text = "Delete Old Sessions",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            Text(
+                                text = "Remove sessions older than selected days",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+
+                            // Days selector
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Older than:")
+                                FilterChip(
+                                    onClick = { selectedDays = 7 },
+                                    label = { Text("7 days") },
+                                    selected = selectedDays == 7
+                                )
+                                FilterChip(
+                                    onClick = { selectedDays = 30 },
+                                    label = { Text("30 days") },
+                                    selected = selectedDays == 30
+                                )
+                                FilterChip(
+                                    onClick = { selectedDays = 90 },
+                                    label = { Text("90 days") },
+                                    selected = selectedDays == 90
+                                )
+                            }
+
+                            Button(
+                                onClick = { onDeleteOld(selectedDays) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary
+                                )
+                            ) {
+                                Text("Delete Sessions Older Than $selectedDays Days")
+                            }
+                        }
+                    }
+                }
+
+                // Complete data reset option
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    text = "Complete Privacy Reset",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                            Text(
+                                text = "Remove ALL CBT data including sessions and knowledge base",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                            OutlinedButton(
+                                onClick = onClearAll,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.error
+                                ),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Clear Everything")
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
 fun getEmotionColor(emotion: Emotion?): Color {
     return when (emotion) {
         Emotion.HAPPY -> Color(0xFF4CAF50)
@@ -995,7 +1263,7 @@ private fun ServiceModeIndicatorCBT(
                     MaterialTheme.colorScheme.onTertiaryContainer
                 }
             )
-            
+
             Text(
                 text = if (isOnline) "Online" else "Offline",
                 style = MaterialTheme.typography.labelSmall,

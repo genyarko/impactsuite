@@ -62,6 +62,45 @@ data class StoryRequest(
     val exactPageCount: Int? = null // Exact page count from slider
 )
 
+data class ReadingStreak(
+    val date: String, // Format: "yyyy-MM-dd"
+    val storiesRead: Int = 0,
+    val pagesRead: Int = 0,
+    val totalReadingTimeMinutes: Int = 0,
+    val goalMet: Boolean = false,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+data class ReadingGoal(
+    val id: String = "daily_goal",
+    val dailyPagesGoal: Int = 5,
+    val dailyTimeGoalMinutes: Int = 15,
+    val dailyStoriesGoal: Int = 1,
+    val lastUpdated: Long = System.currentTimeMillis()
+)
+
+data class AchievementBadge(
+    val id: String,
+    val name: String,
+    val description: String,
+    val type: BadgeType,
+    val milestone: Int,
+    val unlockedAt: Long? = null,
+    val isUnlocked: Boolean = false,
+    val iconName: String = "default_badge"
+)
+
+data class ReadingStats(
+    val currentStreak: Int = 0,
+    val longestStreak: Int = 0,
+    val totalStoriesRead: Int = 0,
+    val totalPagesRead: Int = 0,
+    val totalTimeMinutes: Int = 0,
+    val goalsMet: Int = 0,
+    val unlockedBadges: List<AchievementBadge> = emptyList(),
+    val nextBadge: AchievementBadge? = null
+)
+
 /* ─────────────────────── Room entities ───────────────────── */
 
 @Entity(tableName = "stories")
@@ -93,6 +132,47 @@ data class StoryReadingSession(
     val totalTimeMinutes: Int = 0
 )
 
+@Entity(tableName = "reading_streaks")
+data class ReadingStreakEntity(
+    @PrimaryKey val date: String, // Format: "yyyy-MM-dd"
+    val storiesRead: Int = 0,
+    val pagesRead: Int = 0,
+    val totalReadingTimeMinutes: Int = 0,
+    val goalMet: Boolean = false,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "reading_goals")
+data class ReadingGoalEntity(
+    @PrimaryKey val id: String = "daily_goal",
+    val dailyPagesGoal: Int = 5,
+    val dailyTimeGoalMinutes: Int = 15,
+    val dailyStoriesGoal: Int = 1,
+    val lastUpdated: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "achievement_badges")
+data class AchievementBadgeEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val description: String,
+    val type: BadgeType,
+    val milestone: Int,
+    val unlockedAt: Long? = null,
+    val isUnlocked: Boolean = false,
+    val iconName: String = "default_badge"
+)
+
+enum class BadgeType {
+    READING_STREAK,      // 3, 7, 14, 30, 60, 100 days
+    PAGES_READ,          // 50, 100, 500, 1000 pages
+    STORIES_COMPLETED,   // 5, 10, 25, 50 stories
+    TIME_SPENT,          // 5, 10, 25, 50 hours
+    GENRE_EXPLORER,      // Read 3+ different genres
+    SPEED_READER,        // Read story in under 10 minutes
+    DEDICATED_READER     // Read for 7 consecutive days
+}
+
 /* ─────────────────────── Converters ─────────────────────── */
 
 class StoryConverters {
@@ -101,6 +181,9 @@ class StoryConverters {
 
     @TypeConverter fun fromStoryTarget(t: StoryTarget): String = t.name
     @TypeConverter fun toStoryTarget(v: String): StoryTarget = StoryTarget.valueOf(v)
+
+    @TypeConverter fun fromBadgeType(t: BadgeType): String = t.name
+    @TypeConverter fun toBadgeType(v: String): BadgeType = BadgeType.valueOf(v)
 
     @TypeConverter fun fromDate(d: Date?): Long? = d?.time
     @TypeConverter fun toDate(v: Long?): Date? = v?.let(::Date)
@@ -112,6 +195,9 @@ class StoryConverters {
 interface StoryDao {
     @Query("SELECT * FROM stories ORDER BY createdAt DESC")
     fun getAllStories(): Flow<List<StoryEntity>>
+
+    @Query("SELECT * FROM stories ORDER BY createdAt DESC")
+    suspend fun getAllStoriesSync(): List<StoryEntity>
 
     @Query("SELECT * FROM stories WHERE id = :storyId")
     suspend fun getStoryById(storyId: String): StoryEntity?
@@ -157,15 +243,85 @@ interface StoryReadingSessionDao {
 
     @Query("DELETE FROM story_reading_sessions")
     suspend fun deleteAllSessions()
+
+    @Query("SELECT * FROM story_reading_sessions WHERE date(startTime/1000, 'unixepoch') = :date")
+    suspend fun getSessionsForDate(date: String): List<StoryReadingSession>
+
+    @Query("SELECT * FROM story_reading_sessions")
+    suspend fun getAllSessions(): List<StoryReadingSession>
+}
+
+@Dao
+interface ReadingStreakDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdateStreak(streak: ReadingStreakEntity)
+
+    @Query("SELECT * FROM reading_streaks WHERE date = :date")
+    suspend fun getStreakForDate(date: String): ReadingStreakEntity?
+
+    @Query("SELECT * FROM reading_streaks ORDER BY date DESC LIMIT :limit")
+    suspend fun getRecentStreaks(limit: Int = 30): List<ReadingStreakEntity>
+
+    @Query("SELECT COUNT(*) FROM reading_streaks WHERE goalMet = 1 AND date >= :startDate ORDER BY date DESC")
+    suspend fun getConsecutiveStreakCount(startDate: String): Int
+
+    @Query("SELECT MAX(consecutiveDays) FROM (SELECT COUNT(*) as consecutiveDays FROM reading_streaks WHERE goalMet = 1 GROUP BY (julianday(date) - julianday((SELECT MIN(date) FROM reading_streaks WHERE goalMet = 1))))")
+    suspend fun getLongestStreak(): Int?
+
+    @Query("SELECT COUNT(*) FROM reading_streaks WHERE goalMet = 1")
+    suspend fun getTotalGoalDaysMet(): Int
+
+    @Query("DELETE FROM reading_streaks")
+    suspend fun deleteAllStreaks()
+}
+
+@Dao
+interface ReadingGoalDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdateGoal(goal: ReadingGoalEntity)
+
+    @Query("SELECT * FROM reading_goals WHERE id = :id")
+    suspend fun getGoal(id: String = "daily_goal"): ReadingGoalEntity?
+
+    @Query("DELETE FROM reading_goals")
+    suspend fun deleteAllGoals()
+}
+
+@Dao
+interface AchievementBadgeDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdateBadge(badge: AchievementBadgeEntity)
+
+    @Query("SELECT * FROM achievement_badges ORDER BY unlockedAt DESC")
+    suspend fun getAllBadges(): List<AchievementBadgeEntity>
+
+    @Query("SELECT * FROM achievement_badges WHERE isUnlocked = 1 ORDER BY unlockedAt DESC")
+    suspend fun getUnlockedBadges(): List<AchievementBadgeEntity>
+
+    @Query("SELECT * FROM achievement_badges WHERE isUnlocked = 0 ORDER BY type, milestone")
+    suspend fun getLockedBadges(): List<AchievementBadgeEntity>
+
+    @Query("UPDATE achievement_badges SET isUnlocked = 1, unlockedAt = :unlockedAt WHERE id = :badgeId")
+    suspend fun unlockBadge(badgeId: String, unlockedAt: Long)
+
+    @Query("SELECT * FROM achievement_badges WHERE type = :type AND isUnlocked = 1")
+    suspend fun getUnlockedBadgesOfType(type: BadgeType): List<AchievementBadgeEntity>
+
+    @Query("DELETE FROM achievement_badges")
+    suspend fun deleteAllBadges()
 }
 
 /* ─────────────────────── Repository ─────────────────────── */
 
 @Singleton
 class StoryRepository @Inject constructor(
-    private val storyDao: StoryDao,
-    private val sessionDao: StoryReadingSessionDao,
-    private val gson: Gson
+    val storyDao: StoryDao,
+    val sessionDao: StoryReadingSessionDao,
+    val streakDao: ReadingStreakDao,
+    val goalDao: ReadingGoalDao,
+    val badgeDao: AchievementBadgeDao,
+    private val memoryManager: ReadingStreakMemoryManager,
+    val gson: Gson
 ) {
     
     fun getAllStories(): Flow<List<Story>> =
@@ -219,6 +375,149 @@ class StoryRepository @Inject constructor(
         return Pair(sessionCount, totalTime)
     }
 
+    // Reading Streak Methods
+    suspend fun updateDailyStreak(date: String, pagesRead: Int = 0, timeMinutes: Int = 0, storiesRead: Int = 0) {
+        val existing = streakDao.getStreakForDate(date)
+        val goalEntity = goalDao.getGoal()
+        val goal = goalEntity?.toDomain() ?: getDefaultGoal()
+        
+        val updatedStreak = if (existing != null) {
+            existing.copy(
+                pagesRead = existing.pagesRead + pagesRead,
+                totalReadingTimeMinutes = existing.totalReadingTimeMinutes + timeMinutes,
+                storiesRead = existing.storiesRead + storiesRead
+            )
+        } else {
+            ReadingStreakEntity(
+                date = date,
+                pagesRead = pagesRead,
+                totalReadingTimeMinutes = timeMinutes,
+                storiesRead = storiesRead
+            )
+        }
+        
+        val goalMet = updatedStreak.pagesRead >= goal.dailyPagesGoal ||
+                     updatedStreak.totalReadingTimeMinutes >= goal.dailyTimeGoalMinutes ||
+                     updatedStreak.storiesRead >= goal.dailyStoriesGoal
+        
+        streakDao.insertOrUpdateStreak(updatedStreak.copy(goalMet = goalMet))
+        
+        // Check for new badge achievements
+        checkAndUnlockBadges()
+        
+        // Invalidate cache after potential badge changes
+        memoryManager.invalidateCache()
+    }
+
+    suspend fun getCurrentStreak(): Int {
+        val today = java.time.LocalDate.now().toString()
+        return streakDao.getConsecutiveStreakCount(today)
+    }
+
+    suspend fun getLongestStreak(): Int {
+        return streakDao.getLongestStreak() ?: 0
+    }
+
+    suspend fun getReadingGoal(): ReadingGoal {
+        return goalDao.getGoal()?.toDomain() ?: getDefaultGoal()
+    }
+
+    suspend fun updateReadingGoal(goal: ReadingGoal) {
+        goalDao.insertOrUpdateGoal(goal.toEntity())
+    }
+
+    suspend fun getOverallReadingStats(forceRefresh: Boolean = false): ReadingStats {
+        return memoryManager.getOptimizedReadingStats(this, forceRefresh)
+    }
+
+    suspend fun getAllBadges(): List<AchievementBadge> {
+        return badgeDao.getAllBadges().map { it.toDomain() }
+    }
+
+    suspend fun initializeDefaultBadges() {
+        val defaultBadges = createDefaultBadges()
+        defaultBadges.forEach { badge ->
+            badgeDao.insertOrUpdateBadge(badge.toEntity())
+        }
+    }
+
+    private suspend fun checkAndUnlockBadges() {
+        val stats = getOverallReadingStats()
+        val lockedBadges = badgeDao.getLockedBadges()
+        
+        lockedBadges.forEach { badge ->
+            val shouldUnlock = when (badge.type) {
+                BadgeType.READING_STREAK -> stats.currentStreak >= badge.milestone
+                BadgeType.PAGES_READ -> stats.totalPagesRead >= badge.milestone
+                BadgeType.STORIES_COMPLETED -> stats.totalStoriesRead >= badge.milestone
+                BadgeType.TIME_SPENT -> stats.totalTimeMinutes >= badge.milestone * 60
+                BadgeType.GENRE_EXPLORER -> getUniqueGenresRead() >= badge.milestone
+                BadgeType.SPEED_READER -> hasSpeedReadingAchievement()
+                BadgeType.DEDICATED_READER -> stats.currentStreak >= badge.milestone
+            }
+            
+            if (shouldUnlock) {
+                badgeDao.unlockBadge(badge.id, System.currentTimeMillis())
+            }
+        }
+    }
+
+    private suspend fun getNextBadgeToUnlock(): AchievementBadge? {
+        val lockedBadges = badgeDao.getLockedBadges()
+        val stats = getOverallReadingStats()
+        
+        return lockedBadges.minByOrNull { badge ->
+            when (badge.type) {
+                BadgeType.READING_STREAK -> badge.milestone - stats.currentStreak
+                BadgeType.PAGES_READ -> badge.milestone - stats.totalPagesRead
+                BadgeType.STORIES_COMPLETED -> badge.milestone - stats.totalStoriesRead
+                BadgeType.TIME_SPENT -> (badge.milestone * 60) - stats.totalTimeMinutes
+                BadgeType.GENRE_EXPLORER -> badge.milestone - getUniqueGenresRead()
+                BadgeType.SPEED_READER -> if (hasSpeedReadingAchievement()) 0 else 1
+                BadgeType.DEDICATED_READER -> badge.milestone - stats.currentStreak
+            }
+        }?.toDomain()
+    }
+
+    private suspend fun getUniqueGenresRead(): Int {
+        val stories = storyDao.getAllStoriesSync()
+        return stories.map { it.genre }.toSet().size
+    }
+
+    private suspend fun hasSpeedReadingAchievement(): Boolean {
+        // Check if any story was completed in under 10 minutes
+        val allSessions = sessionDao.getAllSessions()
+        return allSessions.any { it.totalTimeMinutes < 10 }
+    }
+
+    private fun getDefaultGoal() = ReadingGoal()
+
+    private fun createDefaultBadges(): List<AchievementBadge> = listOf(
+        // Reading Streak Badges
+        AchievementBadge("streak_3", "First Steps", "Read for 3 consecutive days", BadgeType.READING_STREAK, 3, iconName = "streak_bronze"),
+        AchievementBadge("streak_7", "Week Warrior", "Read for 7 consecutive days", BadgeType.READING_STREAK, 7, iconName = "streak_silver"),
+        AchievementBadge("streak_14", "Two Week Champion", "Read for 14 consecutive days", BadgeType.READING_STREAK, 14, iconName = "streak_gold"),
+        AchievementBadge("streak_30", "Monthly Master", "Read for 30 consecutive days", BadgeType.READING_STREAK, 30, iconName = "streak_platinum"),
+        
+        // Pages Read Badges
+        AchievementBadge("pages_50", "Page Turner", "Read 50 pages", BadgeType.PAGES_READ, 50, iconName = "pages_bronze"),
+        AchievementBadge("pages_100", "Bookworm", "Read 100 pages", BadgeType.PAGES_READ, 100, iconName = "pages_silver"),
+        AchievementBadge("pages_500", "Reading Machine", "Read 500 pages", BadgeType.PAGES_READ, 500, iconName = "pages_gold"),
+        
+        // Stories Completed Badges
+        AchievementBadge("stories_5", "Story Starter", "Complete 5 stories", BadgeType.STORIES_COMPLETED, 5, iconName = "stories_bronze"),
+        AchievementBadge("stories_10", "Tale Collector", "Complete 10 stories", BadgeType.STORIES_COMPLETED, 10, iconName = "stories_silver"),
+        AchievementBadge("stories_25", "Story Master", "Complete 25 stories", BadgeType.STORIES_COMPLETED, 25, iconName = "stories_gold"),
+        
+        // Time Spent Badges
+        AchievementBadge("time_5h", "Reading Enthusiast", "Spend 5 hours reading", BadgeType.TIME_SPENT, 5, iconName = "time_bronze"),
+        AchievementBadge("time_10h", "Devoted Reader", "Spend 10 hours reading", BadgeType.TIME_SPENT, 10, iconName = "time_silver"),
+        
+        // Special Badges
+        AchievementBadge("genre_explorer", "Genre Explorer", "Read stories from 3 different genres", BadgeType.GENRE_EXPLORER, 3, iconName = "explorer"),
+        AchievementBadge("speed_reader", "Speed Reader", "Complete a story in under 10 minutes", BadgeType.SPEED_READER, 1, iconName = "speed")
+    )
+
     /* -- mapping helpers ------------------------------------------------- */
 
     private fun Story.toEntity(gson: Gson) = StoryEntity(
@@ -255,5 +554,61 @@ class StoryRepository @Inject constructor(
         setting = setting,
         hasImages = hasImages,
         imageGenerationScript = imageGenerationScript
+    )
+
+    private fun ReadingStreakEntity.toDomain() = ReadingStreak(
+        date = date,
+        storiesRead = storiesRead,
+        pagesRead = pagesRead,
+        totalReadingTimeMinutes = totalReadingTimeMinutes,
+        goalMet = goalMet,
+        createdAt = createdAt
+    )
+
+    private fun ReadingStreak.toEntity() = ReadingStreakEntity(
+        date = date,
+        storiesRead = storiesRead,
+        pagesRead = pagesRead,
+        totalReadingTimeMinutes = totalReadingTimeMinutes,
+        goalMet = goalMet,
+        createdAt = createdAt
+    )
+
+    private fun ReadingGoalEntity.toDomain() = ReadingGoal(
+        id = id,
+        dailyPagesGoal = dailyPagesGoal,
+        dailyTimeGoalMinutes = dailyTimeGoalMinutes,
+        dailyStoriesGoal = dailyStoriesGoal,
+        lastUpdated = lastUpdated
+    )
+
+    private fun ReadingGoal.toEntity() = ReadingGoalEntity(
+        id = id,
+        dailyPagesGoal = dailyPagesGoal,
+        dailyTimeGoalMinutes = dailyTimeGoalMinutes,
+        dailyStoriesGoal = dailyStoriesGoal,
+        lastUpdated = lastUpdated
+    )
+
+    private fun AchievementBadgeEntity.toDomain() = AchievementBadge(
+        id = id,
+        name = name,
+        description = description,
+        type = type,
+        milestone = milestone,
+        unlockedAt = unlockedAt,
+        isUnlocked = isUnlocked,
+        iconName = iconName
+    )
+
+    private fun AchievementBadge.toEntity() = AchievementBadgeEntity(
+        id = id,
+        name = name,
+        description = description,
+        type = type,
+        milestone = milestone,
+        unlockedAt = unlockedAt,
+        isUnlocked = isUnlocked,
+        iconName = iconName
     )
 }

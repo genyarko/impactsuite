@@ -44,6 +44,10 @@ import com.example.mygemma3n.feature.story.OnlineStoryGenerator
 import com.example.mygemma3n.feature.story.StoryImageGenerator
 import com.example.mygemma3n.feature.story.StoryDao
 import com.example.mygemma3n.feature.story.StoryReadingSessionDao
+import com.example.mygemma3n.feature.story.ReadingStreakDao
+import com.example.mygemma3n.feature.story.ReadingGoalDao
+import com.example.mygemma3n.feature.story.AchievementBadgeDao
+import com.example.mygemma3n.feature.story.ReadingStreakMemoryManager
 import com.example.mygemma3n.feature.tutor.TutorProgressIntegrationService
 import com.example.mygemma3n.feature.tutor.TutorPromptManager
 import com.example.mygemma3n.remote.EmergencyDatabase
@@ -371,11 +375,27 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideReadingStreakDao(db: AppDatabase): ReadingStreakDao = db.readingStreakDao()
+
+    @Provides
+    @Singleton
+    fun provideReadingGoalDao(db: AppDatabase): ReadingGoalDao = db.readingGoalDao()
+
+    @Provides
+    @Singleton
+    fun provideAchievementBadgeDao(db: AppDatabase): AchievementBadgeDao = db.achievementBadgeDao()
+
+    @Provides
+    @Singleton
     fun provideStoryRepository(
         storyDao: StoryDao,
         sessionDao: StoryReadingSessionDao,
+        streakDao: ReadingStreakDao,
+        goalDao: ReadingGoalDao,
+        badgeDao: AchievementBadgeDao,
+        memoryManager: ReadingStreakMemoryManager,
         gson: Gson
-    ): StoryRepository = StoryRepository(storyDao, sessionDao, gson)
+    ): StoryRepository = StoryRepository(storyDao, sessionDao, streakDao, goalDao, badgeDao, memoryManager, gson)
 
     @Provides
     @Singleton
