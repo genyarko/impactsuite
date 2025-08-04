@@ -296,17 +296,31 @@ class LearningAnalyticsRepository @Inject constructor(
             val existing = progressDao.getProgressForSubject(studentId, subject)
             val interactionCount = interactionDao.getInteractionCount(studentId, subject)
             val avgQuality = interactionDao.getAverageResponseQuality(studentId, subject) ?: 0.5f
+            val totalTimeSpent = interactionDao.getTotalTimeSpent(studentId, subject) ?: 0L
+            
+            // Calculate unique topics explored for this subject
+            val uniqueTopics = interactionDao.getUniqueTopicsForSubject(studentId, subject)
+            val topicsExplored = uniqueTopics.size
+            
+            // Calculate accuracy from correct/incorrect interactions
+            val accuracy = interactionDao.getAccuracyForSubject(studentId, subject) ?: 0.0f
             
             val progress = existing?.copy(
                 totalInteractions = interactionCount,
+                totalTimeSpentMs = totalTimeSpent,
                 masteryScore = avgQuality,
+                topicsExplored = topicsExplored,
+                averageAccuracy = accuracy,
                 lastInteraction = System.currentTimeMillis()
             ) ?: SubjectProgressEntity(
                 id = UUID.randomUUID().toString(),
                 studentId = studentId,
                 subject = subject,
                 totalInteractions = interactionCount,
+                totalTimeSpentMs = totalTimeSpent,
                 masteryScore = avgQuality,
+                topicsExplored = topicsExplored,
+                averageAccuracy = accuracy,
                 lastInteraction = System.currentTimeMillis()
             )
             
@@ -411,12 +425,22 @@ class LearningAnalyticsRepository @Inject constructor(
         val weekStart = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(7)
         val stats = computationDao.getWeeklySessionStats(studentId, weekStart)
         
+        // Calculate topics explored this week from interactions
+        val recentInteractions = interactionDao.getInteractionsSince(studentId, weekStart)
+        val topicsThisWeek = recentInteractions.map { it.topic }.distinct().size
+        
+        // Calculate most active subject from recent interactions
+        val mostActiveSubject = recentInteractions
+            .groupBy { it.subject }
+            .maxByOrNull { it.value.size }
+            ?.key ?: "MATHEMATICS"
+        
         return WeeklyStats(
             totalTimeSpent = stats?.totalTime ?: 0L,
             sessionsCompleted = stats?.sessionCount ?: 0,
-            topicsExplored = 0, // Would calculate from interactions
+            topicsExplored = topicsThisWeek,
             averageSessionDuration = stats?.avgDuration ?: 0L,
-            mostActiveSubject = "MATHEMATICS", // Would calculate from data
+            mostActiveSubject = mostActiveSubject,
             improvementAreas = listOf()
         )
     }

@@ -51,12 +51,13 @@ fun AnalyticsDashboardScreen(
                 }
             },
             actions = {
-                IconButton(
-                    onClick = { viewModel.initializeDemoData() },
-                    enabled = !uiState.isLoading
-                ) {
-                    Icon(Icons.Default.DatasetLinked, "Initialize demo data")
-                }
+                // Demo data button - commented out for production use
+                // IconButton(
+                //     onClick = { viewModel.initializeDemoData() },
+                //     enabled = !uiState.isLoading
+                // ) {
+                //     Icon(Icons.Default.DatasetLinked, "Initialize demo data")
+                // }
                 IconButton(
                     onClick = { viewModel.refreshAnalytics() },
                     enabled = !uiState.isLoading

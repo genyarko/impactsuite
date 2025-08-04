@@ -15,7 +15,8 @@ import javax.inject.Singleton
 class OnlineStoryGenerator @Inject constructor(
     private val geminiApiService: GeminiApiService,
     private val gson: Gson,
-    private val storyImageGenerator: StoryImageGenerator
+    private val storyImageGenerator: StoryImageGenerator,
+    private val difficultyAdapter: StoryDifficultyAdapter
 ) {
     
     // Create a lenient Gson instance for parsing potentially malformed JSON
@@ -70,6 +71,8 @@ class OnlineStoryGenerator @Inject constructor(
     }
 
     private fun createStoryPrompt(request: StoryRequest, targetPageCount: Int): String {
+        val difficultySettings = difficultyAdapter.getDifficultySettings(request.targetAudience)
+        
         val audienceContext = when (request.targetAudience) {
             StoryTarget.KINDERGARTEN -> "ages 3-5, simple vocabulary, very short sentences"
             StoryTarget.ELEMENTARY -> "ages 6-10, basic vocabulary, clear simple sentences"
@@ -77,6 +80,8 @@ class OnlineStoryGenerator @Inject constructor(
             StoryTarget.HIGH_SCHOOL -> "ages 14-18, advanced vocabulary, complex themes"
             StoryTarget.ADULT -> "adult audience, sophisticated language and themes"
         }
+        
+        val difficultyInstructions = buildDifficultyInstructions(difficultySettings)
 
         val genreContext = when (request.genre) {
             StoryGenre.ADVENTURE -> "exciting journey with challenges and discoveries"
@@ -128,6 +133,9 @@ class OnlineStoryGenerator @Inject constructor(
         - Include dialogue to bring characters to life
         - Ensure smooth transitions between pages
         - Make each page end with a natural stopping point
+
+        DIFFICULTY REQUIREMENTS:
+        $difficultyInstructions
 
         OUTPUT FORMAT:
         Return ONLY valid JSON in this exact format:
@@ -356,7 +364,7 @@ class OnlineStoryGenerator @Inject constructor(
 
     private fun createElementaryFallback(genre: StoryGenre): List<StoryPage> {
         return when (genre) {
-            StoryGenre.ADVENTURE -> listof(
+            StoryGenre.ADVENTURE -> listOf(
                 StoryPage(1, "Emma discovered an old treasure map in her grandmother's attic. The map showed a path through the nearby forest to a mysterious X mark."),
                 StoryPage(2, "With her backpack full of supplies, Emma set off into the forest. She followed the winding trail, crossing streams and climbing over fallen logs."),
                 StoryPage(3, "At the X mark, Emma found not gold or jewels, but something even better - a beautiful clearing where endangered butterflies lived. She had discovered a treasure worth protecting forever.")
@@ -393,6 +401,33 @@ class OnlineStoryGenerator @Inject constructor(
         )
     }
 
-    // Fix the typo in createElementaryFallback
-    private fun listof(vararg elements: StoryPage): List<StoryPage> = listOf(*elements)
+    
+    private fun buildDifficultyInstructions(settings: DifficultySettings): String {
+        val vocabularyInstruction = when (settings.vocabularyLevel) {
+            VocabularyLevel.BASIC -> "Use only simple, common words. Avoid words with more than ${settings.maxSyllablesPerWord} syllables."
+            VocabularyLevel.INTERMEDIATE -> "Use basic vocabulary with some challenging words, but provide context clues."
+            VocabularyLevel.ADVANCED -> "Use rich, descriptive vocabulary appropriate for the grade level."
+            VocabularyLevel.COMPLEX -> "Use sophisticated vocabulary and varied word choices."
+        }
+        
+        val sentenceInstruction = when (settings.sentenceComplexity) {
+            SentenceComplexity.SIMPLE -> "Use simple sentences averaging ${settings.averageWordsPerSentence} words."
+            SentenceComplexity.COMPOUND -> "Use compound sentences with basic conjunctions, averaging ${settings.averageWordsPerSentence} words."
+            SentenceComplexity.COMPLEX -> "Use complex sentences with dependent clauses, averaging ${settings.averageWordsPerSentence} words."
+            SentenceComplexity.SOPHISTICATED -> "Use varied, sophisticated sentence structures averaging ${settings.averageWordsPerSentence} words."
+        }
+        
+        val conceptInstruction = if (settings.allowComplexConcepts) {
+            "Complex themes and abstract concepts are appropriate."
+        } else {
+            "Keep concepts concrete and simple. Avoid abstract ideas."
+        }
+        
+        return """
+        - Vocabulary: $vocabularyInstruction
+        - Sentence Structure: $sentenceInstruction
+        - Paragraph Length: Average ${settings.averageSentencesPerParagraph} sentences per paragraph
+        - Concepts: $conceptInstruction
+        """.trimIndent()
+    }
 }

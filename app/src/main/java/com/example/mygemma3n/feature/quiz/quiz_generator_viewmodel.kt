@@ -378,7 +378,8 @@ class QuizGeneratorViewModel @Inject constructor(
                         topic = topic,
                         count = questionCount,
                         country = _state.value.studentCountry,
-                        studentName = _state.value.studentName
+                        studentName = _state.value.studentName,
+                        previousQuestions = getRecentQuestionTexts(subject, topic)
                     )
                     
                     // Check if we got any questions from online generation
@@ -729,6 +730,11 @@ class QuizGeneratorViewModel @Inject constructor(
                 if (!correct) {
                     correct = checkSimpleKeywordMatch(normalizedUserAnswer, normalizedCorrectAnswer)
                 }
+                
+                // Extra lenient check for geographic/demographic questions
+                if (!correct) {
+                    correct = checkGeographicConceptMatch(normalizedUserAnswer, normalizedCorrectAnswer, q)
+                }
             }
 
             // Log for debugging with question type information
@@ -982,27 +988,120 @@ class QuizGeneratorViewModel @Inject constructor(
     }
 
     /**
-     * Simple keyword matching for 6th graders - accept if user mentions any important concept
+     * Enhanced keyword matching - accept if user demonstrates understanding of key concepts
      */
     private fun checkSimpleKeywordMatch(userAnswer: String, correctAnswer: String): Boolean {
-        val userWords = userAnswer.split(" ").filter { it.length > 2 }
-        val correctWords = correctAnswer.split(" ").filter { it.length > 2 }
+        val userWords = userAnswer.split(" ").filter { it.length > 2 }.map { it.lowercase() }
+        val correctWords = correctAnswer.split(" ").filter { it.length > 2 }.map { it.lowercase() }
         
-        // Key educational concepts that if mentioned, should be accepted
+        // Expanded key educational concepts across all subjects
         val importantConcepts = setOf(
+            // History & Government
             "trade", "trading", "leader", "leadership", "ruler", "rule", "government", 
             "skill", "skills", "organization", "communicate", "communication",
             "roads", "infrastructure", "agriculture", "farming", "water", "nile",
-            "egypt", "egyptian", "ancient", "civilization", "democracy", "republic"
+            "egypt", "egyptian", "ancient", "civilization", "democracy", "republic",
+            
+            // Geography & Demographics
+            "population", "people", "density", "coastal", "coast", "cities", "city",
+            "urban", "rural", "mountain", "mountains", "plains", "rivers", "river",
+            "fertile", "land", "resources", "climate", "migrate", "move", "settlement",
+            "region", "area", "location", "northern", "southern", "eastern", "western",
+            
+            // Science & Nature
+            "climate", "weather", "temperature", "precipitation", "ecosystem", "habitat",
+            "species", "adaptation", "environment", "natural", "resources", "energy",
+            
+            // Economics & Social
+            "economy", "economic", "jobs", "employment", "industry", "services",
+            "culture", "cultural", "society", "social", "community", "family"
         )
         
-        // Accept if user mentions any important concept that's also in the correct answer
+        // Check for semantic word overlap (more lenient)
         val userConcepts = userWords.intersect(importantConcepts)
         val correctConcepts = correctWords.intersect(importantConcepts)
         
-        // If both user and correct answer contain important concepts, and there's overlap, accept it
-        return userConcepts.isNotEmpty() && correctConcepts.isNotEmpty() && 
-               (userConcepts.intersect(correctConcepts).isNotEmpty() || userConcepts.size >= 1)
+        // Accept if user mentions relevant concepts
+        if (userConcepts.isNotEmpty() && correctConcepts.isNotEmpty()) {
+            val hasOverlap = userConcepts.intersect(correctConcepts).isNotEmpty()
+            val hasRelevantConcept = userConcepts.size >= 1
+            return hasOverlap || hasRelevantConcept
+        }
+        
+        // Additional lenient check: partial word matching for key terms
+        val keyTermsInCorrect = correctWords.filter { word ->
+            importantConcepts.any { concept -> word.contains(concept) || concept.contains(word) }
+        }
+        val keyTermsInUser = userWords.filter { word ->
+            importantConcepts.any { concept -> word.contains(concept) || concept.contains(word) }
+        }
+        
+        // Accept if user mentions any key geographic/demographic terms for population questions
+        val isPopulationQuestion = correctWords.any { it in setOf("population", "density", "people", "coastal", "cities") }
+        val userMentionsPopulationConcepts = userWords.any { it in setOf("people", "population", "cities", "coastal", "move", "southern", "northern") }
+        
+        return (keyTermsInCorrect.isNotEmpty() && keyTermsInUser.isNotEmpty()) ||
+               (isPopulationQuestion && userMentionsPopulationConcepts)
+    }
+
+    /**
+     * Special lenient checking for geographic and demographic questions
+     */
+    private fun checkGeographicConceptMatch(userAnswer: String, correctAnswer: String, question: Question): Boolean {
+        val userWords = userAnswer.lowercase().split(" ").filter { it.length > 2 }
+        val correctWords = correctAnswer.lowercase().split(" ").filter { it.length > 2 }
+        
+        // Check if this is a population/demographic question
+        val isPopulationQuestion = correctWords.any { 
+            it in setOf("population", "density", "people", "coastal", "cities", "plains", "rivers", "fertile", "mountainous") 
+        }
+        
+        if (isPopulationQuestion) {
+            // For population questions, accept if user shows understanding of:
+            // 1. Where people live (coastal, cities, south, north, etc.)
+            // 2. Why people live there (resources, fertile, etc.)
+            val populationConcepts = setOf(
+                "people", "population", "live", "move", "cities", "city", "urban",
+                "coastal", "coast", "southern", "northern", "eastern", "western",
+                "plains", "rivers", "fertile", "resources", "farming", "mountains",
+                "density", "higher", "lower", "areas", "regions"
+            )
+            
+            val userPopulationConcepts = userWords.intersect(populationConcepts)
+            val correctPopulationConcepts = correctWords.intersect(populationConcepts)
+            
+            // Accept if user mentions relevant population concepts
+            if (userPopulationConcepts.isNotEmpty() && correctPopulationConcepts.isNotEmpty()) {
+                return true
+            }
+            
+            // Specific pattern matching for population distribution answers
+            val userMentionsLocation = userWords.any { it in setOf("southern", "coastal", "cities", "plains") }
+            val correctMentionsLocation = correctWords.any { it in setOf("southern", "coastal", "cities", "plains") }
+            
+            if (userMentionsLocation && correctMentionsLocation) {
+                return true
+            }
+        }
+        
+        // Check for climate/geography questions
+        val isGeographyQuestion = correctWords.any {
+            it in setOf("climate", "weather", "temperature", "rainfall", "desert", "forest", "mountain", "ocean")
+        }
+        
+        if (isGeographyQuestion) {
+            val geographyConcepts = setOf(
+                "climate", "weather", "hot", "cold", "dry", "wet", "rain", "rainfall",
+                "desert", "forest", "mountain", "ocean", "temperature", "season"
+            )
+            
+            val userGeoConcepts = userWords.intersect(geographyConcepts)
+            val correctGeoConcepts = correctWords.intersect(geographyConcepts)
+            
+            return userGeoConcepts.isNotEmpty() && correctGeoConcepts.isNotEmpty()
+        }
+        
+        return false
     }
 
     /* ─────────────────────── Enhanced Question generation with retry ─────────────────────── */

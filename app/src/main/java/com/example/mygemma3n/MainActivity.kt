@@ -1436,6 +1436,88 @@ fun ApiSettingsScreen(
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Help Card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Text(
+                        text = "💡 Help & Tips",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "How to use G3N:",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    val helpTips = listOf(
+                        "🤖 AI Tutor: Get personalized lessons on any topic with voice interaction",
+                        "🎯 Quiz Generator: Create custom quizzes to test your knowledge",
+                        "💬 Chat: Have open conversations with the AI assistant",
+                        "🧠 CBT Coach: Practice mindfulness and emotional regulation techniques",
+                        "📄 Summarizer: Extract and summarize text from PDF, DOCX, or TXT files",
+                        "🎤 Live Caption: Real-time speech transcription and translation",
+                        "📸 Image Classification: Identify plants and objects using your camera",
+                        "🆘 Crisis Handbook: Access emergency resources and safety information",
+                        "📊 Analytics: Track your learning progress and usage patterns",
+                        "📚 Story Mode: Interactive storytelling with AI-generated content"
+                    )
+
+                    helpTips.forEach { tip ->
+                        Text(
+                            text = "• $tip",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "Getting Started:",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    val gettingStartedTips = listOf(
+                        "1. Add your Gemini API key above for online AI features",
+                        "2. Download models for offline functionality (recommended)",
+                        "3. Add Speech API key for voice features (optional)",
+                        "4. All features work offline once models are downloaded",
+                        "5. Switch between Online/Offline modes as needed"
+                    )
+
+                    gettingStartedTips.forEach { tip ->
+                        Text(
+                            text = tip,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        )
+                    }
+                }
+            }
         }
     }
 }

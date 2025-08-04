@@ -18,7 +18,9 @@ import javax.inject.Inject
 class StoryViewModel @Inject constructor(
     private val storyRepository: StoryRepository,
     private val onlineStoryGenerator: OnlineStoryGenerator,
-    private val textToSpeechManager: TextToSpeechManager
+    private val textToSpeechManager: TextToSpeechManager,
+    private val recommendationService: StoryRecommendationService,
+    private val difficultyAdapter: StoryDifficultyAdapter
 ) : ViewModel() {
 
     data class StoryState(
@@ -39,7 +41,13 @@ class StoryViewModel @Inject constructor(
         val readingStats: ReadingStats = ReadingStats(),
         val currentGoal: ReadingGoal = ReadingGoal(),
         val showBadgeNotification: AchievementBadge? = null,
-        val showStreakScreen: Boolean = false
+        val showStreakScreen: Boolean = false,
+        // New recommendation and difficulty features
+        val recommendations: List<StoryRecommendation> = emptyList(),
+        val isLoadingRecommendations: Boolean = false,
+        val selectedRecommendation: StoryRecommendation? = null,
+        val isAdaptingDifficulty: Boolean = false,
+        val showDifficultyOptions: Boolean = false
     )
 
     private val _state = MutableStateFlow(StoryState())
@@ -497,6 +505,102 @@ class StoryViewModel @Inject constructor(
     fun getTodayProgress(): Pair<ReadingStreak?, ReadingGoal> {
         // This would typically be called to get today's progress for UI display
         return Pair(null, _state.value.currentGoal) // Implementation would get today's streak
+    }
+
+    // Story Recommendation Methods
+    fun loadPersonalizedRecommendations(targetAudience: StoryTarget) {
+        viewModelScope.launch {
+            try {
+                _state.value = _state.value.copy(isLoadingRecommendations = true)
+                
+                val recommendations = recommendationService.getPersonalizedRecommendations(
+                    targetAudience = targetAudience,
+                    count = 5
+                )
+                
+                _state.value = _state.value.copy(
+                    recommendations = recommendations,
+                    isLoadingRecommendations = false
+                )
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to load recommendations")
+                _state.value = _state.value.copy(
+                    isLoadingRecommendations = false,
+                    error = "Failed to load story recommendations: ${e.message}"
+                )
+            }
+        }
+    }
+
+    fun selectRecommendation(recommendation: StoryRecommendation) {
+        _state.value = _state.value.copy(selectedRecommendation = recommendation)
+    }
+
+    fun generateStoryFromRecommendation(recommendation: StoryRecommendation) {
+        val request = StoryRequest(
+            prompt = recommendation.suggestedPrompt,
+            genre = recommendation.genre,
+            targetAudience = recommendation.targetAudience,
+            length = recommendation.length
+        )
+        generateStory(request)
+    }
+
+    fun clearRecommendations() {
+        _state.value = _state.value.copy(
+            recommendations = emptyList(),
+            selectedRecommendation = null
+        )
+    }
+
+    // Difficulty Adaptation Methods
+    fun showDifficultyAdaptationOptions(story: Story) {
+        _state.value = _state.value.copy(
+            currentStory = story,
+            showDifficultyOptions = true
+        )
+    }
+
+    fun hideDifficultyOptions() {
+        _state.value = _state.value.copy(showDifficultyOptions = false)
+    }
+
+    fun adaptStoryToDifficulty(story: Story, newTargetAudience: StoryTarget) {
+        viewModelScope.launch {
+            try {
+                _state.value = _state.value.copy(
+                    isAdaptingDifficulty = true,
+                    showDifficultyOptions = false
+                )
+
+                val adaptedStory = difficultyAdapter.adaptStoryDifficulty(story, newTargetAudience)
+                
+                // Save the adapted story
+                storyRepository.saveStory(adaptedStory)
+                
+                _state.value = _state.value.copy(
+                    isAdaptingDifficulty = false,
+                    currentStory = adaptedStory,
+                    currentPage = 0,
+                    showStoryList = false
+                )
+                
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to adapt story difficulty")
+                _state.value = _state.value.copy(
+                    isAdaptingDifficulty = false,
+                    error = "Failed to adapt story difficulty: ${e.message}"
+                )
+            }
+        }
+    }
+
+    fun getReadabilityScore(text: String): ReadabilityScore {
+        return difficultyAdapter.getReadabilityScore(text)
+    }
+
+    fun getDifficultySettings(targetAudience: StoryTarget): DifficultySettings {
+        return difficultyAdapter.getDifficultySettings(targetAudience)
     }
     
     override fun onCleared() {

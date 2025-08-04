@@ -30,6 +30,15 @@ interface LearningInteractionDao {
     @Query("SELECT AVG(responseQuality) FROM learning_interactions WHERE studentId = :studentId AND subject = :subject AND responseQuality IS NOT NULL")
     suspend fun getAverageResponseQuality(studentId: String, subject: String): Float?
     
+    @Query("SELECT SUM(sessionDurationMs) FROM learning_interactions WHERE studentId = :studentId AND subject = :subject")
+    suspend fun getTotalTimeSpent(studentId: String, subject: String): Long?
+    
+    @Query("SELECT DISTINCT topic FROM learning_interactions WHERE studentId = :studentId AND subject = :subject")
+    suspend fun getUniqueTopicsForSubject(studentId: String, subject: String): List<String>
+    
+    @Query("SELECT AVG(CASE WHEN wasCorrect = 1 THEN 1.0 ELSE 0.0 END) FROM learning_interactions WHERE studentId = :studentId AND subject = :subject AND wasCorrect IS NOT NULL")
+    suspend fun getAccuracyForSubject(studentId: String, subject: String): Float?
+    
     @Query("DELETE FROM learning_interactions WHERE studentId = :studentId")
     suspend fun clearInteractionsForStudent(studentId: String)
 }

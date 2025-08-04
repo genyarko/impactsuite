@@ -360,6 +360,9 @@ class StoryRepository @Inject constructor(
     suspend fun getStoriesByTarget(target: StoryTarget): List<Story> =
         storyDao.getStoriesByTarget(target).map { it.toDomain(gson) }
 
+    suspend fun getAllStoriesSync(): List<StoryEntity> =
+        storyDao.getAllStoriesSync()
+
     suspend fun startReadingSession(storyId: String): Long {
         val session = StoryReadingSession(
             storyId = storyId,

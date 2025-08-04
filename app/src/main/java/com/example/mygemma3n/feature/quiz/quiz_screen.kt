@@ -808,23 +808,8 @@ fun EnhancedQuizTakingScreen(
         if (q.isAnswered && q.feedback != null) {
             Spacer(Modifier.height(16.dp))
 
-            // Determine if the answer was correct
-            val isCorrect = q.userAnswer?.let { userAns ->
-                // Normalize both answers for comparison
-                val normalizedUser = userAns.trim().lowercase()
-                    .replace(Regex("^(the|a|an)\\s+"), "")
-                    .replace(Regex("[.,!?;:'\"-]"), "")
-                    .replace(Regex("\\s+"), " ")
-                    .trim()
-
-                val normalizedCorrect = q.correctAnswer.trim().lowercase()
-                    .replace(Regex("^(the|a|an)\\s+"), "")
-                    .replace(Regex("[.,!?;:'\"-]"), "")
-                    .replace(Regex("\\s+"), " ")
-                    .trim()
-
-                normalizedUser == normalizedCorrect
-            } ?: false
+            // Use the isCorrect field that was already calculated by the ViewModel
+            val isCorrect = q.isCorrect
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
