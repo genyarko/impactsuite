@@ -48,6 +48,8 @@ import com.example.mygemma3n.feature.story.ReadingStreakDao
 import com.example.mygemma3n.feature.story.ReadingGoalDao
 import com.example.mygemma3n.feature.story.AchievementBadgeDao
 import com.example.mygemma3n.feature.story.ReadingStreakMemoryManager
+import com.example.mygemma3n.feature.story.StoryRecommendationService
+import com.example.mygemma3n.feature.story.StoryDifficultyAdapter
 import com.example.mygemma3n.feature.tutor.TutorProgressIntegrationService
 import com.example.mygemma3n.feature.tutor.TutorPromptManager
 import com.example.mygemma3n.remote.EmergencyDatabase
@@ -409,8 +411,22 @@ object AppModule {
     fun provideOnlineStoryGenerator(
         geminiApiService: GeminiApiService,
         gson: Gson,
-        storyImageGenerator: StoryImageGenerator
-    ): OnlineStoryGenerator = OnlineStoryGenerator(geminiApiService, gson, storyImageGenerator)
+        storyImageGenerator: StoryImageGenerator,
+        difficultyAdapter: StoryDifficultyAdapter
+    ): OnlineStoryGenerator = OnlineStoryGenerator(geminiApiService, gson, storyImageGenerator, difficultyAdapter)
+
+    @Provides
+    @Singleton
+    fun provideStoryRecommendationService(
+        storyRepository: StoryRepository,
+        gemmaService: UnifiedGemmaService
+    ): StoryRecommendationService = StoryRecommendationService(storyRepository, gemmaService)
+
+    @Provides
+    @Singleton
+    fun provideStoryDifficultyAdapter(
+        gemmaService: UnifiedGemmaService
+    ): StoryDifficultyAdapter = StoryDifficultyAdapter(gemmaService)
 
     @Module
     @InstallIn(SingletonComponent::class)
