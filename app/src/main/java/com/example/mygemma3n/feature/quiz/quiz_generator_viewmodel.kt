@@ -176,7 +176,7 @@ class QuizGeneratorViewModel @Inject constructor(
             val apiKey = settingsRepo.apiKeyFlow.first()
             if (apiKey.isNotBlank()) {
                 try {
-                    geminiApiService.initialize(GeminiApiConfig(apiKey = apiKey))
+                    geminiApiService.initialize(GeminiApiConfig.forQuiz(apiKey))
                     Timber.d("GeminiApiService initialized for Quiz Generator")
                 } catch (e: Exception) {
                     Timber.e(e, "Failed to initialize GeminiApiService")

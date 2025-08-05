@@ -2,6 +2,8 @@ package com.example.mygemma3n.feature.analytics
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CancellationException
 import timber.log.Timber
 import java.util.*
 import java.util.concurrent.TimeUnit
@@ -48,6 +50,9 @@ class KnowledgeGapAnalyzer @Inject constructor(
             Timber.d("Identified ${prioritizedGaps.size} knowledge gaps for student $studentId")
             return prioritizedGaps
             
+        } catch (e: CancellationException) {
+            // Silently handle cancellation - this is expected when scope is cancelled
+            return emptyList()
         } catch (e: Exception) {
             Timber.e(e, "Failed to analyze knowledge gaps")
             return emptyList()
@@ -97,6 +102,9 @@ class KnowledgeGapAnalyzer @Inject constructor(
                 }
             }
             
+        } catch (e: CancellationException) {
+            // Silently handle cancellation - this is expected when scope is cancelled
+            throw e // Re-throw to properly cancel the operation
         } catch (e: Exception) {
             Timber.e(e, "Failed to detect performance declines")
         }
@@ -111,45 +119,45 @@ class KnowledgeGapAnalyzer @Inject constructor(
         val gaps = mutableListOf<KnowledgeGapEntity>()
         
         try {
-            val masteryData = masteryDao.getMasteryForStudent(studentId)
+            val masteries = masteryDao.getMasteryForStudent(studentId).first()
+            val masteryBySubject = masteries.groupBy { it.subject }
             
-            masteryData.collect { masteries ->
-                val masteryBySubject = masteries.groupBy { it.subject }
+            masteryBySubject.forEach { (subject, subjectMasteries) ->
+                val prerequisiteMap = getSubjectPrerequisites(subject)
                 
-                masteryBySubject.forEach { (subject, subjectMasteries) ->
-                    val prerequisiteMap = getSubjectPrerequisites(subject)
-                    
-                    subjectMasteries.forEach { mastery ->
-                        if (mastery.masteryLevel in listOf(MasteryLevel.INTRODUCED, MasteryLevel.DEVELOPING)) {
-                            val prerequisites = prerequisiteMap[mastery.topic] ?: emptyList()
+                subjectMasteries.forEach { mastery ->
+                    if (mastery.masteryLevel in listOf(MasteryLevel.INTRODUCED, MasteryLevel.DEVELOPING)) {
+                        val prerequisites = prerequisiteMap[mastery.topic] ?: emptyList()
+                        
+                        prerequisites.forEach { prerequisite ->
+                            val prereqMastery = subjectMasteries.find { it.topic == prerequisite }
                             
-                            prerequisites.forEach { prerequisite ->
-                                val prereqMastery = subjectMasteries.find { it.topic == prerequisite }
-                                
-                                if (prereqMastery == null || prereqMastery.masteryLevel in listOf(
-                                        MasteryLevel.NOT_STARTED, 
-                                        MasteryLevel.INTRODUCED
-                                    )) {
-                                    gaps.add(
-                                        KnowledgeGapEntity(
-                                            id = UUID.randomUUID().toString(),
-                                            studentId = studentId,
-                                            subject = subject,
-                                            topic = prerequisite,
-                                            concept = "Foundation knowledge",
-                                            gapType = GapType.MISSING_PREREQUISITE,
-                                            priority = GapPriority.HIGH,
-                                            description = "Missing prerequisite: $prerequisite needed for ${mastery.topic}",
-                                            prerequisiteTopics = """["$prerequisite"]"""
-                                        )
+                            if (prereqMastery == null || prereqMastery.masteryLevel in listOf(
+                                    MasteryLevel.NOT_STARTED, 
+                                    MasteryLevel.INTRODUCED
+                                )) {
+                                gaps.add(
+                                    KnowledgeGapEntity(
+                                        id = UUID.randomUUID().toString(),
+                                        studentId = studentId,
+                                        subject = subject,
+                                        topic = prerequisite,
+                                        concept = "Foundation knowledge",
+                                        gapType = GapType.MISSING_PREREQUISITE,
+                                        priority = GapPriority.HIGH,
+                                        description = "Missing prerequisite: $prerequisite needed for ${mastery.topic}",
+                                        prerequisiteTopics = """["$prerequisite"]"""
                                     )
-                                }
+                                )
                             }
                         }
                     }
                 }
             }
             
+        } catch (e: CancellationException) {
+            // Silently handle cancellation - this is expected when scope is cancelled
+            throw e // Re-throw to properly cancel the operation
         } catch (e: Exception) {
             Timber.e(e, "Failed to detect missing prerequisites")
         }
@@ -203,6 +211,9 @@ class KnowledgeGapAnalyzer @Inject constructor(
                 }
             }
             
+        } catch (e: CancellationException) {
+            // Silently handle cancellation - this is expected when scope is cancelled
+            throw e // Re-throw to properly cancel the operation
         } catch (e: Exception) {
             Timber.e(e, "Failed to detect conceptual misunderstandings")
         }
@@ -270,6 +281,9 @@ class KnowledgeGapAnalyzer @Inject constructor(
                 }
             }
             
+        } catch (e: CancellationException) {
+            // Silently handle cancellation - this is expected when scope is cancelled
+            throw e // Re-throw to properly cancel the operation
         } catch (e: Exception) {
             Timber.e(e, "Failed to detect learning pattern anomalies")
         }
@@ -284,51 +298,51 @@ class KnowledgeGapAnalyzer @Inject constructor(
         val gaps = mutableListOf<KnowledgeGapEntity>()
         
         try {
-            val masteryData = masteryDao.getMasteryForStudent(studentId)
+            val masteries = masteryDao.getMasteryForStudent(studentId).first()
+            val masteryBySubject = masteries.groupBy { it.subject }
             
-            masteryData.collect { masteries ->
-                val masteryBySubject = masteries.groupBy { it.subject }
+            masteryBySubject.forEach { (subject, subjectMasteries) ->
+                // Look for inconsistent mastery levels within related topics
+                val relatedTopicGroups = getRelatedTopicGroups(subject)
                 
-                masteryBySubject.forEach { (subject, subjectMasteries) ->
-                    // Look for inconsistent mastery levels within related topics
-                    val relatedTopicGroups = getRelatedTopicGroups(subject)
+                relatedTopicGroups.forEach { topicGroup ->
+                    val groupMasteries = subjectMasteries.filter { it.topic in topicGroup }
                     
-                    relatedTopicGroups.forEach { topicGroup ->
-                        val groupMasteries = subjectMasteries.filter { it.topic in topicGroup }
+                    if (groupMasteries.size >= 2) {
+                        val masteryLevels = groupMasteries.map { it.masteryLevel.ordinal }
+                        val maxLevel = masteryLevels.maxOrNull() ?: 0
+                        val minLevel = masteryLevels.minOrNull() ?: 0
                         
-                        if (groupMasteries.size >= 2) {
-                            val masteryLevels = groupMasteries.map { it.masteryLevel.ordinal }
-                            val maxLevel = masteryLevels.maxOrNull() ?: 0
-                            val minLevel = masteryLevels.minOrNull() ?: 0
+                        // Significant gap between mastery levels in related topics
+                        if (maxLevel - minLevel >= 3) {
+                            val weakTopics = groupMasteries
+                                .filter { it.masteryLevel.ordinal <= minLevel + 1 }
+                                .map { it.topic }
                             
-                            // Significant gap between mastery levels in related topics
-                            if (maxLevel - minLevel >= 3) {
-                                val weakTopics = groupMasteries
-                                    .filter { it.masteryLevel.ordinal <= minLevel + 1 }
-                                    .map { it.topic }
-                                
-                                weakTopics.forEach { weakTopic ->
-                                    gaps.add(
-                                        KnowledgeGapEntity(
-                                            id = UUID.randomUUID().toString(),
-                                            studentId = studentId,
-                                            subject = subject,
-                                            topic = weakTopic,
-                                            concept = "Topic connections",
-                                            gapType = GapType.KNOWLEDGE_FRAGMENTATION,
-                                            priority = GapPriority.MEDIUM,
-                                            description = "Knowledge fragmentation: $weakTopic lags behind related topics",
-                                            suggestedActions = """["Connect to stronger topics", "Review relationships", "Practice integration"]""",
-                                            prerequisiteTopics = topicGroup.filter { it != weakTopic }.take(2).toString()
-                                        )
+                            weakTopics.forEach { weakTopic ->
+                                gaps.add(
+                                    KnowledgeGapEntity(
+                                        id = UUID.randomUUID().toString(),
+                                        studentId = studentId,
+                                        subject = subject,
+                                        topic = weakTopic,
+                                        concept = "Topic connections",
+                                        gapType = GapType.KNOWLEDGE_FRAGMENTATION,
+                                        priority = GapPriority.MEDIUM,
+                                        description = "Knowledge fragmentation: $weakTopic lags behind related topics",
+                                        suggestedActions = """["Connect to stronger topics", "Review relationships", "Practice integration"]""",
+                                        prerequisiteTopics = topicGroup.filter { it != weakTopic }.take(2).toString()
                                     )
-                                }
+                                )
                             }
                         }
                     }
                 }
             }
             
+        } catch (e: CancellationException) {
+            // Silently handle cancellation - this is expected when scope is cancelled
+            throw e // Re-throw to properly cancel the operation
         } catch (e: Exception) {
             Timber.e(e, "Failed to detect knowledge fragmentation")
         }

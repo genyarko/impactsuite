@@ -439,6 +439,8 @@ class TutorViewModel @Inject constructor(
                     difficulty = getDifficultyForGrade(student.gradeLevel).name
                 )
             )
+            // Ensure loading state is cleared after adding message
+            _state.update { it.copy(isLoading = false) }
         }
 
         // Auto-speak if enabled

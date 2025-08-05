@@ -44,40 +44,22 @@ class LearningAnalyticsViewModel @Inject constructor(
                     }
                 }
                 
-                analyticsRepository.getLearningAnalytics(currentStudentId)
-                    .catch { error ->
-                        if (error is kotlinx.coroutines.CancellationException) {
-                            // Don't log cancellation as error - it's expected during navigation
-                            Timber.d("Analytics loading cancelled")
-                            throw error // Re-throw to stop collection
-                        } else {
-                            Timber.e(error, "Failed to load analytics")
-                            _uiState.value = _uiState.value.copy(
-                                isLoading = false,
-                                error = "Failed to load analytics: ${error.message}"
-                            )
-                        }
-                    }
-                    .collect { analytics ->
-                        if (isActive) { // Only update if coroutine is still active
-                            _uiState.value = _uiState.value.copy(
-                                isLoading = false,
-                                analytics = analytics,
-                                error = null
-                            )
-                        }
-                    }
+                val analytics = analyticsRepository.getLearningAnalytics(currentStudentId).first()
+                
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    analytics = analytics,
+                    error = null
+                )
             } catch (e: kotlinx.coroutines.CancellationException) {
                 // Expected during navigation - don't log as error
                 Timber.d("Analytics loading was cancelled")
             } catch (e: Exception) {
-                if (isActive) { // Only update if coroutine is still active
-                    Timber.e(e, "Error loading analytics")
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        error = "Error loading analytics: ${e.message}"
-                    )
-                }
+                Timber.e(e, "Error loading analytics")
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    error = "Error loading analytics: ${e.message}"
+                )
             }
         }
     }
@@ -149,8 +131,9 @@ class LearningAnalyticsViewModel @Inject constructor(
     fun markRecommendationCompleted(recommendationId: String) {
         viewModelScope.launch {
             try {
-                // Update in repository - would be implemented in full version
+                analyticsRepository.markRecommendationCompleted(recommendationId)
                 refreshAnalytics()
+                Timber.d("Marked recommendation $recommendationId as completed")
             } catch (e: Exception) {
                 Timber.e(e, "Failed to mark recommendation as completed")
             }
@@ -160,8 +143,9 @@ class LearningAnalyticsViewModel @Inject constructor(
     fun dismissRecommendation(recommendationId: String) {
         viewModelScope.launch {
             try {
-                // Update in repository - would be implemented in full version
+                analyticsRepository.dismissRecommendation(recommendationId)
                 refreshAnalytics()
+                Timber.d("Dismissed recommendation $recommendationId")
             } catch (e: Exception) {
                 Timber.e(e, "Failed to dismiss recommendation")
             }
