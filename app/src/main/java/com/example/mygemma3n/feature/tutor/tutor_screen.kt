@@ -49,6 +49,7 @@ import com.example.mygemma3n.components.*
 import com.example.mygemma3n.feature.tutor.TutorProgressDisplay
 import com.example.mygemma3n.feature.tutor.FloatingProgressSummary
 import com.example.mygemma3n.feature.tutor.TutorProgressIntegrationService
+import com.example.mygemma3n.feature.tutor.AchievementDialog
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -224,6 +225,14 @@ fun TutorScreen(
             onConfirm = { name, grade ->
                 viewModel.initializeStudent(name, grade)
             }
+        )
+    }
+
+    // Achievement Dialog
+    if (state.showAchievementDialog && state.achievementToShow != null) {
+        AchievementDialog(
+            achievement = state.achievementToShow!!,
+            onDismiss = { viewModel.dismissAchievementDialog() }
         )
     }
 }

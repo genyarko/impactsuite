@@ -18,6 +18,7 @@ import timber.log.Timber
 import java.io.ByteArrayInputStream
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.example.mygemma3n.config.ApiConfiguration
 
 private val okHttpClient = OkHttpClient()
 
@@ -106,7 +107,10 @@ class SpeechRecognitionService @Inject constructor(
     }
 
     private suspend fun testApiKey(apiKey: String) = withContext(Dispatchers.IO) {
-        val url = "https://speech.googleapis.com/v1/speech:recognize?key=$apiKey"
+        val url = ApiConfiguration.buildSpeechUrl(
+            ApiConfiguration.Speech.RECOGNIZE_ENDPOINT,
+            apiKey
+        )
 
         // Create a minimal test request with silence
         val testAudio = ByteArray(3200) // 0.1 seconds of silence
@@ -145,9 +149,13 @@ class SpeechRecognitionService @Inject constructor(
             "Speech service not initialized"
         }
 
+        val apiKey = apiKeyForRest ?: error("API key is null")
         Timber.d("Transcribing ${audioData.size} bytes of audio")
 
-        val url = "https://speech.googleapis.com/v1/speech:recognize?key=$apiKeyForRest"
+        val url = ApiConfiguration.buildSpeechUrl(
+            ApiConfiguration.Speech.RECOGNIZE_ENDPOINT,
+            apiKey
+        )
         val audioBase64 = android.util.Base64.encodeToString(
             audioData,
             android.util.Base64.NO_WRAP
@@ -258,6 +266,8 @@ class SpeechRecognitionService @Inject constructor(
             "Speech service not initialised. isInitialized=$isInitialized, hasApiKey=${apiKeyForRest != null}"
         }
 
+        val apiKey = apiKeyForRest ?: error("API key is null")
+
         /* ───── adaptive gate: noise tracking ───── */
         val NOISE_WINDOW = 50                 // #chunks ≈ 1 s
         val SPEECH_FACTOR = 2f                // threshold = noise × factor (further reduced)
@@ -299,7 +309,7 @@ class SpeechRecognitionService @Inject constructor(
                     transcribeAudioREST(
                         audioData = data,
                         languageCode = languageCode,
-                        apiKey = apiKeyForRest!!,
+                        apiKey = apiKey,
                         isFinal = isFinal,
                         model = cfg.modelName
                     )
@@ -395,8 +405,10 @@ class SpeechRecognitionService @Inject constructor(
         model: String = "latest_short"
     ): TranscriptionResult = withContext(Dispatchers.IO) {
 
-        val url =
-            "https://speech.googleapis.com/v1/speech:recognize?key=$apiKey"
+        val url = ApiConfiguration.buildSpeechUrl(
+            ApiConfiguration.Speech.RECOGNIZE_ENDPOINT,
+            apiKey
+        )
         val audioBase64 = android.util.Base64.encodeToString(
             audioData,
             android.util.Base64.NO_WRAP

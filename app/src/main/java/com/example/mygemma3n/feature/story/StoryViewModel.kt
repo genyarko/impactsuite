@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
@@ -63,12 +65,14 @@ class StoryViewModel @Inject constructor(
             try {
                 _state.value = _state.value.copy(isLoading = true)
                 
-                storyRepository.getAllStories().collect { stories ->
-                    _state.value = _state.value.copy(
-                        allStories = stories,
-                        isLoading = false
-                    )
-                }
+                val stories = storyRepository.getAllStories().first()
+                _state.value = _state.value.copy(
+                    allStories = stories,
+                    isLoading = false
+                )
+            } catch (e: CancellationException) {
+                // Silently handle cancellation - this is expected when scope is cancelled
+                throw e // Re-throw to properly cancel the operation
             } catch (e: Exception) {
                 Timber.e(e, "Failed to load stories")
                 _state.value = _state.value.copy(
@@ -602,12 +606,21 @@ class StoryViewModel @Inject constructor(
     fun getDifficultySettings(targetAudience: StoryTarget): DifficultySettings {
         return difficultyAdapter.getDifficultySettings(targetAudience)
     }
+
+    /**
+     * Stop TTS immediately - called when navigating away from story screen
+     */
+    fun stopTTS() {
+        textToSpeechManager.stop()
+        _state.value = _state.value.copy(isReadingAloud = false)
+        Timber.d("TTS stopped manually")
+    }
     
     override fun onCleared() {
         super.onCleared()
-        // Stop TTS and cleanup when ViewModel is destroyed
-        if (_state.value.isReadingAloud) {
-            textToSpeechManager.stop()
-        }
+        // Always stop TTS when ViewModel is destroyed to prevent audio from continuing
+        textToSpeechManager.stop()
+        _state.value = _state.value.copy(isReadingAloud = false)
+        Timber.d("StoryViewModel cleared - TTS stopped")
     }
 }

@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.platform.LocalContext
+import androidx.activity.compose.BackHandler
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.delay
@@ -57,6 +58,18 @@ fun StoryScreen(
     viewModel: StoryViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+
+    // Handle system back button to ensure TTS is stopped
+    BackHandler(enabled = !state.showStoryList) {
+        viewModel.backToStoryList()
+    }
+
+    // Ensure TTS is stopped when the screen is disposed
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.stopTTS()
+        }
+    }
 
     Scaffold(
         topBar = {

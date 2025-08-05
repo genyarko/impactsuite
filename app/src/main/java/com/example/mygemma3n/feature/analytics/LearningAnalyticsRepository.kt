@@ -706,4 +706,30 @@ class LearningAnalyticsRepository @Inject constructor(
             Timber.e(e, "Failed to initialize demo data")
         }
     }
+
+    /**
+     * Mark a study recommendation as completed
+     */
+    suspend fun markRecommendationCompleted(recommendationId: String) {
+        try {
+            recommendationDao.markRecommendationCompleted(recommendationId, System.currentTimeMillis())
+            Timber.d("Marked recommendation $recommendationId as completed")
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to mark recommendation as completed")
+            throw e
+        }
+    }
+
+    /**
+     * Dismiss a study recommendation
+     */
+    suspend fun dismissRecommendation(recommendationId: String) {
+        try {
+            recommendationDao.dismissRecommendation(recommendationId, System.currentTimeMillis())
+            Timber.d("Dismissed recommendation $recommendationId")
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to dismiss recommendation")
+            throw e
+        }
+    }
 }

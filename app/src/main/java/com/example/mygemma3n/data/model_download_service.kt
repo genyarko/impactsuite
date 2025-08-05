@@ -13,6 +13,7 @@ import java.net.URL
 import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.cancellation.CancellationException
 
 // Model Repository
 @Singleton
@@ -561,13 +562,17 @@ class ModelDownloadManager @Inject constructor(
             type = "gemma-3n-2b"
         )
 
-        val state = if (modelDownloadManager.isModelAvailable(request.name)) {
-            val info = modelDownloadManager.getAvailableModels().first { it.name == request.name }
-            ModelDownloadManager.DownloadState.Success(info.path, info.size)
-        } else {
-            var result: ModelDownloadManager.DownloadState = ModelDownloadManager.DownloadState.Idle
-            modelDownloadManager.downloadModel(request).collect { result = it }
-            result
+        val state = try {
+            if (modelDownloadManager.isModelAvailable(request.name)) {
+                val info = modelDownloadManager.getAvailableModels().first { it.name == request.name }
+                ModelDownloadManager.DownloadState.Success(info.path, info.size)
+            } else {
+                // Wait for the final download state instead of collecting all states
+                modelDownloadManager.downloadModel(request).last()
+            }
+        } catch (e: CancellationException) {
+            Timber.d("Model download was cancelled")
+            throw e // Re-throw to properly cancel the operation
         }
 
         if (state is ModelDownloadManager.DownloadState.Success) {
@@ -580,14 +585,18 @@ class ModelDownloadManager @Inject constructor(
 
 
     suspend fun ensureModelDownloaded(manager: ModelDownloadManager, request: ModelDownloadManager.DownloadRequest): ModelDownloadManager.DownloadState {
-        if (manager.isModelAvailable(request.name)) {
-            val info = manager.getAvailableModels().first { it.name == request.name }
-            return ModelDownloadManager.DownloadState.Success(info.path, info.size)
+        return try {
+            if (manager.isModelAvailable(request.name)) {
+                val info = manager.getAvailableModels().first { it.name == request.name }
+                ModelDownloadManager.DownloadState.Success(info.path, info.size)
+            } else {
+                // Wait for the final download state instead of collecting all states
+                manager.downloadModel(request).last()
+            }
+        } catch (e: CancellationException) {
+            Timber.d("Model download was cancelled")
+            throw e // Re-throw to properly cancel the operation
         }
-
-        var result: ModelDownloadManager.DownloadState = ModelDownloadManager.DownloadState.Idle
-        manager.downloadModel(request).collect { result = it }
-        return result
     }
 
 

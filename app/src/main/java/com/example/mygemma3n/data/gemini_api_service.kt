@@ -23,6 +23,7 @@ import org.json.JSONArray
 import java.util.Base64
 import com.example.mygemma3n.data.local.entities.TokenUsage
 import com.example.mygemma3n.data.repository.TokenUsageRepository
+import com.example.mygemma3n.config.ApiConfiguration
 import javax.inject.Provider
 
 /* ────────────────────────────────────────────────────────────────────
@@ -34,13 +35,16 @@ class GeminiApiService @Inject constructor(
     private val tokenUsageRepositoryProvider: Provider<TokenUsageRepository>
 ) {
 
-    /* IDs published 2025-07-09 */
+    /* Model IDs - using centralized configuration */
     companion object {
-        const val PRIMARY_GENERATION_MODEL = "gemma-3n-e4b-it"
-        const val GEMINI_PRO_MODEL        = "gemini-2.5-pro"
-        const val GEMINI_FLASH_MODEL      = "gemini-2.5-flash"   // vision
-        const val EMBEDDING_MODEL         = "embedding-001"
-        const val GEMINI_IMAGE_MODEL = "gemini-2.0-flash-preview-image-generation"
+        // Online models (delegated to centralized config)
+        const val GEMINI_PRO_MODEL = ApiConfiguration.Online.GEMINI_PRO_MODEL
+        const val GEMINI_FLASH_MODEL = ApiConfiguration.Online.GEMINI_FLASH_MODEL
+        const val EMBEDDING_MODEL = ApiConfiguration.Online.EMBEDDING_MODEL
+        const val GEMINI_IMAGE_MODEL = ApiConfiguration.Online.IMAGE_MODEL
+        
+        // Offline models (delegated to centralized config)
+        const val PRIMARY_GENERATION_MODEL = ApiConfiguration.Offline.PRIMARY_GENERATION_MODEL
     }
 
     /* state */
@@ -69,7 +73,11 @@ class GeminiApiService @Inject constructor(
     suspend fun embedText(text: String): FloatArray = withContext(Dispatchers.IO) {
         val key = apiKey ?: error("Service not initialised")
 
-        val url  = "https://generativelanguage.googleapis.com/v1beta/models/$EMBEDDING_MODEL:embedContent"
+        val url = ApiConfiguration.buildOnlineGeminiUrl(
+            ApiConfiguration.Online.GENERATE_CONTENT_ENDPOINT,
+            EMBEDDING_MODEL,
+            key
+        ).replace(":generateContent", ":embedContent")
         val body = JSONObject().apply {
             put("model", "models/$EMBEDDING_MODEL")
             put("content", JSONObject().apply {
@@ -242,8 +250,11 @@ class GeminiApiService @Inject constructor(
     suspend fun generateImageBytes(prompt: String): ByteArray = withContext(Dispatchers.IO) {
         val key = apiKey ?: error("Service not initialised")
 
-        val url =
-            "https://generativelanguage.googleapis.com/v1beta/models/$GEMINI_IMAGE_MODEL:generateContent?key=$key"
+        val url = ApiConfiguration.buildOnlineGeminiUrl(
+            ApiConfiguration.Online.GENERATE_CONTENT_ENDPOINT,
+            GEMINI_IMAGE_MODEL,
+            key
+        )
 
         val body = JSONObject().apply {
             put("contents", JSONArray().put(JSONObject().apply {
