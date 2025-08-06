@@ -791,7 +791,7 @@ fun ModelDownloadSection(
                 Button(
                     onClick = { viewModel.startModelDownload() },
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = true
+                    enabled = !downloadState.isDownloading // Disable when downloading
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,

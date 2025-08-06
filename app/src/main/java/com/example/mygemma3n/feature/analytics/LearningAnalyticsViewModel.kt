@@ -35,14 +35,15 @@ class LearningAnalyticsViewModel @Inject constructor(
             try {
                 _uiState.value = _uiState.value.copy(isLoading = true, error = null)
                 
-                // Initialize demo data in a separate job that won't block
-                launch {
-                    try {
-                        analyticsRepository.initializeDemoData(currentStudentId)
-                    } catch (e: Exception) {
-                        Timber.w(e, "Failed to initialize demo data, continuing anyway")
-                    }
-                }
+                // Demo data initialization is disabled for production use
+                // Only initialize demo data if explicitly called via UI button
+                // launch {
+                //     try {
+                //         analyticsRepository.initializeDemoData(currentStudentId)
+                //     } catch (e: Exception) {
+                //         Timber.w(e, "Failed to initialize demo data, continuing anyway")
+                //     }
+                // }
                 
                 val analytics = analyticsRepository.getLearningAnalytics(currentStudentId).first()
                 

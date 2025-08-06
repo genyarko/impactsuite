@@ -114,15 +114,15 @@ class LearningAnalyticsRepository @Inject constructor(
                     sessionsCompleted = 0,
                     topicsExplored = 0,
                     averageSessionDuration = 0L,
-                    mostActiveSubject = "Mathematics",
+                    mostActiveSubject = "",  // No data available yet
                     improvementAreas = emptyList()
                 ),
                 trends = LearningTrends(
-                    masteryTrend = TrendDirection.STABLE,
-                    engagementTrend = TrendDirection.STABLE,
-                    accuracyTrend = TrendDirection.STABLE,
-                    focusTrend = TrendDirection.STABLE,
-                    consistencyScore = 0.75f
+                    masteryTrend = TrendDirection.INSUFFICIENT_DATA,
+                    engagementTrend = TrendDirection.INSUFFICIENT_DATA,
+                    accuracyTrend = TrendDirection.INSUFFICIENT_DATA,
+                    focusTrend = TrendDirection.INSUFFICIENT_DATA,
+                    consistencyScore = 0.0f  // No data available yet
                 )
             )
         }.map { analytics ->
@@ -449,12 +449,19 @@ class LearningAnalyticsRepository @Inject constructor(
         val thirtyDaysAgo = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(30)
         val performanceData = computationDao.getPerformanceTrend(studentId, thirtyDaysAgo)
         
+        // Calculate actual consistency score based on performance data
+        val consistencyScore = if (performanceData.size >= 3) {
+            calculateConsistencyScore(performanceData.map { it.avgQuality })
+        } else {
+            0.0f  // Insufficient data for consistency calculation
+        }
+        
         return LearningTrends(
             masteryTrend = analyzeTrend(performanceData.map { it.avgQuality }),
-            engagementTrend = TrendDirection.STABLE,
-            accuracyTrend = TrendDirection.STABLE,
-            focusTrend = TrendDirection.STABLE,
-            consistencyScore = 0.75f
+            engagementTrend = analyzeTrend(performanceData.map { it.interactions.toFloat() }),
+            accuracyTrend = if (performanceData.isEmpty()) TrendDirection.INSUFFICIENT_DATA else TrendDirection.STABLE,
+            focusTrend = if (performanceData.isEmpty()) TrendDirection.INSUFFICIENT_DATA else TrendDirection.STABLE,
+            consistencyScore = consistencyScore
         )
     }
 
@@ -469,6 +476,22 @@ class LearningAnalyticsRepository @Inject constructor(
             secondHalf < firstHalf * 0.9 -> TrendDirection.DECLINING
             else -> TrendDirection.STABLE
         }
+    }
+    
+    private fun calculateConsistencyScore(values: List<Float>): Float {
+        if (values.size < 3) return 0.0f
+        
+        // Calculate coefficient of variation (lower is more consistent)
+        val mean = values.average().toFloat()
+        if (mean == 0.0f) return 0.0f
+        
+        val variance = values.map { (it - mean) * (it - mean) }.average().toFloat()
+        val standardDeviation = kotlin.math.sqrt(variance)
+        val coefficientOfVariation = standardDeviation / mean
+        
+        // Convert to consistency score (0-1, higher is better)
+        // Invert and normalize the coefficient of variation
+        return (1.0f - coefficientOfVariation.coerceIn(0.0f, 1.0f)).coerceIn(0.0f, 1.0f)
     }
 
     private fun calculateConfidenceScore(

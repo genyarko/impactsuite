@@ -8,8 +8,10 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -315,19 +317,22 @@ fun AccessibleProgressIndicator(
         }
         
         Spacer(modifier = Modifier.height(8.dp))
-        
+
         LinearProgressIndicator(
-            progress = progress,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(8.dp)
-                .semantics {
-                    progressBarRangeInfo = ProgressBarRangeInfo(
-                        current = progress,
-                        range = 0f..1f
-                    )
-                    contentDescription = "$label progress: $percentage percent"
-                }
+        progress = { progress },
+        modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .semantics {
+                            progressBarRangeInfo = ProgressBarRangeInfo(
+                                current = progress,
+                                range = 0f..1f
+                            )
+                            contentDescription = "$label progress: $percentage percent"
+                        },
+        color = ProgressIndicatorDefaults.linearColor,
+        trackColor = ProgressIndicatorDefaults.linearTrackColor,
+        strokeCap = ProgressIndicatorDefaults.LinearStrokeCap,
         )
     }
 }
@@ -361,7 +366,7 @@ fun AccessibleNavigationHeader(
                     }
                 ) {
                     Icon(
-                        Icons.Default.ArrowBack,
+                        Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back"
                     )
                 }
