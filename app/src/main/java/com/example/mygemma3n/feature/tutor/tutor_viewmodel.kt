@@ -9,7 +9,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mygemma3n.data.*
 import com.example.mygemma3n.domain.repository.SettingsRepository
-import com.example.mygemma3n.feature.caption.SpeechRecognitionService
+import com.example.mygemma3n.data.SpeechRecognitionService
 import com.example.mygemma3n.feature.quiz.Difficulty
 import com.example.mygemma3n.service.AudioCaptureService
 import com.example.mygemma3n.shared_utilities.OfflineRAG

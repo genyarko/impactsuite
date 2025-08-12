@@ -8,14 +8,12 @@ plugins {
     id("com.google.gms.google-services")
     id("com.google.firebase.crashlytics")
     id("org.jetbrains.kotlin.kapt")
-    id("com.android.asset-pack")
 }
 
 
 android {
     namespace = "com.example.mygemma3n"
     compileSdk = 36
-    assetPacks += listOf(":gemma3n_assetpack")
 
     androidResources {
         noCompress += "tflite"
@@ -54,28 +52,33 @@ android {
             buildConfigField("Boolean", "ENABLE_PERFORMANCE_MONITORING", "true")
         }
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            isMinifyEnabled = false  // Disabled to preserve ALL functionality including Google Cloud Speech
+            isShrinkResources = false
             buildConfigField("Boolean", "ENABLE_PERFORMANCE_MONITORING", "false")
+            
+            // Keep ABI filtering for size optimization (most compatible optimization)
+            ndk {
+                abiFilters += listOf("arm64-v8a") // Only include 64-bit ARM (most devices)
+            }
         }
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
     kotlinOptions {
-        jvmTarget = "17"
+        jvmTarget = "21"
         freeCompilerArgs += listOf(
             "-opt-in=kotlin.RequiresOptIn",
             "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
             "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
             "-XXLanguage:+PropertyParamAnnotationDefaultTargetMode"
         )
+    }
+    
+    kotlin {
+        jvmToolchain(21)
     }
     buildFeatures {
         compose = true
@@ -85,6 +88,23 @@ android {
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.10"
+    }
+    
+    bundle {
+        language {
+            enableSplit = false  // Disable language splits to reduce overhead
+        }
+        density {
+            enableSplit = false  // Keep all densities in base for offline AI app
+        }
+        abi {
+            enableSplit = true   // Enable ABI splits to reduce size
+        }
+        
+        // Additional bundle optimizations
+        texture {
+            enableSplit = false  // Keep textures in base for AI models
+        }
     }
 
 
@@ -100,7 +120,16 @@ android {
             excludes.add("META-INF/ASL2.0")
             excludes.add("META-INF/io.netty.versions.properties")
             excludes.add("META-INF/*.kotlin_module")
-            excludes.add("mozilla/public-suffix-list.txt") // ✅ Add this line
+            excludes.add("mozilla/public-suffix-list.txt")
+            
+            // Additional size reduction exclusions
+            excludes.add("META-INF/*.version")
+            excludes.add("META-INF/maven/**")
+            excludes.add("META-INF/proguard/**")
+            excludes.add("**/*.proto")
+            excludes.add("google/protobuf/**")
+            excludes.add("kotlin/**")
+            excludes.add("META-INF/services/**")
         }
     }
 
@@ -199,7 +228,8 @@ dependencies {
 
 // Media (for audio processing)
     implementation(libs.androidx.media3.common.ktx)
-    implementation(libs.androidx.media3.exoplayer)
+    // Removed ExoPlayer - large media library, using Android MediaPlayer
+    // implementation(libs.androidx.media3.exoplayer)
 
 // Testing
     testImplementation(libs.junit)
@@ -212,11 +242,11 @@ dependencies {
 // Debug Tools
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
-    debugImplementation(libs.leakcanary.android)
+    // Removed LeakCanary - reduces debug build size
 
 // Analytics & Services
     implementation(libs.play.services.measurement.api)
-    implementation(libs.localagents.rag)
+    // Removed localagents.rag - not used and reduces bundle size
     implementation(libs.asset.delivery.ktx)
 
 // TensorFlow Lite (Legacy - for compatibility)
@@ -246,19 +276,16 @@ dependencies {
     // Local broadcast manager for service communication
     implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
 
-//    // Coqui STT (formerly Mozilla DeepSpeech)
-//    implementation("ai.coqui.stt:libstt:1.4.0")
-//// Java facade
-//    implementation("ai.coqui.stt:libstt-android:1.4.0")
-//// Whisper cpp JNI binding (pre‑compiled for arm64, x86_64, etc.)
-//    implementation("com.github.ggerganov:whisper.cpp:android-v1.5.4")
 
 
-    // Google Cloud Speech-to-Text with exclusions
+
+    // Google Cloud Speech - with aggressive dependency exclusions to prevent conflicts
     implementation(libs.google.cloud.speech) {
-        exclude(group = "com.google.protobuf", module = "protobuf-java")
-        exclude(group = "com.google.api.grpc", module = "proto-google-common-protos")
         exclude(group = "com.google.firebase", module = "protolite-well-known-types")
+        exclude(group = "com.google.api.grpc", module = "proto-google-common-protos")
+        exclude(group = "com.google.protobuf", module = "protobuf-javalite")
+        exclude(group = "com.google.protobuf", module = "protobuf-java")
+        exclude(group = "commons-logging", module = "commons-logging")
     }
 
 

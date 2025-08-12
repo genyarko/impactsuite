@@ -12,7 +12,7 @@ import com.example.mygemma3n.data.GeminiApiConfig
 import com.example.mygemma3n.domain.repository.SettingsRepository
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import com.example.mygemma3n.feature.caption.SpeechRecognitionService
+import com.example.mygemma3n.data.SpeechRecognitionService
 import com.example.mygemma3n.service.AudioCaptureService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext

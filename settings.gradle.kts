@@ -33,8 +33,3 @@ include(":feature_plant")
 include(":feature_crisis")
 include(":common_ui")
 include(":common_utils")
-
-
-
-
-include(":gemma3n_assetpack")
