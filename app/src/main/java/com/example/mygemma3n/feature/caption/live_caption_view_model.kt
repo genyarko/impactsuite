@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mygemma3n.data.ChatRepository
+import com.example.mygemma3n.data.SpeechRecognitionService
 import com.example.mygemma3n.data.UnifiedGemmaService
 import com.example.mygemma3n.data.GeminiApiService
 import com.example.mygemma3n.data.GeminiApiConfig

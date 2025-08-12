@@ -4,19 +4,11 @@
     <include domain="sharedpref" path="."/>
 
     <!-- Include databases -->
-    <include domain="database" path="vector_database"/>
-    <include domain="database" path="emergency_database"/>
-    <include domain="database" path="cbt_database"/>
-    <include domain="database" path="plant_database"/>
-    <include domain="database" path="quiz_database"/>
+    <include domain="database" path="."/>
 
-    <!-- Exclude large model files -->
+    <!-- Include files but exclude large model files and temporary files -->
+    <include domain="file" path="."/>
     <exclude domain="file" path="models/"/>
-
-    <!-- Exclude cache -->
-    <exclude domain="cache" path="."/>
-
-    <!-- Exclude temporary files -->
     <exclude domain="file" path="temp/"/>
     <exclude domain="file" path="downloads/"/>
 </full-backup-content>

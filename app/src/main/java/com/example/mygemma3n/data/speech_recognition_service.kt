@@ -1,4 +1,4 @@
-package com.example.mygemma3n.feature.caption
+package com.example.mygemma3n.data
 
 import android.content.Context
 import com.google.api.gax.core.FixedCredentialsProvider
@@ -19,6 +19,7 @@ import java.io.ByteArrayInputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 import com.example.mygemma3n.config.ApiConfiguration
+import com.example.mygemma3n.feature.caption.AudioUtils
 
 private val okHttpClient = OkHttpClient()
 
@@ -507,5 +508,11 @@ class SpeechRecognitionService @Inject constructor(
             confidence = 0f,
             language = languageCode
         )
+    }
+
+    fun cleanup() {
+        speechClient?.close()
+        speechClient = null
+        isInitialized = false
     }
 }

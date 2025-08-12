@@ -32,8 +32,8 @@ import com.example.mygemma3n.data.GeminiApiService
 import com.example.mygemma3n.data.UnifiedGemmaService
 import com.example.mygemma3n.data.repository.TokenUsageRepository
 import com.example.mygemma3n.data.local.entities.TokenUsageSummary
-import com.example.mygemma3n.feature.caption.SpeechRecognitionService
 import com.example.mygemma3n.data.GeminiApiConfig
+import com.example.mygemma3n.data.SpeechRecognitionService
 import com.example.mygemma3n.ui.components.ModelDownloadViewModel
 import java.text.NumberFormat
 import java.util.*
@@ -239,11 +239,12 @@ class MainActivity : ComponentActivity() {
         return@withContext try {
             val assets = assets.list("models")?.toSet().orEmpty()
             
-            // Universal Sentence Encoder should always be in assets
-            val requiredInAssets = "universal_sentence_encoder.tflite"
-            if (requiredInAssets !in assets) {
-                Timber.e("Required embedding model not found in assets: $requiredInAssets")
-                return@withContext false
+            // Universal Sentence Encoder can be downloaded on-demand for size optimization
+            val embeddingModel = "universal_sentence_encoder.tflite"
+            if (embeddingModel !in assets) {
+                Timber.d("Universal Sentence Encoder not in assets - will download on-demand when needed")
+            } else {
+                Timber.d("Universal Sentence Encoder found in assets")
             }
             
             // Check if any Gemma model is available in assets (optional)
@@ -261,7 +262,7 @@ class MainActivity : ComponentActivity() {
                 Timber.d("No Gemma model in assets - will need to download")
             }
             
-            // Return true if embedding model is available (Gemma download handled separately)
+            // Continue initialization - embedding model can be downloaded on-demand
             true
         } catch (e: Exception) {
             Timber.e(e, "Failed to check assets models")

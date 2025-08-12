@@ -8,10 +8,9 @@
         <include domain="database" path="."/>
         <exclude domain="database" path="cache.db"/>
 
-        <!-- Exclude models (too large) -->
+        <!-- Include files but exclude models and temp files -->
+        <include domain="file" path="."/>
         <exclude domain="file" path="models/"/>
-
-        <!-- Exclude temporary files -->
         <exclude domain="file" path="cache/"/>
         <exclude domain="file" path="temp/"/>
     </cloud-backup>

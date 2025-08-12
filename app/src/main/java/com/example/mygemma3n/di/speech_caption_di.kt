@@ -1,7 +1,7 @@
 package com.example.mygemma3n.di
 
 
-import com.example.mygemma3n.feature.caption.SpeechRecognitionService
+import com.example.mygemma3n.data.SpeechRecognitionService
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
