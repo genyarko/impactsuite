@@ -600,7 +600,7 @@ private fun EnhancedChatInputArea(
                                             Text(
                                                 text = when {
                                                     isRecording -> "Recording... Speak now"
-                                                    else -> "Chat with AI or type commands below..."
+                                                    else -> "Chat with AI or type command below..."
                                                 },
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                                 style = MaterialTheme.typography.bodyLarge

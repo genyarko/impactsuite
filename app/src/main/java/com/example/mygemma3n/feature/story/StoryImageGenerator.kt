@@ -46,7 +46,7 @@ class StoryImageGenerator @Inject constructor(
             
             val response = if (usingOpenAI) {
                 Timber.d("Using OpenAI for image script generation")
-                openAIService.generateStoryContent(prompt, maxTokens = 6000, temperature = 0.7f)
+                openAIService.generateStoryContent(prompt, maxTokens = 6000, temperature = 1.0f)
             } else {
                 Timber.d("Using Gemini for image script generation")
                 require(geminiApiService.isInitialized()) { "GeminiApiService not initialized" }

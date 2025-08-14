@@ -41,12 +41,13 @@ class OnlineStoryGenerator @Inject constructor(
         onPageGenerated: (Int, Int) -> Unit = { _, _ -> } // Callback for progress updates
     ): Story? = withContext(Dispatchers.IO) {
         
+        val targetPageCount = request.exactPageCount ?: when (request.length) {
+            StoryLength.SHORT -> 5
+            StoryLength.MEDIUM -> 10
+            StoryLength.LONG -> 20
+        }
+        
         return@withContext try {
-            val targetPageCount = request.exactPageCount ?: when (request.length) {
-                StoryLength.SHORT -> 5
-                StoryLength.MEDIUM -> 10
-                StoryLength.LONG -> 20
-            }
             
             val usingOpenAI = shouldUseOpenAI()
             val prompt = if (usingOpenAI) {
@@ -57,7 +58,7 @@ class OnlineStoryGenerator @Inject constructor(
             
             withTimeoutOrNull(180_000) { // 180 second timeout for entire story (allows time for image generation)
                 val response = if (usingOpenAI) {
-                    openAIService.generateStoryContent(prompt, maxTokens = 6000, temperature = 0.8f)
+                    openAIService.generateStoryContent(prompt, maxTokens = 6000, temperature = 1.0f)
                 } else {
                     require(geminiApiService.isInitialized()) { "GeminiApiService not initialized" }
                     geminiApiService.generateTextComplete(prompt, "story")
@@ -86,8 +87,8 @@ class OnlineStoryGenerator @Inject constructor(
                 finalStory
             }
         } catch (e: Exception) {
-            Timber.e(e, "Failed to generate story online")
-            null
+            Timber.e(e, "Failed to generate story online, creating fallback story")
+            createFallbackStory(request, targetPageCount)
         }
     }
 

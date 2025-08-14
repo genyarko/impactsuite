@@ -65,11 +65,13 @@ class StoryViewModel @Inject constructor(
             try {
                 _state.value = _state.value.copy(isLoading = true)
                 
-                val stories = storyRepository.getAllStories().first()
-                _state.value = _state.value.copy(
-                    allStories = stories,
-                    isLoading = false
-                )
+                // Observe the stories flow for automatic updates
+                storyRepository.getAllStories().collect { stories ->
+                    _state.value = _state.value.copy(
+                        allStories = stories,
+                        isLoading = false
+                    )
+                }
             } catch (e: CancellationException) {
                 // Silently handle cancellation - this is expected when scope is cancelled
                 throw e // Re-throw to properly cancel the operation
@@ -284,6 +286,8 @@ class StoryViewModel @Inject constructor(
                     isCompleted = true,
                     completedAt = System.currentTimeMillis()
                 )
+                
+                Timber.d("Story completed: ${updatedStory.title} (ID: ${updatedStory.id})")
                 _state.value = _state.value.copy(currentStory = updatedStory)
                 
                 // Update reading progress for completing a story
@@ -458,6 +462,7 @@ class StoryViewModel @Inject constructor(
                     if (newBadgeCount > previousBadgeCount) {
                         val newBadge = updatedStats.unlockedBadges.maxByOrNull { it.unlockedAt ?: 0 }
                         if (newBadge != null) {
+                            Timber.d("New badge unlocked: ${newBadge.name}")
                             showBadgeNotification(newBadge)
                         }
                     }
