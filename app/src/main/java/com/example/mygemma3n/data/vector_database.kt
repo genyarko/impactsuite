@@ -33,8 +33,10 @@ import com.example.mygemma3n.data.local.entities.TokenUsageEntity
 import com.example.mygemma3n.data.local.TokenUsageDao
 import com.example.mygemma3n.data.local.entities.UserQuotaEntity
 import com.example.mygemma3n.data.local.entities.PricingConfigEntity
+import com.example.mygemma3n.data.local.entities.SpendingLimitEntity
 import com.example.mygemma3n.data.local.UserQuotaDao
 import com.example.mygemma3n.data.local.PricingConfigDao
+import com.example.mygemma3n.data.local.SpendingLimitDao
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -138,9 +140,10 @@ interface VectorDao {
         AchievementBadgeEntity::class,
         TokenUsageEntity::class,
         UserQuotaEntity::class,
-        PricingConfigEntity::class
+        PricingConfigEntity::class,
+        SpendingLimitEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 
 )
@@ -158,6 +161,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun tokenUsageDao(): TokenUsageDao
     abstract fun userQuotaDao(): UserQuotaDao
     abstract fun pricingConfigDao(): PricingConfigDao
+    abstract fun spendingLimitDao(): SpendingLimitDao
 }
 
 

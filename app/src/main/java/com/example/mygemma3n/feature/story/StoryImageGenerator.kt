@@ -4,8 +4,11 @@ import android.content.Context
 import com.example.mygemma3n.data.GeminiApiService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.first
 import timber.log.Timber
 import java.io.File
+import android.util.Base64
 import javax.inject.Inject
 import javax.inject.Singleton
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -18,19 +21,38 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 @Singleton
 class StoryImageGenerator @Inject constructor(
     private val geminiApiService: GeminiApiService,
+    private val openAIService: com.example.mygemma3n.feature.chat.OpenAIChatService,
+    private val settingsRepository: com.example.mygemma3n.domain.repository.SettingsRepository,
     @ApplicationContext private val context: Context
 ) {
+
+    private suspend fun shouldUseOpenAI(): Boolean {
+        return try {
+            val modelProvider = settingsRepository.modelProviderFlow.first()
+            modelProvider == "openai" && openAIService.isInitialized()
+        } catch (e: Exception) {
+            false
+        }
+    }
 
     /**
      * Requests a set of visual descriptions for each page in the provided [story].
      * Returns a single string containing all page descriptions, or null if
      * generation fails. The call runs on an IO dispatcher.
      */
-    suspend fun generateImageScript(story: Story): String? = withContext(Dispatchers.IO) {
+    suspend fun generateImageScript(story: Story, usingOpenAI: Boolean = false): String? = withContext(Dispatchers.IO) {
         try {
-            require(geminiApiService.isInitialized()) { "GeminiApiService not initialized" }
             val prompt = createImageScriptPrompt(story)
-            val response = geminiApiService.generateTextComplete(prompt, "story")
+            
+            val response = if (usingOpenAI) {
+                Timber.d("Using OpenAI for image script generation")
+                openAIService.generateStoryContent(prompt, maxTokens = 6000, temperature = 0.7f)
+            } else {
+                Timber.d("Using Gemini for image script generation")
+                require(geminiApiService.isInitialized()) { "GeminiApiService not initialized" }
+                geminiApiService.generateTextComplete(prompt, "story")
+            }
+            
             Timber.d("Generated Image Script Response: $response")
             if (response.isNotBlank()) response.trim() else {
                 Timber.e("Image script response was blank.")
@@ -131,11 +153,47 @@ class StoryImageGenerator @Inject constructor(
      * pointing to a temporary PNG on disk. The file is created in the app's
      * cache directory so image loaders like Coil can access it.
      */
-    private suspend fun createRealImageUrl(page: Int, desc: String): String = withContext(Dispatchers.IO) {
-        val bytes = geminiApiService.generateImageBytes(desc)
+    private suspend fun createRealImageUrl(page: Int, desc: String, usingOpenAI: Boolean = false): String = withContext(Dispatchers.IO) {
+        val bytes = if (usingOpenAI) {
+            generateImageWithDALLE(desc)
+        } else {
+            geminiApiService.generateImageBytes(desc)
+        }
+        
         val file = File.createTempFile("story_page_${page}_", ".png", context.cacheDir)
         file.writeBytes(bytes)
         file.toURI().toString()
+    }
+
+    /**
+     * Generates image bytes using DALL-E API with retry logic
+     */
+    private suspend fun generateImageWithDALLE(description: String): ByteArray {
+        val maxRetries = 2
+        var lastException: Exception? = null
+        
+        repeat(maxRetries) { attempt ->
+            try {
+                val imagePrompt = "Children's book illustration: $description. Style: colorful, friendly, and age-appropriate artwork suitable for children's storybooks."
+                Timber.d("DALL-E attempt ${attempt + 1}/$maxRetries for image generation")
+                
+                return openAIService.generateImageWithDALLE(
+                    prompt = imagePrompt,
+                    size = "1024x1024",
+                    quality = "standard",
+                    style = "vivid"
+                )
+            } catch (e: Exception) {
+                lastException = e
+                Timber.w(e, "DALL-E attempt ${attempt + 1} failed, retrying...")
+                if (attempt < maxRetries - 1) {
+                    kotlinx.coroutines.delay(2000) // Wait 2 seconds before retry
+                }
+            }
+        }
+        
+        Timber.e(lastException, "Failed to generate image with DALL-E after $maxRetries attempts")
+        throw lastException ?: Exception("Unknown error in DALL-E image generation")
     }
 
     /**
@@ -146,26 +204,40 @@ class StoryImageGenerator @Inject constructor(
      * description are successfully produced will have their [StoryPage.imageUrl]
      * and [StoryPage.imageDescription] fields populated.
      */
-    suspend fun generateImagesForStory(story: Story): Story? = withContext(Dispatchers.IO) {
+    suspend fun generateImagesForStory(story: Story, usingOpenAI: Boolean = false): Story? = withContext(Dispatchers.IO) {
         if (!shouldGenerateImages(story.targetAudience)) {
             return@withContext story.copy(hasImages = false)
         }
-        val imageScript = generateImageScript(story)
+        val imageScript = generateImageScript(story, usingOpenAI)
         if (imageScript.isNullOrBlank()) {
             return@withContext story.copy(hasImages = false)
         }
         val descriptions = parseImageScript(imageScript, story.totalPages)
+        Timber.d("Parsed ${descriptions.size} image descriptions from script")
+        
         val updatedPages = story.pages.mapIndexed { index, page ->
             val desc = descriptions.getOrNull(index)
             if (desc != null) {
                 try {
-                    val uri = createRealImageUrl(index + 1, desc)
-                    page.copy(imageUrl = uri, imageDescription = desc)
+                    Timber.d("Generating image for page ${index + 1} using ${if (usingOpenAI) "DALL-E" else "Gemini"}")
+                    // Add individual timeout for each image generation
+                    val uri = withTimeoutOrNull(60_000) { // 60 second timeout per image
+                        createRealImageUrl(index + 1, desc, usingOpenAI)
+                    }
+                    
+                    if (uri != null) {
+                        Timber.d("Successfully generated image for page ${index + 1}: $uri")
+                        page.copy(imageUrl = uri, imageDescription = desc)
+                    } else {
+                        Timber.w("Image generation timed out for page ${index + 1}, continuing without image")
+                        page.copy(imageDescription = desc) // Keep description but no image
+                    }
                 } catch (e: Exception) {
                     Timber.e(e, "Failed to generate image for page ${index + 1}")
-                    page
+                    page.copy(imageDescription = desc) // Keep description but no image
                 }
             } else {
+                Timber.w("No description found for page ${index + 1}")
                 page
             }
         }
@@ -185,13 +257,50 @@ class StoryImageGenerator @Inject constructor(
      */
     private fun parseImageScript(script: String, totalPages: Int): List<String> {
         val results = mutableListOf<String>()
-        val regex = Regex("Page\\s+(\\d+):\\s+(.*?)(?=(Page\\s+\\d+:)|$)", RegexOption.DOT_MATCHES_ALL)
-        regex.findAll(script).forEach { matchResult ->
-            val description = matchResult.groups[2]?.value?.trim()
-            if (!description.isNullOrBlank()) {
-                results.add(description)
+        
+        // Try to parse as JSON first (OpenAI format)
+        if (script.trim().startsWith("{") || script.contains("\"Page")) {
+            try {
+                Timber.d("Attempting to parse image script as JSON")
+                val cleanScript = script.replace("```json", "").replace("```", "").trim()
+                val jsonStart = cleanScript.indexOf('{')
+                val jsonEnd = cleanScript.lastIndexOf('}')
+                
+                if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
+                    val jsonString = cleanScript.substring(jsonStart, jsonEnd + 1)
+                    Timber.d("Extracted JSON string length: ${jsonString.length}")
+                    val gson = com.google.gson.Gson()
+                    @Suppress("UNCHECKED_CAST")
+                    val jsonData = gson.fromJson(jsonString, Map::class.java) as Map<String, Any>
+                    
+                    Timber.d("Parsed JSON with ${jsonData.size} keys: ${jsonData.keys}")
+                    
+                    // Extract descriptions in order
+                    for (i in 1..totalPages) {
+                        val pageKey = "Page $i"
+                        val description = jsonData[pageKey]?.toString()?.trim()
+                        if (!description.isNullOrBlank()) {
+                            results.add(description)
+                            Timber.d("Added description for $pageKey: ${description.take(50)}...")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.w(e, "Failed to parse JSON image script, falling back to regex parsing")
             }
         }
+        
+        // Fallback to regex parsing (Gemini format)
+        if (results.isEmpty()) {
+            val regex = Regex("Page\\s+(\\d+):\\s+(.*?)(?=(Page\\s+\\d+:)|$)", RegexOption.DOT_MATCHES_ALL)
+            regex.findAll(script).forEach { matchResult ->
+                val description = matchResult.groups[2]?.value?.trim()
+                if (!description.isNullOrBlank()) {
+                    results.add(description)
+                }
+            }
+        }
+        
         return results.take(totalPages)
     }
 }

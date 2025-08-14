@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Error
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -35,6 +36,7 @@ import com.example.mygemma3n.data.local.entities.TokenUsageSummary
 import com.example.mygemma3n.data.GeminiApiConfig
 import com.example.mygemma3n.data.SpeechRecognitionService
 import com.example.mygemma3n.ui.components.ModelDownloadViewModel
+import com.example.mygemma3n.service.CostCalculationService
 import java.text.NumberFormat
 import java.util.*
 import dagger.hilt.android.AndroidEntryPoint
@@ -71,6 +73,9 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var unifiedGemmaService: UnifiedGemmaService
     @Inject lateinit var modelDownloadService: ModelDownloadService
     @Inject lateinit var speechRecognitionService: SpeechRecognitionService
+    @Inject lateinit var costCalculationService: CostCalculationService
+    @Inject lateinit var spendingLimitService: com.example.mygemma3n.service.SpendingLimitService
+    @Inject lateinit var databaseCleanupService: com.example.mygemma3n.service.DatabaseCleanupService
 
     // Function to manually re-initialize speech service if needed
     fun reinitializeSpeechService() {
@@ -172,12 +177,22 @@ class MainActivity : ComponentActivity() {
                 initializeGemmaModel()
             }
 
-            // Step 4: Wait for both to complete
+            // Step 4: Initialize pricing configuration and spending limits
+            updateInitState("Configuring pricing...", 0.85f)
+            val pricingDeferred = lifecycleScope.async {
+                costCalculationService.initializeDefaultPricing()
+                spendingLimitService.initializeDefaultLimits()
+                databaseCleanupService.schedulePeriodicCleanup() // Currently disabled to preserve billing data
+                Timber.d("Pricing configuration, spending limits, and cleanup scheduling initialized")
+            }
+            
+            // Step 5: Wait for all to complete
             updateInitState("Finalizing setup...", 0.9f)
             apiKeyDeferred.await()
             gemmaDeferred.await()
+            pricingDeferred.await()
 
-            // Step 5: Complete
+            // Step 6: Complete
             updateInitState("Ready!", 1.0f)
             delay(500) // Show complete state briefly
 
@@ -467,13 +482,22 @@ fun TokenUsageSection(tokenUsageRepository: TokenUsageRepository) {
     var selectedPeriod by remember { mutableStateOf("Today") }
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(Unit) {
+    var isCalculatingCosts by remember { mutableStateOf(false) }
+    var calculatedTodayCost by remember { mutableFloatStateOf(0f) }
+    var calculatedMonthlyCost by remember { mutableFloatStateOf(0f) }
+    
+    val coroutineScope = rememberCoroutineScope()
+    
+    // Load token usage data only
+    LaunchedEffect(selectedPeriod) {
         try {
-            Timber.d("TokenUsageSection: Loading token usage data...")
+            Timber.d("TokenUsageSection: Loading token usage data for $selectedPeriod")
+            isLoading = true
+            errorMessage = null
             val today = tokenUsageRepository.getTodayTokenUsage()
             val monthly = tokenUsageRepository.getMonthlyTokenUsage()
-            Timber.d("TokenUsageSection: Today tokens: ${today?.totalTokens ?: 0}, Monthly tokens: ${monthly?.totalTokens ?: 0}")
+            Timber.d("TokenUsageSection: Today usage - tokens: ${today?.totalTokens ?: 0}")
+            Timber.d("TokenUsageSection: Monthly usage - tokens: ${monthly?.totalTokens ?: 0}")
             todayUsage = today
             monthlyUsage = monthly
             isLoading = false
@@ -482,6 +506,30 @@ fun TokenUsageSection(tokenUsageRepository: TokenUsageRepository) {
             errorMessage = e.message
             isLoading = false
         }
+    }
+    
+    // Manual cost calculation function
+    val calculateCosts: () -> Unit = {
+        coroutineScope.launch {
+            try {
+                isCalculatingCosts = true
+                Timber.d("Manual cost calculation initiated")
+                val todayCost = tokenUsageRepository.calculateCostsForSummary(
+                    java.time.LocalDateTime.now().toLocalDate().atStartOfDay()
+                )
+                val monthlyCost = tokenUsageRepository.calculateCostsForSummary(
+                    java.time.LocalDateTime.now().toLocalDate().withDayOfMonth(1).atStartOfDay()
+                )
+                calculatedTodayCost = todayCost.toFloat()
+                calculatedMonthlyCost = monthlyCost.toFloat()
+                Timber.d("Calculated costs - Today: $$todayCost, Monthly: $$monthlyCost")
+                isCalculatingCosts = false
+            } catch (e: Exception) {
+                Timber.e(e, "Error calculating costs")
+                isCalculatingCosts = false
+            }
+        }
+        Unit
     }
 
     Card(
@@ -605,6 +653,64 @@ fun TokenUsageSection(tokenUsageRepository: TokenUsageRepository) {
                                             color = MaterialTheme.colorScheme.primary
                                         )
                                     }
+                                }
+                                
+                                // Manual cost calculation
+                                Spacer(modifier = Modifier.height(8.dp))
+                                
+                                val currentCost = if (selectedPeriod == "Today") calculatedTodayCost else calculatedMonthlyCost
+                                
+                                if (currentCost > 0.0f) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Estimated Cost",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Text(
+                                            text = "$${String.format("%.4f", currentCost)}",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.secondary
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                }
+                                
+                                Button(
+                                    onClick = calculateCosts,
+                                    enabled = !isLoading && !isCalculatingCosts,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    if (isCalculatingCosts) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.Center
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(16.dp),
+                                                strokeWidth = 2.dp
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("Calculating...")
+                                        }
+                                    } else {
+                                        Text("Calculate Estimated Costs")
+                                    }
+                                }
+                                
+                                if (currentCost > 0.0f || isCalculatingCosts) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Based on current OpenAI and Gemini API pricing. On-device models are free.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                    )
                                 }
                                 
                                 if (summary.serviceBreakdown.isNotEmpty()) {

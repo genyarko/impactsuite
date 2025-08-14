@@ -21,6 +21,10 @@ import com.example.mygemma3n.data.local.dao.SubjectDao
 import com.example.mygemma3n.data.repository.TokenUsageRepository
 import com.example.mygemma3n.service.QuotaService
 import com.example.mygemma3n.service.CostCalculationService
+import com.example.mygemma3n.service.SpendingLimitService
+import com.example.mygemma3n.service.DatabaseCleanupService
+import com.example.mygemma3n.util.CostPredictionUtils
+import com.example.mygemma3n.util.ApiKeyValidator
 import com.example.mygemma3n.data.local.UserQuotaDao
 import com.example.mygemma3n.data.local.PricingConfigDao
 import com.example.mygemma3n.dataStore
@@ -37,6 +41,8 @@ import com.example.mygemma3n.feature.quiz.EnhancedPromptManager
 import com.example.mygemma3n.feature.quiz.OnlineQuizGenerator
 import com.example.mygemma3n.feature.quiz.PerformanceOptimizedQuizGenerator
 import com.example.mygemma3n.feature.chat.OnlineChatService
+import com.example.mygemma3n.feature.chat.OpenAIChatService
+import com.example.mygemma3n.domain.repository.SettingsRepository
 import com.example.mygemma3n.feature.quiz.QuizDatabase
 import com.example.mygemma3n.feature.quiz.QuizRepository
 import com.example.mygemma3n.feature.story.StoryRepository
@@ -245,8 +251,9 @@ object AppModule {
     @Provides
     @Singleton
     fun provideTokenUsageRepository(
-        tokenUsageDao: TokenUsageDao
-    ): TokenUsageRepository = TokenUsageRepository(tokenUsageDao)
+        tokenUsageDao: TokenUsageDao,
+        costCalculationService: CostCalculationService
+    ): TokenUsageRepository = TokenUsageRepository(tokenUsageDao, costCalculationService)
 
     @Provides
     @Singleton
@@ -403,17 +410,21 @@ object AppModule {
     @Singleton
     fun provideStoryImageGenerator(
         geminiApiService: GeminiApiService,
+        openAIService: OpenAIChatService,
+        settingsRepository: SettingsRepository,
         @ApplicationContext context: Context
-    ): StoryImageGenerator = StoryImageGenerator(geminiApiService, context)
+    ): StoryImageGenerator = StoryImageGenerator(geminiApiService, openAIService, settingsRepository, context)
 
     @Provides
     @Singleton
     fun provideOnlineStoryGenerator(
         geminiApiService: GeminiApiService,
+        openAIService: OpenAIChatService,
+        settingsRepository: SettingsRepository,
         gson: Gson,
         storyImageGenerator: StoryImageGenerator,
         difficultyAdapter: StoryDifficultyAdapter
-    ): OnlineStoryGenerator = OnlineStoryGenerator(geminiApiService, gson, storyImageGenerator, difficultyAdapter)
+    ): OnlineStoryGenerator = OnlineStoryGenerator(geminiApiService, openAIService, settingsRepository, gson, storyImageGenerator, difficultyAdapter)
 
     @Provides
     @Singleton
@@ -510,6 +521,35 @@ object AppModule {
     fun provideCostCalculationService(
         pricingConfigDao: PricingConfigDao
     ): CostCalculationService = CostCalculationService(pricingConfigDao)
+
+    @Provides
+    @Singleton
+    fun provideSpendingLimitDao(database: AppDatabase): SpendingLimitDao =
+        database.spendingLimitDao()
+
+    @Provides
+    @Singleton
+    fun provideSpendingLimitService(
+        spendingLimitDao: SpendingLimitDao,
+        tokenUsageRepository: TokenUsageRepository
+    ): SpendingLimitService = SpendingLimitService(spendingLimitDao, tokenUsageRepository)
+
+    @Provides
+    @Singleton
+    fun provideCostPredictionUtils(
+        costCalculationService: CostCalculationService
+    ): CostPredictionUtils = CostPredictionUtils(costCalculationService)
+
+    @Provides
+    @Singleton
+    fun provideDatabaseCleanupService(
+        tokenUsageRepository: TokenUsageRepository,
+        @ApplicationContext context: Context
+    ): DatabaseCleanupService = DatabaseCleanupService(tokenUsageRepository, context)
+
+    @Provides
+    @Singleton
+    fun provideApiKeyValidator(): ApiKeyValidator = ApiKeyValidator()
 
     @Provides
     @Singleton

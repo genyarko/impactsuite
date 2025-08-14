@@ -117,6 +117,29 @@ object GeminiPricingConfig {
         pricePerMillionTokens = 0.0 // Free for on-device
     )
     
+    // OpenAI GPT-5 mini pricing (as of January 2025)
+    val GPT_5_MINI_INPUT = PricingConfigEntity(
+        id = "gpt-5-mini_input",
+        modelName = "gpt-5-mini",
+        tokenType = TokenType.INPUT,
+        pricePerMillionTokens = 0.15 // $0.15 per 1M tokens
+    )
+    
+    val GPT_5_MINI_OUTPUT = PricingConfigEntity(
+        id = "gpt-5-mini_output",
+        modelName = "gpt-5-mini",
+        tokenType = TokenType.OUTPUT,
+        pricePerMillionTokens = 0.60 // $0.60 per 1M tokens
+    )
+    
+    // DALL-E 3 pricing (per image, not per token)
+    val DALLE_3_IMAGE = PricingConfigEntity(
+        id = "dall-e-3_output",
+        modelName = "dall-e-3",
+        tokenType = TokenType.OUTPUT,
+        pricePerMillionTokens = 40000.0 // $0.04 per image = $40 per 1M "images"
+    )
+    
     fun getAllDefaultPricing(): List<PricingConfigEntity> {
         return listOf(
             GEMINI_FLASH_INPUT,
@@ -129,7 +152,10 @@ object GeminiPricingConfig {
             GEMINI_LIVE_INPUT,
             GEMINI_LIVE_OUTPUT,
             GEMMA_3N_INPUT,
-            GEMMA_3N_OUTPUT
+            GEMMA_3N_OUTPUT,
+            GPT_5_MINI_INPUT,
+            GPT_5_MINI_OUTPUT,
+            DALLE_3_IMAGE
         )
     }
 }

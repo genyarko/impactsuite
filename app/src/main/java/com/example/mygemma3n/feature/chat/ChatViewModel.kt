@@ -43,6 +43,7 @@ class ChatViewModel @Inject constructor(
     private val speechService: SpeechRecognitionService,
     private val repo: ChatRepository,
     private val onlineChatService: OnlineChatService,
+    private val openAIChatService: OpenAIChatService,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -70,7 +71,7 @@ class ChatViewModel @Inject constructor(
     private suspend fun shouldUseOnlineService(): Boolean {
         return try {
             val useOnlineService = settingsRepository.useOnlineServiceFlow.first()
-            val hasApiKey = settingsRepository.apiKeyFlow.first().isNotBlank()
+            val hasApiKey = hasValidApiKey()
             val hasNetwork = hasNetworkConnection()
             
             useOnlineService && hasApiKey && hasNetwork
@@ -78,6 +79,18 @@ class ChatViewModel @Inject constructor(
             Timber.w(e, "Error checking service preference, defaulting to offline")
             false
         }
+    }
+
+    private suspend fun hasValidApiKey(): Boolean {
+        val modelProvider = settingsRepository.modelProviderFlow.first()
+        return when (modelProvider) {
+            "openai" -> openAIChatService.isInitialized()
+            else -> settingsRepository.apiKeyFlow.first().isNotBlank()
+        }
+    }
+
+    private suspend fun shouldUseOpenAI(): Boolean {
+        return settingsRepository.modelProviderFlow.first() == "openai"
     }
 
     private suspend fun initializeApiServiceIfNeeded() {
@@ -291,12 +304,21 @@ class ChatViewModel @Inject constructor(
                     try {
                         initializeApiServiceIfNeeded()
                         val conversationHistory = _uiState.value.conversation
-                        onlineChatService.generateChatResponseOnline(
-                            userMessage = text,
-                            conversationHistory = conversationHistory,
-                            maxTokens = 150,
-                            temperature = 0.7f
-                        )
+                        if (shouldUseOpenAI()) {
+                            openAIChatService.generateChatResponseOnline(
+                                userMessage = text,
+                                conversationHistory = conversationHistory,
+                                maxTokens = 2048,
+                                temperature = 0.7f
+                            )
+                        } else {
+                            onlineChatService.generateChatResponseOnline(
+                                userMessage = text,
+                                conversationHistory = conversationHistory,
+                                maxTokens = 2048,
+                                temperature = 0.7f
+                            )
+                        }
                     } catch (e: Exception) {
                         Timber.w(e, "Online chat generation failed, falling back to offline")
                         // Fallback to offline generation
@@ -359,11 +381,21 @@ class ChatViewModel @Inject constructor(
                         repo.addMessage(sessionId, streamingMsg)
                         
                         var fullResponse = ""
-                        onlineChatService.generateChatResponseStreamOnline(
-                            userMessage = text,
-                            conversationHistory = conversationHistory,
-                            temperature = 0.7f
-                        ).collect { chunk ->
+                        val streamFlow = if (shouldUseOpenAI()) {
+                            openAIChatService.generateChatResponseStreamOnline(
+                                userMessage = text,
+                                conversationHistory = conversationHistory,
+                                temperature = 0.7f
+                            )
+                        } else {
+                            onlineChatService.generateChatResponseStreamOnline(
+                                userMessage = text,
+                                conversationHistory = conversationHistory,
+                                temperature = 0.7f
+                            )
+                        }
+                        
+                        streamFlow.collect { chunk ->
                             fullResponse += chunk
                             // Update the last AI message with accumulated response
                             val updatedMsg = ChatMessage.AI(fullResponse, streamingMsg.timestamp)
@@ -400,10 +432,16 @@ class ChatViewModel @Inject constructor(
                     initializeApiServiceIfNeeded()
                     val lastMessage = _uiState.value.conversation.lastOrNull()
                     if (lastMessage is ChatMessage.AI) {
-                        val suggestions = onlineChatService.generateSmartReply(
-                            userMessage = lastMessage.content,
-                            conversationHistory = _uiState.value.conversation
-                        )
+                        val suggestions = if (shouldUseOpenAI()) {
+                            // For now, provide default suggestions for OpenAI
+                            // Could implement OpenAI smart reply generation later
+                            listOf("Tell me more", "That's interesting", "What else?")
+                        } else {
+                            onlineChatService.generateSmartReply(
+                                userMessage = lastMessage.content,
+                                conversationHistory = _uiState.value.conversation
+                            )
+                        }
                         // Update UI state with smart reply suggestions
                         _uiState.update { it.copy(smartReplies = suggestions) }
                     }

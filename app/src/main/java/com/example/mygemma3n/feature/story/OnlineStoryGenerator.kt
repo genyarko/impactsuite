@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.first
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -14,6 +15,8 @@ import javax.inject.Singleton
 @Singleton
 class OnlineStoryGenerator @Inject constructor(
     private val geminiApiService: GeminiApiService,
+    private val openAIService: com.example.mygemma3n.feature.chat.OpenAIChatService,
+    private val settingsRepository: com.example.mygemma3n.domain.repository.SettingsRepository,
     private val gson: Gson,
     private val storyImageGenerator: StoryImageGenerator,
     private val difficultyAdapter: StoryDifficultyAdapter
@@ -24,12 +27,19 @@ class OnlineStoryGenerator @Inject constructor(
         .setLenient()
         .create()
 
+    private suspend fun shouldUseOpenAI(): Boolean {
+        return try {
+            val modelProvider = settingsRepository.modelProviderFlow.first()
+            modelProvider == "openai" && openAIService.isInitialized()
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     suspend fun generateStoryOnline(
         request: StoryRequest,
         onPageGenerated: (Int, Int) -> Unit = { _, _ -> } // Callback for progress updates
     ): Story? = withContext(Dispatchers.IO) {
-        
-        require(geminiApiService.isInitialized()) { "GeminiApiService not initialized" }
         
         return@withContext try {
             val targetPageCount = request.exactPageCount ?: when (request.length) {
@@ -38,11 +48,22 @@ class OnlineStoryGenerator @Inject constructor(
                 StoryLength.LONG -> 20
             }
             
-            val prompt = createStoryPrompt(request, targetPageCount)
+            val usingOpenAI = shouldUseOpenAI()
+            val prompt = if (usingOpenAI) {
+                createOpenAIStoryPrompt(request, targetPageCount)
+            } else {
+                createStoryPrompt(request, targetPageCount)
+            }
             
-            withTimeoutOrNull(90_000) { // 90 second timeout for entire story
-                val response = geminiApiService.generateTextComplete(prompt, "story")
-                val story = parseStoryResponse(response, request, targetPageCount)
+            withTimeoutOrNull(180_000) { // 180 second timeout for entire story (allows time for image generation)
+                val response = if (usingOpenAI) {
+                    openAIService.generateStoryContent(prompt, maxTokens = 6000, temperature = 0.8f)
+                } else {
+                    require(geminiApiService.isInitialized()) { "GeminiApiService not initialized" }
+                    geminiApiService.generateTextComplete(prompt, "story")
+                }
+                
+                val story = parseStoryResponse(response, request, targetPageCount, usingOpenAI)
                 
                 // Generate images if story was created successfully
                 val finalStory = if (story != null) {
@@ -54,7 +75,7 @@ class OnlineStoryGenerator @Inject constructor(
                     
                     // Generate images for appropriate age groups
                     if (storyImageGenerator.shouldGenerateImages(story.targetAudience)) {
-                        storyImageGenerator.generateImagesForStory(story)
+                        storyImageGenerator.generateImagesForStory(story, usingOpenAI)
                     } else {
                         story
                     }
@@ -162,10 +183,114 @@ class OnlineStoryGenerator @Inject constructor(
         """.trimIndent()
     }
 
+    private fun createOpenAIStoryPrompt(request: StoryRequest, targetPageCount: Int): String {
+        val difficultySettings = difficultyAdapter.getDifficultySettings(request.targetAudience)
+        
+        val audienceContext = when (request.targetAudience) {
+            StoryTarget.KINDERGARTEN -> "ages 3-5, simple vocabulary, very short sentences, lots of repetition"
+            StoryTarget.ELEMENTARY -> "ages 6-10, basic vocabulary, clear simple sentences, engaging plots"
+            StoryTarget.MIDDLE_SCHOOL -> "ages 11-13, intermediate vocabulary, more complex themes"
+            StoryTarget.HIGH_SCHOOL -> "ages 14-18, advanced vocabulary, sophisticated themes"
+            StoryTarget.ADULT -> "adult audience, sophisticated language and complex themes"
+        }
+        
+        val genreContext = when (request.genre) {
+            StoryGenre.ADVENTURE -> "exciting journey with challenges, discoveries, and heroic moments"
+            StoryGenre.FANTASY -> "magical elements, mythical creatures, enchanted worlds, wonder and magic"
+            StoryGenre.MYSTERY -> "puzzles to solve, clues to uncover, suspenseful atmosphere, detective work"
+            StoryGenre.SCIENCE_FICTION -> "futuristic technology, space exploration, scientific concepts, innovation"
+            StoryGenre.HISTORICAL -> "accurate historical setting, period details, cultural authenticity"
+            StoryGenre.FRIENDSHIP -> "relationships, loyalty, cooperation, emotional connections"
+            StoryGenre.FAMILY -> "family bonds, love, support, togetherness, family values"
+            StoryGenre.EDUCATIONAL -> "learning opportunities, factual information, educational content"
+            StoryGenre.FAIRYTALE -> "classic fairytale structure, moral lessons, magical elements, happy endings"
+            StoryGenre.COMEDY -> "humorous situations, funny characters, light-hearted tone, laughter"
+        }
+
+        val charactersText = if (request.characters.isNotEmpty()) {
+            "Include these characters: ${request.characters.joinToString(", ")}"
+        } else {
+            "Create memorable, relatable characters appropriate for the target audience"
+        }
+
+        val settingText = if (request.setting.isNotEmpty()) {
+            "Setting: ${request.setting}"
+        } else {
+            "Create an engaging setting that perfectly fits the ${request.genre.name.lowercase()} genre"
+        }
+
+        val themeText = if (request.theme.isNotEmpty()) {
+            "Central theme: ${request.theme}"
+        } else {
+            "Include positive, age-appropriate themes and life lessons"
+        }
+
+        val difficultyInstructions = buildDifficultyInstructions(difficultySettings)
+
+        return """
+        Create an engaging, high-quality ${request.genre.name.lowercase().replace('_', ' ')} story for ${request.targetAudience.name.lowercase().replace('_', ' ')} readers.
+
+        **STORY SPECIFICATIONS:**
+        - User's Creative Prompt: "${request.prompt}"
+        - Genre: ${request.genre.name} ($genreContext)
+        - Target Audience: ${request.targetAudience.name} ($audienceContext)
+        - Required Length: Exactly $targetPageCount pages
+        - $charactersText
+        - $settingText
+        - $themeText
+
+        **WRITING GUIDELINES:**
+        - Create compelling, age-appropriate content with strong narrative flow
+        - Each page should contain substantial, engaging content (not just a few sentences)
+        - Develop interesting characters with clear motivations and growth
+        - Use vivid, sensory descriptions to bring scenes to life
+        - Include meaningful dialogue that advances the story
+        - Ensure smooth transitions between pages with natural cliffhangers
+        - Build to a satisfying, emotionally resonant conclusion
+
+        **DIFFICULTY & LANGUAGE REQUIREMENTS:**
+        $difficultyInstructions
+
+        **CRITICAL FORMATTING REQUIREMENT:**
+        You MUST return your response as a properly formatted JSON object with this EXACT structure:
+
+        ```json
+        {
+          "title": "Creative, Engaging Story Title",
+          "pages": [
+            {
+              "pageNumber": 1,
+              "title": "Chapter 1 Title (optional but recommended)",
+              "content": "Rich, substantial content for page 1. This should be engaging, descriptive text that draws the reader in and establishes the story world, characters, and initial situation. Make this compelling and age-appropriate."
+            },
+            {
+              "pageNumber": 2,
+              "title": "Chapter 2 Title (optional but recommended)",
+              "content": "Continuing the story naturally from page 1. Develop the plot, characters, and conflict. Each page should feel complete but also connect seamlessly to the next."
+            }
+            // Continue this pattern for all $targetPageCount pages
+          ],
+          "characters": ["Main Character Name", "Supporting Character Name", "Other Characters"],
+          "setting": "Detailed description of the primary story setting and world"
+        }
+        ```
+
+        **IMPORTANT NOTES:**
+        - The JSON must be valid and parseable
+        - Each page should be substantial (appropriate for the target audience)
+        - Ensure the story has a clear beginning, middle, and end
+        - Make the content engaging and memorable
+        - Include appropriate themes and lessons for the age group
+
+        Create the complete $targetPageCount-page story now:
+        """.trimIndent()
+    }
+
     private fun parseStoryResponse(
         response: String,
         request: StoryRequest,
-        targetPageCount: Int
+        targetPageCount: Int,
+        usingOpenAI: Boolean = false
     ): Story? {
         return try {
             // Try multiple approaches to parse the response

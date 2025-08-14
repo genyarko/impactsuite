@@ -148,6 +148,7 @@ fun StoryScreen(
                         onNextPage = { viewModel.goToNextPage() },
                         onPreviousPage = { viewModel.goToPreviousPage() },
                         onGoToPage = { pageNumber -> viewModel.goToPage(pageNumber) },
+                        onCompleteStory = { viewModel.completeStory() },
                         onStartReadingAloud = { viewModel.startReadingAloud() },
                         onStopReadingAloud = { viewModel.stopReadingAloud() },
                         onToggleAutoReadAloud = { viewModel.toggleAutoReadAloud() }
@@ -696,6 +697,7 @@ fun StoryReadingScreen(
     onNextPage: () -> Unit,
     onPreviousPage: () -> Unit,
     onGoToPage: (Int) -> Unit,
+    onCompleteStory: () -> Unit,
     onStartReadingAloud: () -> Unit = {},
     onStopReadingAloud: () -> Unit = {},
     onToggleAutoReadAloud: () -> Unit = {}
@@ -753,6 +755,7 @@ fun StoryReadingScreen(
                 isReadingAloud = isReadingAloud,
                 onNextPage = onNextPage,
                 onPreviousPage = onPreviousPage,
+                onCompleteStory = onCompleteStory,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 16.dp)
@@ -853,7 +856,7 @@ fun StoryReadingScreen(
                         }
                     }
 
-                    // Next button
+                    // Next button or Completion button
                     if (currentPage < story.totalPages - 1) {
                         IconButton(
                             onClick = onNextPage,
@@ -868,6 +871,23 @@ fun StoryReadingScreen(
                                 Icons.AutoMirrored.Filled.ArrowForward, 
                                 contentDescription = "Next page",
                                 tint = MaterialTheme.colorScheme.onPrimary
+                            )
+                        }
+                    } else if (!story.isCompleted) {
+                        // Show completion button on the last page if story is not completed
+                        IconButton(
+                            onClick = onCompleteStory,
+                            modifier = Modifier
+                                .background(
+                                    MaterialTheme.colorScheme.secondary,
+                                    CircleShape
+                                )
+                                .size(48.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.CheckCircle, 
+                                contentDescription = "Complete story",
+                                tint = MaterialTheme.colorScheme.onSecondary
                             )
                         }
                     } else {
@@ -900,6 +920,7 @@ fun StoryPageContent(
     isReadingAloud: Boolean,
     onNextPage: () -> Unit,
     onPreviousPage: () -> Unit,
+    onCompleteStory: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val currentStoryPage = story.pages.getOrNull(pageIndex)

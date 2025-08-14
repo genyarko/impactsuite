@@ -33,6 +33,7 @@ class CBTCoachViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val gemmaService: UnifiedGemmaService,
     private val geminiApiService: GeminiApiService,
+    private val openAIService: com.example.mygemma3n.feature.chat.OpenAIChatService,
     private val settingsRepository: SettingsRepository,
     private val emotionDetector: EmotionDetector,
     val cbtTechniques: CBTTechniques,
@@ -65,12 +66,30 @@ class CBTCoachViewModel @Inject constructor(
     private suspend fun shouldUseOnlineService(): Boolean {
         return try {
             val useOnlineService = settingsRepository.useOnlineServiceFlow.first()
-            val hasApiKey = settingsRepository.apiKeyFlow.first().isNotBlank()
             val hasNetwork = hasNetworkConnection()
             
-            useOnlineService && hasApiKey && hasNetwork
+            if (!useOnlineService || !hasNetwork) return false
+            
+            // Check if any API key is available
+            val modelProvider = settingsRepository.modelProviderFlow.first()
+            val hasValidApiKey = when (modelProvider) {
+                "openai" -> openAIService.isInitialized()
+                "gemini" -> settingsRepository.apiKeyFlow.first().isNotBlank()
+                else -> settingsRepository.apiKeyFlow.first().isNotBlank() // Default to Gemini
+            }
+            
+            hasValidApiKey
         } catch (e: Exception) {
             Timber.w(e, "Error checking service preference, defaulting to offline")
+            false
+        }
+    }
+
+    private suspend fun shouldUseOpenAI(): Boolean {
+        return try {
+            val modelProvider = settingsRepository.modelProviderFlow.first()
+            modelProvider == "openai" && openAIService.isInitialized()
+        } catch (e: Exception) {
             false
         }
     }
@@ -166,8 +185,13 @@ Let's explore what you're experiencing together. Can you tell me more about what
                     if (shouldUseOnlineService()) {
                         try {
                             Timber.d("Preloading API service for CBT Coach")
-                            initializeApiServiceIfNeeded()
-                            warmUpApiService()
+                            if (shouldUseOpenAI()) {
+                                // OpenAI service is already initialized if the API key is valid
+                                Timber.d("Using OpenAI for CBT responses")
+                            } else {
+                                initializeApiServiceIfNeeded()
+                                warmUpApiService()
+                            }
                         } catch (e: Exception) {
                             Timber.w(e, "Failed to preload API service for CBT Coach")
                         }
@@ -448,14 +472,65 @@ Let's explore what you're experiencing together. Can you tell me more about what
     private suspend fun generateOptimizedCBTResponse(userInput: String): String {
         return if (shouldUseOnlineService()) {
             try {
-                initializeApiServiceIfNeeded()
-                generateCBTResponseOnline(userInput)
+                if (shouldUseOpenAI()) {
+                    generateCBTResponseWithOpenAI(userInput)
+                } else {
+                    initializeApiServiceIfNeeded()
+                    generateCBTResponseOnline(userInput)
+                }
             } catch (e: Exception) {
                 Timber.w(e, "Online CBT response failed, falling back to offline")
                 generateCBTResponseOffline(userInput)
             }
         } else {
             generateCBTResponseOffline(userInput)
+        }
+    }
+
+    private suspend fun generateCBTResponseWithOpenAI(userInput: String): String {
+        // Update service indicator
+        _sessionState.update { it.copy(isUsingOnlineService = true) }
+
+        try {
+            // Build conversation history with CBT-specific system prompt
+            val chatHistory = convertToChatMessages(_sessionState.value.conversation)
+            
+            // Create custom system message for CBT context
+            val systemMessage = com.example.mygemma3n.feature.chat.ChatMessage.AI(
+                """You are a compassionate, licensed CBT (Cognitive Behavioral Therapy) therapist. Your role is to:
+
+1. Validate clients' feelings with empathy and warmth
+2. Help them identify the connections between thoughts, feelings, and behaviors
+3. Guide them through CBT techniques like thought challenging, grounding exercises, and behavioral activation
+4. Ask thoughtful follow-up questions to deepen understanding
+5. Suggest specific CBT interventions when appropriate
+6. Keep responses concise but meaningful (under 150 words)
+7. Maintain professional boundaries while being genuinely supportive
+
+Focus on helping the client develop self-awareness and practical coping strategies."""
+            )
+            
+            // Combine system message with conversation history
+            val fullHistory = listOf(systemMessage) + chatHistory
+            
+            val response = withTimeoutOrNull(12_000) { // 12 second timeout for CBT responses
+                openAIService.generateChatResponseOnline(
+                    userMessage = userInput,
+                    conversationHistory = fullHistory,
+                    maxTokens = 512,
+                    temperature = 0.7f
+                )
+            } ?: throw IllegalStateException("Response timeout")
+
+            return if (response.isBlank()) {
+                throw IllegalStateException("Empty response from OpenAI service")
+            } else {
+                response
+            }
+
+        } catch (e: Exception) {
+            Timber.e(e, "Error generating OpenAI CBT response")
+            throw e
         }
     }
 
@@ -562,6 +637,16 @@ Respond as a CBT therapist in under 50 words. Be empathetic and helpful."""
         }
 
         return speechService.transcribeAudioData(pcmData, "en-US")
+    }
+
+    // Helper function to convert CBT messages to chat messages for OpenAI service
+    private fun convertToChatMessages(conversation: List<Message>): List<com.example.mygemma3n.feature.chat.ChatMessage> {
+        return conversation.takeLast(10).map { message -> // Limit to last 10 messages
+            when (message) {
+                is Message.User -> com.example.mygemma3n.feature.chat.ChatMessage.User(message.content)
+                is Message.AI -> com.example.mygemma3n.feature.chat.ChatMessage.AI(message.content)
+            }
+        }
     }
 
     // Async background save - don't block UI

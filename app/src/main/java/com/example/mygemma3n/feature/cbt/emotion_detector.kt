@@ -70,9 +70,14 @@ class EmotionDetector @Inject constructor(
                 )
             )
 
-            // Parse JSON response
+            // Parse JSON response - clean markdown code fences first
             return@withContext try {
-                val json = JSONObject(response)
+                val cleanedResponse = response
+                    .replace("```json", "")
+                    .replace("```", "")
+                    .trim()
+                
+                val json = JSONObject(cleanedResponse)
                 val emotionStr = json.getString("emotion")
                 Emotion.valueOf(emotionStr)
             } catch (e: Exception) {
@@ -150,7 +155,11 @@ class EmotionDetector @Inject constructor(
                     temperature = 0.5f
                 )
             )
-            val json = JSONObject(response)
+            val cleanedResponse = response
+                .replace("```json", "")
+                .replace("```", "")
+                .trim()
+            val json = JSONObject(cleanedResponse)
 
             EmotionDetectionResult(
                 emotion = Emotion.valueOf(json.getString("emotion")),
@@ -220,7 +229,11 @@ class EmotionDetector @Inject constructor(
                     temperature = 0.7f
                 )
             )
-            val json = JSONObject(response)
+            val cleanedResponse = response
+                .replace("```json", "")
+                .replace("```", "")
+                .trim()
+            val json = JSONObject(cleanedResponse)
 
             EmotionTrajectoryAnalysis(
                 startEmotion = startEmotion,

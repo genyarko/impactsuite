@@ -18,6 +18,9 @@ interface TokenUsageDao {
     @Query("SELECT * FROM token_usage WHERE timestamp >= :fromDate ORDER BY timestamp DESC")
     fun getTokenUsageSince(fromDate: LocalDateTime): Flow<List<TokenUsageEntity>>
     
+    @Query("SELECT * FROM token_usage WHERE timestamp >= :fromDate ORDER BY timestamp DESC")
+    suspend fun getTokenUsageSinceSync(fromDate: LocalDateTime): List<TokenUsageEntity>
+    
     @Query("SELECT * FROM token_usage WHERE serviceType = :serviceType ORDER BY timestamp DESC")
     fun getTokenUsageByService(serviceType: String): Flow<List<TokenUsageEntity>>
     

@@ -47,6 +47,7 @@ class LiveCaptionViewModel @Inject constructor(
     private val speechService: SpeechRecognitionService,
     private val gemmaService: UnifiedGemmaService,
     private val geminiApiService: GeminiApiService,
+    private val openAIService: com.example.mygemma3n.feature.chat.OpenAIChatService,
     private val settingsRepository: SettingsRepository,
     private val translationCache: TranslationCache,
     private val chatRepository: ChatRepository,
@@ -85,12 +86,30 @@ class LiveCaptionViewModel @Inject constructor(
     private suspend fun shouldUseOnlineService(): Boolean {
         return try {
             val useOnlineService = settingsRepository.useOnlineServiceFlow.first()
-            val hasApiKey = settingsRepository.apiKeyFlow.first().isNotBlank()
             val hasNetwork = hasNetworkConnection()
             
-            useOnlineService && hasApiKey && hasNetwork
+            if (!useOnlineService || !hasNetwork) return false
+            
+            // Check if any API key is available
+            val modelProvider = settingsRepository.modelProviderFlow.first()
+            val hasValidApiKey = when (modelProvider) {
+                "openai" -> openAIService.isInitialized()
+                "gemini" -> settingsRepository.apiKeyFlow.first().isNotBlank()
+                else -> settingsRepository.apiKeyFlow.first().isNotBlank() // Default to Gemini
+            }
+            
+            hasValidApiKey
         } catch (e: Exception) {
             Timber.w(e, "Error checking service preference, defaulting to offline")
+            false
+        }
+    }
+
+    private suspend fun shouldUseOpenAI(): Boolean {
+        return try {
+            val modelProvider = settingsRepository.modelProviderFlow.first()
+            modelProvider == "openai" && openAIService.isInitialized()
+        } catch (e: Exception) {
             false
         }
     }
@@ -249,10 +268,23 @@ class LiveCaptionViewModel @Inject constructor(
                 }
             }
 
-            // Gemma for translation
-            if (!gemmaService.isInitialized()) {
-                _state.update { it.copy(error = "Initialising AI model…") }
-                gemmaService.initializeBestAvailable()
+            // Initialize AI service for translation based on settings
+            val usingOnline = shouldUseOnlineService()
+            if (usingOnline) {
+                val usingOpenAI = shouldUseOpenAI()
+                if (usingOpenAI) {
+                    Timber.d("Using OpenAI for live caption translation")
+                    // OpenAI service is already initialized if API key is valid
+                } else {
+                    Timber.d("Using Gemini for live caption translation") 
+                    // Gemini will be initialized when needed
+                }
+            } else {
+                // Initialize offline Gemma model for translation
+                if (!gemmaService.isInitialized()) {
+                    _state.update { it.copy(error = "Initialising AI model…") }
+                    gemmaService.initializeBestAvailable()
+                }
             }
 
             _state.update { it.copy(isModelReady = true, error = null) }
@@ -486,8 +518,12 @@ class LiveCaptionViewModel @Inject constructor(
     private suspend fun translateWithService(prompt: String): String {
         return if (shouldUseOnlineService()) {
             try {
-                initializeApiServiceIfNeeded()
-                geminiApiService.generateTextComplete(prompt, "caption")
+                if (shouldUseOpenAI()) {
+                    translateWithOpenAI(prompt)
+                } else {
+                    initializeApiServiceIfNeeded()
+                    geminiApiService.generateTextComplete(prompt, "caption")
+                }
             } catch (e: Exception) {
                 Timber.w(e, "Online translation failed, falling back to offline")
                 gemmaService.generateTextAsync(
@@ -500,6 +536,78 @@ class LiveCaptionViewModel @Inject constructor(
                 prompt,
                 UnifiedGemmaService.GenerationConfig(maxTokens = 50, temperature = 0.1f)
             )
+        }
+    }
+
+    private suspend fun translateWithOpenAI(prompt: String): String {
+        return try {
+            // Extract the source text and target language from the prompt
+            val (sourceText, targetLanguage) = parseTranslationPrompt(prompt)
+            
+            // Create optimized translation prompt for OpenAI
+            val optimizedPrompt = buildTranslationPrompt(sourceText, targetLanguage)
+            
+            openAIService.generateChatResponseOnline(
+                userMessage = optimizedPrompt,
+                conversationHistory = emptyList(), // No history needed for translation
+                maxTokens = 100, // Reasonable limit for translations
+                temperature = 0.1f // Very low temperature for consistent, accurate translations
+            )
+        } catch (e: Exception) {
+            Timber.e(e, "OpenAI translation failed")
+            throw e
+        }
+    }
+
+    private fun parseTranslationPrompt(prompt: String): Pair<String, String> {
+        // Extract source text and target language from the generic prompt
+        // Example prompt: "Translate this English text to Spanish. Give ONLY the direct translation, no explanations or alternatives: \"Hello world\""
+        
+        // Try to extract quoted text first
+        val textMatch = Regex("\"([^\"]+)\"").findAll(prompt).lastOrNull()
+        val sourceText = if (textMatch != null) {
+            textMatch.groupValues[1]
+        } else {
+            // Fallback: get text after the last colon
+            prompt.substringAfterLast(":").trim().removePrefix("\"").removeSuffix("\"")
+        }
+        
+        // Extract target language (more flexible matching)
+        val targetLangMatch = Regex("to ([A-Za-z\\s]+?)(?:\\.|,|\\s+text|\\s+Give)").find(prompt)
+        val targetLanguage = targetLangMatch?.groupValues?.get(1)?.trim() ?: run {
+            // Fallback: try to get current target language from state
+            _state.value.targetLanguage.displayName
+        }
+        
+        return sourceText.trim() to targetLanguage.trim()
+    }
+
+    private fun buildTranslationPrompt(sourceText: String, targetLanguage: String): String {
+        return when {
+            sourceText.length < 10 -> {
+                // Very short text - simple translation
+                "Translate to $targetLanguage: \"$sourceText\""
+            }
+            sourceText.split(" ").size < 20 -> {
+                // Short sentence - direct translation with context preservation
+                """Translate the following text to $targetLanguage. Preserve the meaning and tone:
+                
+                "$sourceText"
+                
+                Response format: Only provide the translation, no explanations."""
+            }
+            else -> {
+                // Longer text - more detailed instruction for context preservation
+                """Please translate the following text to $targetLanguage. Important guidelines:
+                - Preserve the original meaning and context
+                - Maintain the same tone and style
+                - Keep any technical terms accurate
+                - Provide only the translation without explanations
+                
+                Text to translate:
+                "$sourceText"
+                """
+            }
         }
     }
     

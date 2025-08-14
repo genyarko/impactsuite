@@ -36,6 +36,7 @@ class PlantScannerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val gemma: UnifiedGemmaService,
     private val geminiApiService: GeminiApiService,
+    private val openAIService: com.example.mygemma3n.feature.chat.OpenAIChatService,
     private val settingsRepository: SettingsRepository,
     private val plantDatabase: PlantDatabase
 ) : ViewModel() {
@@ -58,12 +59,30 @@ class PlantScannerViewModel @Inject constructor(
     private suspend fun shouldUseOnlineService(): Boolean {
         return try {
             val useOnlineService = settingsRepository.useOnlineServiceFlow.first()
-            val hasApiKey = settingsRepository.apiKeyFlow.first().isNotBlank()
             val hasNetwork = hasNetworkConnection()
             
-            useOnlineService && hasApiKey && hasNetwork
+            if (!useOnlineService || !hasNetwork) return false
+            
+            // Check if any API key is available
+            val modelProvider = settingsRepository.modelProviderFlow.first()
+            val hasValidApiKey = when (modelProvider) {
+                "openai" -> openAIService.isInitialized()
+                "gemini" -> settingsRepository.apiKeyFlow.first().isNotBlank()
+                else -> settingsRepository.apiKeyFlow.first().isNotBlank() // Default to Gemini
+            }
+            
+            hasValidApiKey
         } catch (e: Exception) {
             Timber.w(e, "Error checking service preference, defaulting to offline")
+            false
+        }
+    }
+
+    private suspend fun shouldUseOpenAI(): Boolean {
+        return try {
+            val modelProvider = settingsRepository.modelProviderFlow.first()
+            modelProvider == "openai" && openAIService.isInitialized()
+        } catch (e: Exception) {
             false
         }
     }
@@ -88,15 +107,19 @@ class PlantScannerViewModel @Inject constructor(
     private suspend fun analyzeImageWithService(bitmap: Bitmap): String {
         return if (shouldUseOnlineService()) {
             try {
-                initializeApiServiceIfNeeded()
-                // Use Gemini's vision capabilities
-                val prompt = buildPromptForOnlineService()
-                geminiApiService.generateContentWithImageAndModel(
-                    modelName = GeminiApiService.GEMINI_FLASH_MODEL, // Use vision model
-                    prompt = prompt,
-                    image = bitmap.resizeToGemma(512),
-                    serviceType = "plant"
-                )
+                if (shouldUseOpenAI()) {
+                    analyzeImageWithOpenAI(bitmap)
+                } else {
+                    initializeApiServiceIfNeeded()
+                    // Use Gemini's vision capabilities
+                    val prompt = buildPromptForOnlineService()
+                    geminiApiService.generateContentWithImageAndModel(
+                        modelName = GeminiApiService.GEMINI_FLASH_MODEL, // Use vision model
+                        prompt = prompt,
+                        image = bitmap.resizeToGemma(512),
+                        serviceType = "plant"
+                    )
+                }
             } catch (e: Exception) {
                 Timber.w(e, "Online image analysis failed, falling back to offline")
                 analyzeImageOffline(bitmap)
@@ -104,6 +127,16 @@ class PlantScannerViewModel @Inject constructor(
         } else {
             analyzeImageOffline(bitmap)
         }
+    }
+
+    private suspend fun analyzeImageWithOpenAI(bitmap: Bitmap): String {
+        val prompt = buildPromptForOpenAI()
+        return openAIService.analyzeImageWithBitmap(
+            prompt = prompt,
+            bitmap = bitmap.resizeToGemma(512), // Consistent with other services
+            maxTokens = 1000, // Sufficient for detailed JSON response
+            temperature = 0.3f // Lower temperature for more consistent analysis
+        )
     }
 
     private suspend fun analyzeImageOffline(bitmap: Bitmap): String {
@@ -167,6 +200,73 @@ class PlantScannerViewModel @Inject constructor(
                 "analysisType": "GENERAL",
                 "recommendations": ["general observations"]
             }
+        """.trimIndent()
+    }
+
+    private fun buildPromptForOpenAI(): String {
+        return """
+            You are an expert image analyst specializing in plants, food, and general object recognition. Analyze this image carefully and provide a detailed JSON response.
+
+            **INSTRUCTIONS:**
+            1. Determine if the image contains primarily PLANTS, FOOD, or is a GENERAL object/scene
+            2. Provide accurate identification with confidence scores
+            3. For plants: Include species, health status, diseases, and care recommendations
+            4. For food: Include nutritional analysis, calorie estimates, and serving information
+            5. For general objects: Provide clear description and relevant observations
+
+            **REQUIRED JSON FORMAT:**
+            ```json
+            {
+                "label": "primary object or subject description",
+                "confidence": 0.95,
+                "analysisType": "PLANT|FOOD|GENERAL",
+                
+                // IF PLANT (include these fields):
+                "plantSpecies": "scientific or common name, or 'Unknown' if uncertain",
+                "disease": "disease name or 'None' if healthy",
+                "severity": "mild|moderate|severe (only if disease present)",
+                "recommendations": ["specific care advice", "treatment suggestions"],
+                
+                // IF FOOD (include these fields):
+                "foodItems": [
+                    {
+                        "name": "food item name",
+                        "confidence": 0.9,
+                        "estimatedWeight": 150,
+                        "caloriesPer100g": 250,
+                        "totalCalories": 375,
+                        "macros": {
+                            "carbs": 45.0,
+                            "protein": 12.0,
+                            "fat": 8.5,
+                            "fiber": 3.2
+                        }
+                    }
+                ],
+                "totalCalories": 375,
+                "nutritionalInfo": {
+                    "totalCarbs": 45.0,
+                    "totalProtein": 12.0,
+                    "totalFat": 8.5,
+                    "totalFiber": 3.2,
+                    "servingSize": "1 medium portion"
+                },
+                "recommendations": ["nutritional insights", "serving suggestions"],
+                
+                // IF GENERAL (always include):
+                "recommendations": ["general observations", "relevant information"]
+            }
+            ```
+
+            **ANALYSIS GUIDELINES:**
+            - Be specific and accurate in identification
+            - Provide confidence scores between 0.0 and 1.0
+            - For plants: Focus on health, species ID, and actionable care advice
+            - For food: Estimate realistic portions and nutritional values
+            - For general objects: Describe clearly and provide useful context
+            - If uncertain, acknowledge limitations and provide best estimates
+
+            Analyze the image now and respond with ONLY the JSON formatted exactly as shown above.
         """.trimIndent()
     }
 
