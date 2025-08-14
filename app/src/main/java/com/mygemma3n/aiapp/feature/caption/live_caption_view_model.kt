@@ -283,7 +283,17 @@ class LiveCaptionViewModel @Inject constructor(
                 // Initialize offline Gemma model for translation
                 if (!gemmaService.isInitialized()) {
                     _state.update { it.copy(error = "Initialising AI model…") }
-                    gemmaService.initializeBestAvailable()
+                    try {
+                        gemmaService.initializeBestAvailable()
+                    } catch (e: IllegalStateException) {
+                        Timber.w("No Gemma models available for offline translation: ${e.message}")
+                        _state.update { it.copy(error = "Offline model not available. Please use online mode or download the model.", isModelReady = false) }
+                        return@launch
+                    } catch (e: Exception) {
+                        Timber.e(e, "Failed to initialize Gemma model for translation")
+                        _state.update { it.copy(error = "Failed to initialize offline model. Please use online mode.", isModelReady = false) }
+                        return@launch
+                    }
                 }
             }
 

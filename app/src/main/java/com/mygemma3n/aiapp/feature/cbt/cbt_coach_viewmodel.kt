@@ -68,7 +68,10 @@ class CBTCoachViewModel @Inject constructor(
             val useOnlineService = settingsRepository.useOnlineServiceFlow.first()
             val hasNetwork = hasNetworkConnection()
             
-            if (!useOnlineService || !hasNetwork) return false
+            // If user prefers offline but offline models aren't available, force online
+            val offlineAvailable = isModelInitialized || gemmaService.isInitialized()
+            
+            if (!hasNetwork) return false
             
             // Check if any API key is available
             val modelProvider = settingsRepository.modelProviderFlow.first()
@@ -78,7 +81,8 @@ class CBTCoachViewModel @Inject constructor(
                 else -> settingsRepository.apiKeyFlow.first().isNotBlank() // Default to Gemini
             }
             
-            hasValidApiKey
+            // Use online if: user wants online OR (user wants offline but it's not available and API is available)
+            (useOnlineService || (!offlineAvailable && hasValidApiKey)) && hasValidApiKey
         } catch (e: Exception) {
             Timber.w(e, "Error checking service preference, defaulting to offline")
             false
@@ -217,6 +221,12 @@ Let's explore what you're experiencing together. Can you tell me more about what
             isModelInitialized = true
         } catch (_: CancellationException) {
             Timber.i("Gemma init cancelled (screen closed)")
+        } catch (e: IllegalStateException) {
+            Timber.i("No Gemma models available, will use API fallback: ${e.message}")
+            isModelInitialized = false
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to initialize Gemma model, will use API fallback")
+            isModelInitialized = false
         }
     }
 
@@ -224,10 +234,8 @@ Let's explore what you're experiencing together. Can you tell me more about what
         if (!isModelInitialized) {
             initializeModel()
             if (!isModelInitialized) {
-                _sessionState.update {
-                    it.copy(error = "Model initialization in progress. Please wait...")
-                }
-                return
+                // Model initialization failed, proceed with API fallback
+                Timber.d("Model initialization failed, proceeding with API fallback")
             }
         }
 
@@ -365,13 +373,6 @@ Let's explore what you're experiencing together. Can you tell me more about what
     // ═══════════════════════════════════════════════════════════════
 
     suspend fun processTextInput(userInput: String) {
-        if (!isModelInitialized) {
-            _sessionState.update {
-                it.copy(error = "Model not initialized. Please wait...")
-            }
-            return
-        }
-
         if (userInput.trim().isEmpty()) return
 
         _isLoading.value = true
@@ -391,49 +392,39 @@ Let's explore what you're experiencing together. Can you tell me more about what
                 it.copy(conversation = it.conversation + Message.User(userInput))
             }
 
-            // First, try to match with fallback responses
-            val fallbackResponse = getFallbackResponse(userInput)
+            // Try to generate AI response first (online or offline)
+            val response = withTimeoutOrNull(15_000) {
+                generateOptimizedCBTResponse(userInput)
+            }
 
-            if (fallbackResponse != null) {
-                // Use fallback response immediately
+            if (response != null && response.isNotBlank()) {
+                // Use AI-generated response
+                _sessionState.update {
+                    it.copy(
+                        conversation = it.conversation + Message.AI(response)
+                    )
+                }
+            } else {
+                // Fallback to pre-crafted responses if AI fails
+                val fallbackResponse = getFallbackResponse(userInput) ?: FALLBACK_RESPONSES["default"]!!
                 _sessionState.update {
                     it.copy(
                         conversation = it.conversation + Message.AI(fallbackResponse)
                     )
                 }
+            }
 
-                // Try to detect emotion in background
-                viewModelScope.launch {
-                    try {
-                        val emotion = emotionDetector.detectFromText(userInput)
-                        _sessionState.update { it.copy(currentEmotion = emotion) }
+            // Try to detect emotion and suggest techniques in background
+            viewModelScope.launch {
+                try {
+                    val emotion = emotionDetector.detectFromText(userInput)
+                    _sessionState.update { it.copy(currentEmotion = emotion) }
 
-                        // Suggest appropriate technique
-                        val technique = cbtTechniques.getRecommendedTechnique(emotion)
-                        _sessionState.update { it.copy(suggestedTechnique = technique) }
-                    } catch (e: Exception) {
-                        Timber.e(e, "Error detecting emotion")
-                    }
-                }
-            } else {
-                // Try to generate response with very short prompt
-                val response = withTimeoutOrNull(15_000) { // Reduced timeout
-                    generateOptimizedCBTResponse(userInput)
-                }
-
-                if (response != null && response.isNotBlank()) {
-                    _sessionState.update {
-                        it.copy(
-                            conversation = it.conversation + Message.AI(response)
-                        )
-                    }
-                } else {
-                    // Use generic fallback
-                    _sessionState.update {
-                        it.copy(
-                            conversation = it.conversation + Message.AI(FALLBACK_RESPONSES["default"]!!)
-                        )
-                    }
+                    // Suggest appropriate technique
+                    val technique = cbtTechniques.getRecommendedTechnique(emotion)
+                    _sessionState.update { it.copy(suggestedTechnique = technique) }
+                } catch (e: Exception) {
+                    Timber.e(e, "Error detecting emotion")
                 }
             }
 
@@ -471,6 +462,7 @@ Let's explore what you're experiencing together. Can you tell me more about what
     // Enhanced response generation with online/offline support
     private suspend fun generateOptimizedCBTResponse(userInput: String): String {
         return if (shouldUseOnlineService()) {
+            // Online mode
             try {
                 if (shouldUseOpenAI()) {
                     generateCBTResponseWithOpenAI(userInput)
@@ -479,11 +471,22 @@ Let's explore what you're experiencing together. Can you tell me more about what
                     generateCBTResponseOnline(userInput)
                 }
             } catch (e: Exception) {
-                Timber.w(e, "Online CBT response failed, falling back to offline")
-                generateCBTResponseOffline(userInput)
+                Timber.w(e, "Online CBT response failed, falling back to offline/fallback")
+                // Try offline as last resort
+                if (isModelInitialized || ensureModelInitialized()) {
+                    generateCBTResponseOffline(userInput)
+                } else {
+                    getFallbackResponse(userInput) ?: FALLBACK_RESPONSES["default"]!!
+                }
             }
         } else {
-            generateCBTResponseOffline(userInput)
+            // Offline mode - but this should rarely happen now due to smart shouldUseOnlineService()
+            if (isModelInitialized || ensureModelInitialized()) {
+                generateCBTResponseOffline(userInput)
+            } else {
+                Timber.w("No offline model and no online service available, using fallback")
+                getFallbackResponse(userInput) ?: FALLBACK_RESPONSES["default"]!!
+            }
         }
     }
 

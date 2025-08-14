@@ -38,7 +38,17 @@ class CBTSessionManager @Inject constructor(
 
             // Ensure Gemma is initialized (using fast model for embeddings)
             if (!gemmaService.isInitialized()) {
-                gemmaService.initialize(UnifiedGemmaService.ModelVariant.FAST_2B)
+                try {
+                    gemmaService.initializeBestAvailable()
+                } catch (e: IllegalStateException) {
+                    Timber.w("No Gemma models available for CBT knowledge base: ${e.message}")
+                    // Skip knowledge base initialization - CBT will work without offline RAG
+                    return@withContext
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to initialize Gemma for CBT knowledge base")
+                    // Skip knowledge base initialization - CBT will work without offline RAG
+                    return@withContext
+                }
             }
 
             // Add CBT techniques to vector database

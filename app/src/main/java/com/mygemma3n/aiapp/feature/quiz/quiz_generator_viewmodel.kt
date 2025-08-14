@@ -134,15 +134,19 @@ class QuizGeneratorViewModel @Inject constructor(
                 throw IllegalStateException("No Gemma models found in assets")
             }
 
-            val modelToUse = if (availableModels.contains(UnifiedGemmaService.ModelVariant.FAST_2B)) {
-                UnifiedGemmaService.ModelVariant.FAST_2B
-            } else {
-                availableModels.first()
-            }
+            if (availableModels.isNotEmpty()) {
+                val modelToUse = if (availableModels.contains(UnifiedGemmaService.ModelVariant.FAST_2B)) {
+                    UnifiedGemmaService.ModelVariant.FAST_2B
+                } else {
+                    availableModels.first()
+                }
 
-            gemmaService.initialize(modelToUse)
-            _state.update { it.copy(isModelInitialized = true) }
-            Timber.d("Gemma model initialized successfully with ${modelToUse.displayName}")
+                gemmaService.initialize(modelToUse)
+                _state.update { it.copy(isModelInitialized = true) }
+                Timber.d("Gemma model initialized successfully with ${modelToUse.displayName}")
+            } else {
+                throw IllegalStateException("No Gemma models available for quiz generation")
+            }
         } catch (e: Exception) {
             Timber.e(e, "Failed to initialize Gemma model")
             _state.update {

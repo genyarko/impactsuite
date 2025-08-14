@@ -45,6 +45,10 @@ fun CBTCoachScreen(
     var userInput by remember { mutableStateOf("") }
     var showThoughtRecord by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    
+    // Collapsible card states
+    var emotionCardExpanded by remember { mutableStateOf(true) }
+    var techniqueCardExpanded by remember { mutableStateOf(true) }
 
     // Animation states
     val headerExpanded by remember { derivedStateOf { sessionState.isActive } }
@@ -148,27 +152,53 @@ fun CBTCoachScreen(
                                     .padding(top = 16.dp),
                                 colors = CardDefaults.cardColors(
                                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                                )
+                                ),
+                                onClick = { emotionCardExpanded = !emotionCardExpanded }
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                Column(
+                                    modifier = Modifier.padding(12.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Mood,
-                                        contentDescription = null,
-                                        tint = getEmotionColor(sessionState.currentEmotion)
-                                    )
-                                    Text(
-                                        text = "Current Emotion:",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    EnhancedEmotionChip(
-                                        emotion = sessionState.currentEmotion,
-                                        onClick = { /* no-op */ }
-                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Mood,
+                                                contentDescription = null,
+                                                tint = getEmotionColor(sessionState.currentEmotion)
+                                            )
+                                            Text(
+                                                text = "Current Emotion:",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                        Icon(
+                                            imageVector = if (emotionCardExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                            contentDescription = if (emotionCardExpanded) "Collapse" else "Expand"
+                                        )
+                                    }
+                                    
+                                    AnimatedVisibility(
+                                        visible = emotionCardExpanded,
+                                        enter = expandVertically() + fadeIn(),
+                                        exit = shrinkVertically() + fadeOut()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(top = 8.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            EnhancedEmotionChip(
+                                                emotion = sessionState.currentEmotion,
+                                                onClick = { /* no-op */ }
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -184,46 +214,63 @@ fun CBTCoachScreen(
                                     .padding(top = 12.dp),
                                 colors = CardDefaults.cardColors(
                                     containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                                )
+                                ),
+                                onClick = { techniqueCardExpanded = !techniqueCardExpanded }
                             ) {
                                 Column(modifier = Modifier.padding(16.dp)) {
                                     Row(
+                                        modifier = Modifier.fillMaxWidth(),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.AutoFixHigh,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary
+                                            )
+                                            Text(
+                                                text = sessionState.suggestedTechnique?.name ?: "",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
                                         Icon(
-                                            imageVector = Icons.Default.AutoFixHigh,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary
-                                        )
-                                        Text(
-                                            text = sessionState.suggestedTechnique?.name ?: "",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold
+                                            imageVector = if (techniqueCardExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                            contentDescription = if (techniqueCardExpanded) "Collapse" else "Expand"
                                         )
                                     }
 
-                                    sessionState.suggestedTechnique?.let { technique ->
-                                        val progress = (sessionState.currentStep + 1f) / technique.steps.size
+                                    AnimatedVisibility(
+                                        visible = techniqueCardExpanded,
+                                        enter = expandVertically() + fadeIn(),
+                                        exit = shrinkVertically() + fadeOut()
+                                    ) {
+                                        sessionState.suggestedTechnique?.let { technique ->
+                                            val progress = (sessionState.currentStep + 1f) / technique.steps.size
 
-                                        Spacer(modifier = Modifier.height(8.dp))
+                                            Column(modifier = Modifier.padding(top = 8.dp)) {
+                                                Text(
+                                                    text = "Step ${sessionState.currentStep + 1} of ${technique.steps.size}",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
 
-                                        Text(
-                                            text = "Step ${sessionState.currentStep + 1} of ${technique.steps.size}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-
-                                        LinearProgressIndicator(
-                                            progress = { progress },
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(top = 4.dp)
-                                                .height(8.dp)
-                                                .clip(RoundedCornerShape(4.dp)),
-                                            color = MaterialTheme.colorScheme.primary,
-                                            trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                                        )
+                                                LinearProgressIndicator(
+                                                    progress = { progress },
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(top = 4.dp)
+                                                        .height(8.dp)
+                                                        .clip(RoundedCornerShape(4.dp)),
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }

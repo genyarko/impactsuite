@@ -52,9 +52,15 @@ android {
             buildConfigField("Boolean", "ENABLE_PERFORMANCE_MONITORING", "true")
         }
         release {
-            isMinifyEnabled = false  // Disabled to preserve ALL functionality including Google Cloud Speech
-            isShrinkResources = false
+            isMinifyEnabled = true  // Enable R8 for code shrinking and obfuscation
+            isShrinkResources = true  // Enable resource shrinking
             buildConfigField("Boolean", "ENABLE_PERFORMANCE_MONITORING", "false")
+            
+            // ProGuard/R8 configuration files
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
             
             // Keep ABI filtering for size optimization (most compatible optimization)
             ndk {

@@ -300,10 +300,17 @@ class MainActivity : ComponentActivity() {
                 Timber.d("Available models: ${availableModels.map { it.displayName }}")
 
                 // Initialize the best available
-                unifiedGemmaService.initializeBestAvailable()
-
-                val currentModel = unifiedGemmaService.getCurrentModel()
-                Timber.d("Gemma model initialized: ${currentModel?.displayName}")
+                try {
+                    unifiedGemmaService.initializeBestAvailable()
+                    val currentModel = unifiedGemmaService.getCurrentModel()
+                    Timber.d("Gemma model initialized: ${currentModel?.displayName}")
+                } catch (e: IllegalStateException) {
+                    Timber.w("No Gemma models available for initialization: ${e.message}")
+                    // Continue without offline model - app will use API fallback
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to initialize Gemma model - continuing with API fallback")
+                    // Continue without offline model - app will use API fallback
+                }
             } else {
                 Timber.d("Gemma model already initialized")
             }

@@ -44,7 +44,17 @@ class EmotionDetector @Inject constructor(
         try {
             // Ensure the model is initialized
             if (!gemmaService.isInitialized()) {
-                gemmaService.initialize(UnifiedGemmaService.ModelVariant.FAST_2B)
+                try {
+                    gemmaService.initializeBestAvailable()
+                } catch (e: IllegalStateException) {
+                    Timber.w("No Gemma models available for emotion detection: ${e.message}")
+                    // Fallback to basic emotion detection based on keywords
+                    return@withContext detectEmotionByKeywords(text)
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to initialize Gemma for emotion detection")
+                    // Fallback to basic emotion detection based on keywords
+                    return@withContext detectEmotionByKeywords(text)
+                }
             }
 
             val prompt = """
@@ -290,6 +300,37 @@ class EmotionDetector @Inject constructor(
             Emotion.HAPPY -> 0.3f
             Emotion.NEUTRAL -> 0.1f
         }
+    }
+
+    /**
+     * Fallback emotion detection using keyword matching when offline model is unavailable
+     */
+    private fun detectEmotionByKeywords(text: String): Emotion {
+        val lowerText = text.lowercase()
+        
+        val emotionKeywords = mapOf(
+            Emotion.HAPPY to listOf("happy", "joy", "excited", "glad", "cheerful", "thrilled", "delighted", "pleased", "content"),
+            Emotion.SAD to listOf("sad", "depressed", "upset", "down", "miserable", "heartbroken", "grief", "sorrow", "melancholy"),
+            Emotion.ANGRY to listOf("angry", "furious", "mad", "rage", "irritated", "annoyed", "frustrated", "outraged", "livid"),
+            Emotion.ANXIOUS to listOf("anxious", "worried", "nervous", "stressed", "panic", "fear", "concerned", "uneasy", "tense"),
+            Emotion.FEARFUL to listOf("afraid", "scared", "terrified", "frightened", "intimidated", "alarmed", "spooked"),
+            Emotion.SURPRISED to listOf("surprised", "shocked", "amazed", "astonished", "stunned", "bewildered"),
+            Emotion.DISGUSTED to listOf("disgusted", "revolted", "sickened", "repulsed", "nauseated")
+        )
+        
+        var bestMatch = Emotion.NEUTRAL
+        var highestScore = 0
+        
+        for ((emotion, keywords) in emotionKeywords) {
+            val score = keywords.count { keyword -> lowerText.contains(keyword) }
+            if (score > highestScore) {
+                highestScore = score
+                bestMatch = emotion
+            }
+        }
+        
+        Timber.d("Keyword-based emotion detection: $bestMatch (score: $highestScore)")
+        return bestMatch
     }
 
     data class EmotionDetectionResult(

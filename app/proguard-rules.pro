@@ -261,3 +261,15 @@
 -keep class io.grpc.** { *; }
 -dontwarn io.grpc.**
 -dontwarn io.netty.**
+
+# OpenTelemetry (optional dependency for gRPC)
+-dontwarn io.opentelemetry.**
+
+# GraalVM native image (not used in Android)
+-dontwarn org.graalvm.**
+
+# Google Cloud Location API (optional for Speech API)
+-dontwarn com.google.cloud.location.**
+
+# Google API field info (part of protobuf generation)
+-dontwarn com.google.api.FieldInfoProto

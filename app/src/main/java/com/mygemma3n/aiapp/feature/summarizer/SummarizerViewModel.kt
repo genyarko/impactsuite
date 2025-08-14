@@ -163,8 +163,16 @@ class SummarizerViewModel @Inject constructor(
 
     private suspend fun generateSummaryOffline(text: String): String {
         if (!isModelReady) {
-            gemmaService.initializeBestAvailable()
-            isModelReady = true
+            try {
+                gemmaService.initializeBestAvailable()
+                isModelReady = true
+            } catch (e: IllegalStateException) {
+                Timber.w("No Gemma models available for offline summarization: ${e.message}")
+                throw IllegalStateException("Offline model not available, please use online mode")
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to initialize Gemma model for summarization")
+                throw IllegalStateException("Failed to initialize offline model, please use online mode")
+            }
         }
         return gemmaService.generateTextAsync(
             "Summarize the following text in a clear, concise manner. " +
@@ -271,8 +279,16 @@ class SummarizerViewModel @Inject constructor(
             }
         } else {
             if (!gemmaService.isInitialized()) {
-                gemmaService.initializeBestAvailable()
-                isModelReady = true
+                try {
+                    gemmaService.initializeBestAvailable()
+                    isModelReady = true
+                } catch (e: IllegalStateException) {
+                    Timber.w("No Gemma models available: ${e.message}")
+                    isModelReady = false
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to initialize Gemma model")
+                    isModelReady = false
+                }
             }
         }
     }
