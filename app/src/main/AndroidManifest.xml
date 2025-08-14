@@ -126,8 +126,8 @@
             android:exported="false"
             android:foregroundServiceType="microphone" >
             <intent-filter>
-                <action android:name="com.example.mygemma3n.START_CAPTURE" />
-                <action android:name="com.example.mygemma3n.STOP_CAPTURE" />
+                <action android:name="com.mygemma3n.aiapp.START_CAPTURE" />
+                <action android:name="com.mygemma3n.aiapp.STOP_CAPTURE" />
             </intent-filter>
         </service>
 

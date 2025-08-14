@@ -30,7 +30,8 @@
       "WebFetch(domain:platform.openai.com)",
       "Bash(sed:*)",
       "WebFetch(domain:openai.com)",
-      "Bash(git bisect:*)"
+      "Bash(git bisect:*)",
+      "Bash(cp:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

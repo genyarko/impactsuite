@@ -73,9 +73,9 @@
 -keep interface androidx.camera.** { *; }
 
 # Model classes
--keep class com.example.mygemma3n.data.** { *; }
--keep class com.example.mygemma3n.feature.**.data.** { *; }
--keep class com.example.mygemma3n.shared_utilities.** { *; }
+-keep class com.mygemma3n.aiapp.data.** { *; }
+-keep class com.mygemma3n.aiapp.feature.**.data.** { *; }
+-keep class com.mygemma3n.aiapp.shared_utilities.** { *; }
 
 # Enum classes
 -keepclassmembers enum * {

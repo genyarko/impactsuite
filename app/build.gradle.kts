@@ -12,7 +12,7 @@ plugins {
 
 
 android {
-    namespace = "com.example.mygemma3n"
+    namespace = "com.mygemma3n.aiapp"
     compileSdk = 36
 
     androidResources {
@@ -25,7 +25,7 @@ android {
 
 
     defaultConfig {
-        applicationId = "com.example.mygemma3n"
+        applicationId = "com.mygemma3n.aiapp"
         minSdk = 27
         targetSdk = 36
         versionCode = 1

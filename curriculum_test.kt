@@ -1,8 +1,8 @@
-package com.example.mygemma3n.test
+package com.mygemma3n.aiapp.test
 
 import android.content.Context
-import com.example.mygemma3n.shared_utilities.OfflineRAG
-import com.example.mygemma3n.feature.tutor.TutorViewModel
+import com.mygemma3n.aiapp.shared_utilities.OfflineRAG
+import com.mygemma3n.aiapp.feature.tutor.TutorViewModel
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import timber.log.Timber

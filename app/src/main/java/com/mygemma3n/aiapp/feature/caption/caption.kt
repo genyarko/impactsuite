@@ -1,0 +1,384 @@
+package com.mygemma3n.aiapp.feature.caption
+
+import android.content.Context
+import android.content.pm.PackageManager
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
+import androidx.core.content.ContextCompat
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.isActive
+import java.util.concurrent.ConcurrentHashMap
+import javax.inject.Inject
+import javax.inject.Singleton
+import kotlin.coroutines.coroutineContext
+
+// Language support
+enum class Language(val code: String, val displayName: String) {
+    AUTO("auto", "Auto-detect"),
+    
+    // Major World Languages
+    ENGLISH("en", "English"),
+    CHINESE("zh", "Chinese (Mandarin)"),
+    HINDI("hi", "Hindi"),
+    SPANISH("es", "Spanish"),
+    FRENCH("fr", "French"),
+    ARABIC("ar", "Arabic"),
+    BENGALI("bn", "Bengali"),
+    PORTUGUESE("pt", "Portuguese"),
+    RUSSIAN("ru", "Russian"),
+    JAPANESE("ja", "Japanese"),
+    
+    // European Languages
+    GERMAN("de", "German"),
+    ITALIAN("it", "Italian"),
+    DUTCH("nl", "Dutch"),
+    SWEDISH("sv", "Swedish"),
+    POLISH("pl", "Polish"),
+    TURKISH("tr", "Turkish"),
+    GREEK("el", "Greek"),
+    CZECH("cs", "Czech"),
+    HUNGARIAN("hu", "Hungarian"),
+    ROMANIAN("ro", "Romanian"),
+    BULGARIAN("bg", "Bulgarian"),
+    CROATIAN("hr", "Croatian"),
+    SERBIAN("sr", "Serbian"),
+    SLOVAK("sk", "Slovak"),
+    SLOVENIAN("sl", "Slovenian"),
+    LITHUANIAN("lt", "Lithuanian"),
+    LATVIAN("lv", "Latvian"),
+    ESTONIAN("et", "Estonian"),
+    FINNISH("fi", "Finnish"),
+    DANISH("da", "Danish"),
+    NORWEGIAN("no", "Norwegian"),
+    ICELANDIC("is", "Icelandic"),
+    IRISH("ga", "Irish"),
+    WELSH("cy", "Welsh"),
+    BASQUE("eu", "Basque"),
+    CATALAN("ca", "Catalan"),
+    GALICIAN("gl", "Galician"),
+    MALTESE("mt", "Maltese"),
+    
+    // Asian Languages
+    KOREAN("ko", "Korean"),
+    VIETNAMESE("vi", "Vietnamese"),
+    THAI("th", "Thai"),
+    INDONESIAN("id", "Indonesian"),
+    MALAY("ms", "Malay"),
+    FILIPINO("tl", "Filipino"),
+    BURMESE("my", "Burmese"),
+    KHMER("km", "Khmer"),
+    LAO("lo", "Lao"),
+    MONGOLIAN("mn", "Mongolian"),
+    NEPALI("ne", "Nepali"),
+    SINHALA("si", "Sinhala"),
+    TAMIL("ta", "Tamil"),
+    TELUGU("te", "Telugu"),
+    KANNADA("kn", "Kannada"),
+    MALAYALAM("ml", "Malayalam"),
+    MARATHI("mr", "Marathi"),
+    GUJARATI("gu", "Gujarati"),
+    PUNJABI("pa", "Punjabi"),
+    URDU("ur", "Urdu"),
+    PERSIAN("fa", "Persian"),
+    PASHTO("ps", "Pashto"),
+    DARI("prs", "Dari"),
+    KURDISH("ku", "Kurdish"),
+    ARMENIAN("hy", "Armenian"),
+    GEORGIAN("ka", "Georgian"),
+    AZERBAIJANI("az", "Azerbaijani"),
+    KAZAKH("kk", "Kazakh"),
+    KYRGYZ("ky", "Kyrgyz"),
+    TAJIK("tg", "Tajik"),
+    TURKMEN("tk", "Turkmen"),
+    UZBEK("uz", "Uzbek"),
+    
+    // Middle Eastern & African Languages
+    HEBREW("he", "Hebrew"),
+    AMHARIC("am", "Amharic"),
+    HAUSA("ha", "Hausa"),
+    YORUBA("yo", "Yoruba"),
+    IGBO("ig", "Igbo"),
+    SWAHILI("sw", "Swahili"),
+    SOMALI("so", "Somali"),
+    AFRIKAANS("af", "Afrikaans"),
+    ZULU("zu", "Zulu"),
+    XHOSA("xh", "Xhosa"),
+    
+    // Latin American Languages
+    QUECHUA("qu", "Quechua"),
+    GUARANI("gn", "Guarani"),
+    
+    // Pacific Languages
+    HAWAIIAN("haw", "Hawaiian"),
+    MAORI("mi", "Māori"),
+    SAMOAN("sm", "Samoan"),
+    TONGAN("to", "Tongan"),
+    FIJIAN("fj", "Fijian"),
+    
+    // Additional European Regional Languages
+    CORSICAN("co", "Corsican"),
+    BRETON("br", "Breton"),
+    OCCITAN("oc", "Occitan"),
+    SARDINIAN("sc", "Sardinian"),
+    LUXEMBOURGISH("lb", "Luxembourgish"),
+    FAROESE("fo", "Faroese"),
+    
+    // Additional Asian Languages
+    TIBETAN("bo", "Tibetan"),
+    DZONGKHA("dz", "Dzongkha"),
+    ASSAMESE("as", "Assamese"),
+    ORIYA("or", "Odia"),
+    SANSKRIT("sa", "Sanskrit"),
+    
+    // Sign Languages (where supported)
+    ASL("ase", "American Sign Language"),
+    BSL("bfi", "British Sign Language"),
+    
+    // Constructed Languages
+    ESPERANTO("eo", "Esperanto"),
+    INTERLINGUA("ia", "Interlingua"),
+    
+    // Historical Languages (where supported)
+    LATIN("la", "Latin"),
+    ANCIENT_GREEK("grc", "Ancient Greek")
+}
+
+// Audio capture service
+@Singleton
+class AudioCapture @Inject constructor(
+    @ApplicationContext private val context: Context
+) {
+
+    companion object {
+        private const val SAMPLE_RATE = 16000
+        private const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
+        private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
+        private const val BUFFER_SIZE_FACTOR = 2
+    }
+
+    private var audioRecord: AudioRecord? = null
+    private var isRecording = false
+
+    fun hasRecordPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    fun startCapture(): Flow<FloatArray> = flow {
+        // Check permission first
+        if (!hasRecordPermission()) {
+            throw SecurityException("RECORD_AUDIO permission not granted")
+        }
+
+        val minBufferSize = AudioRecord.getMinBufferSize(
+            SAMPLE_RATE,
+            CHANNEL_CONFIG,
+            AUDIO_FORMAT
+        )
+
+        if (minBufferSize == AudioRecord.ERROR || minBufferSize == AudioRecord.ERROR_BAD_VALUE) {
+            throw IllegalStateException("Failed to get minimum buffer size")
+        }
+
+        val bufferSize = minBufferSize * BUFFER_SIZE_FACTOR
+
+        try {
+            audioRecord = AudioRecord(
+                MediaRecorder.AudioSource.MIC,
+                SAMPLE_RATE,
+                CHANNEL_CONFIG,
+                AUDIO_FORMAT,
+                bufferSize
+            ).apply {
+                if (state != AudioRecord.STATE_INITIALIZED) {
+                    throw IllegalStateException("AudioRecord initialization failed")
+                }
+            }
+
+            val audioBuffer = ShortArray(bufferSize)
+            val floatBuffer = FloatArray(bufferSize)
+
+            audioRecord?.startRecording()
+            isRecording = true
+
+            while (coroutineContext.isActive && isRecording) {
+                val readSize = audioRecord?.read(audioBuffer, 0, bufferSize) ?: 0
+
+                when {
+                    readSize > 0 -> {
+                        // Convert PCM16 to float
+                        for (i in 0 until readSize) {
+                            floatBuffer[i] = audioBuffer[i] / 32768.0f
+                        }
+
+                        // Emit audio chunk
+                        emit(floatBuffer.copyOfRange(0, readSize))
+                    }
+                    readSize == AudioRecord.ERROR_INVALID_OPERATION -> {
+                        throw IllegalStateException("AudioRecord read error: Invalid operation")
+                    }
+                    readSize == AudioRecord.ERROR_BAD_VALUE -> {
+                        throw IllegalStateException("AudioRecord read error: Bad value")
+                    }
+                    readSize == AudioRecord.ERROR_DEAD_OBJECT -> {
+                        throw IllegalStateException("AudioRecord read error: Dead object")
+                    }
+                }
+            }
+        } catch (e: SecurityException) {
+            throw SecurityException("Failed to access microphone. Please grant RECORD_AUDIO permission.", e)
+        } catch (e: Exception) {
+            throw IllegalStateException("Audio capture failed: ${e.message}", e)
+        } finally {
+            // Ensure cleanup happens even if an exception is thrown
+            stopCapture()
+        }
+    }.flowOn(Dispatchers.IO)
+
+    fun stopCapture() {
+        isRecording = false
+        audioRecord?.apply {
+            try {
+                if (state == AudioRecord.STATE_INITIALIZED) {
+                    stop()
+                }
+                release()
+            } catch (e: Exception) {
+                // Log error but don't throw, as we're cleaning up
+                e.printStackTrace()
+            }
+        }
+        audioRecord = null
+    }
+}
+
+// Translation cache
+@Singleton
+class TranslationCache @Inject constructor() {
+    private val cache = ConcurrentHashMap<String, CachedTranslation>()
+    private val maxCacheSize = 1000
+    private val cacheExpirationMs = 24 * 60 * 60 * 1000L // 24 hours
+
+    data class CachedTranslation(
+        val translation: String,
+        val timestamp: Long = System.currentTimeMillis()
+    )
+
+    fun get(key: String): String? {
+        val cached = cache[key] ?: return null
+
+        // Check if expired
+        if (System.currentTimeMillis() - cached.timestamp > cacheExpirationMs) {
+            cache.remove(key)
+            return null
+        }
+
+        return cached.translation
+    }
+
+    fun put(key: String, translation: String) {
+        // Simple LRU: remove oldest entries if cache is full
+        if (cache.size >= maxCacheSize) {
+            val oldestKey = cache.entries
+                .minByOrNull { it.value.timestamp }
+                ?.key
+
+            oldestKey?.let { cache.remove(it) }
+        }
+
+        cache[key] = CachedTranslation(translation)
+    }
+
+    fun clear() {
+        cache.clear()
+    }
+
+    fun getCacheSize(): Int = cache.size
+}
+
+// Audio processing utilities
+object AudioUtils {
+
+    fun chunked(audioFlow: Flow<FloatArray>, chunkSize: Int): Flow<FloatArray> = flow {
+        val buffer = mutableListOf<Float>()
+
+        audioFlow.collect { chunk ->
+            buffer.addAll(chunk.toList())
+
+            while (buffer.size >= chunkSize) {
+                val outputChunk = buffer.take(chunkSize).toFloatArray()
+                buffer.subList(0, chunkSize).clear()
+                emit(outputChunk)
+            }
+        }
+
+        // Emit remaining data
+        if (buffer.isNotEmpty()) {
+            emit(buffer.toFloatArray())
+        }
+    }
+
+    fun calculateRMS(audioData: FloatArray): Float {
+        val sum = audioData.sumOf { (it * it).toDouble() }
+        return kotlin.math.sqrt(sum / audioData.size).toFloat()
+    }
+
+    fun detectSilence(audioData: FloatArray, threshold: Float = 0.01f): Boolean {
+        return calculateRMS(audioData) < threshold
+    }
+
+    fun normalizeAudio(audioData: FloatArray): FloatArray {
+        val maxValue = audioData.maxOfOrNull { kotlin.math.abs(it) } ?: 1f
+
+        return if (maxValue > 0) {
+            audioData.map { it / maxValue }.toFloatArray()
+        } else {
+            audioData
+        }
+    }
+}
+
+/* ───────── state class ───────── */
+data class CaptionState(
+    val isListening: Boolean = false,
+    val currentTranscript: String = "",
+    val translatedText: String = "",
+    val sourceLanguage: Language = Language.AUTO,
+    val targetLanguage: Language = Language.ENGLISH,
+    val latencyMs: Long = 0,
+    val isModelReady: Boolean = false,
+    val error: String? = null,
+    val isUsingOnlineService: Boolean = false,
+
+    /* new diagnostics / buffers */
+    val audioBuffer: MutableList<FloatArray> = mutableListOf(),
+    val pendingBuffer: MutableList<FloatArray> = mutableListOf(),
+    val lastProcessedTime: Long = 0L,
+    val silenceStartTime: Long? = null,
+    /* history tracking */
+    val transcriptHistory: List<TranscriptEntry> = emptyList()
+)
+
+data class TranscriptEntry(
+    val transcript: String,
+    val translation: String? = null,
+    val timestamp: Long = System.currentTimeMillis(),
+    val source: TranscriptSource = TranscriptSource.VOICE
+)
+// Extension function for Flow<FloatArray>
+fun Flow<FloatArray>.chunked(size: Int): Flow<FloatArray> =
+    AudioUtils.chunked(this, size)
+
+
+
+enum class TranscriptSource {
+    VOICE,
+    TYPED
+}
