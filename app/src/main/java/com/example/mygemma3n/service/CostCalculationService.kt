@@ -26,23 +26,36 @@ class CostCalculationService @Inject constructor(
     ): Double = withContext(Dispatchers.IO) {
         try {
             var totalCost = 0.0
+            // Normalize model name for pricing lookup
+            val normalizedModelName = normalizeModelName(modelName)
+            Timber.d("Calculating cost for model: $modelName (normalized: $normalizedModelName), input: $inputTokens, output: $outputTokens")
 
             // Calculate text input cost
             if (inputTokens > 0) {
-                val inputPricing = pricingConfigDao.getPricingByModelAndType(modelName, TokenType.INPUT)
+                val inputPricing = pricingConfigDao.getPricingByModelAndType(normalizedModelName, TokenType.INPUT)
                 if (inputPricing != null) {
-                    totalCost += inputPricing.calculateCost(inputTokens)
-                    Timber.d("Input cost for $modelName: ${inputPricing.calculateCost(inputTokens)} ($inputTokens tokens)")
+                    val inputCost = inputPricing.calculateCost(inputTokens)
+                    totalCost += inputCost
+                    Timber.d("Input cost for $normalizedModelName: $$inputCost ($inputTokens tokens @ $${inputPricing.pricePerMillionTokens}/M)")
+                } else {
+                    Timber.w("No input pricing found for model: $normalizedModelName (original: $modelName)")
                 }
+            } else {
+                Timber.d("No input tokens for $normalizedModelName")
             }
 
             // Calculate text output cost
             if (outputTokens > 0) {
-                val outputPricing = pricingConfigDao.getPricingByModelAndType(modelName, TokenType.OUTPUT)
+                val outputPricing = pricingConfigDao.getPricingByModelAndType(normalizedModelName, TokenType.OUTPUT)
                 if (outputPricing != null) {
-                    totalCost += outputPricing.calculateCost(outputTokens)
-                    Timber.d("Output cost for $modelName: ${outputPricing.calculateCost(outputTokens)} ($outputTokens tokens)")
+                    val outputCost = outputPricing.calculateCost(outputTokens)
+                    totalCost += outputCost
+                    Timber.d("Output cost for $normalizedModelName: $$outputCost ($outputTokens tokens @ $${outputPricing.pricePerMillionTokens}/M)")
+                } else {
+                    Timber.w("No output pricing found for model: $normalizedModelName (original: $modelName)")
                 }
+            } else {
+                Timber.d("No output tokens for $normalizedModelName")
             }
 
             // Calculate context cache cost if applicable
@@ -72,7 +85,16 @@ class CostCalculationService @Inject constructor(
                 }
             }
 
-            Timber.d("Total cost for $modelName: $$totalCost")
+            if (totalCost == 0.0) {
+                Timber.w("Total cost for $normalizedModelName is $0.0 - check pricing config and token counts")
+                // Debug: List all available pricing configs (only when cost is 0)
+                val allPricing = pricingConfigDao.getAllActivePricing()
+                Timber.d("Available pricing configs: ${allPricing.map { "${it.modelName}:${it.tokenType.name}" }}")
+            }
+            
+            if (totalCost > 0.0) {
+                Timber.d("Total cost for $normalizedModelName: $$totalCost")
+            }
             return@withContext totalCost
 
         } catch (e: Exception) {
@@ -236,6 +258,17 @@ class CostCalculationService @Inject constructor(
     suspend fun initializeDefaultPricing() = withContext(Dispatchers.IO) {
         try {
             val existingPricing = pricingConfigDao.getAllActivePricing()
+            Timber.d("Found ${existingPricing.size} existing pricing configs")
+            
+            // Always ensure GPT-5 mini pricing exists (in case we upgraded from GPT-4o-mini)
+            val hasGpt5Mini = existingPricing.any { it.modelName == "gpt-5-mini" }
+            if (!hasGpt5Mini) {
+                Timber.i("Adding GPT-5 mini pricing configuration")
+                pricingConfigDao.insertPricing(GeminiPricingConfig.GPT_5_MINI_INPUT)
+                pricingConfigDao.insertPricing(GeminiPricingConfig.GPT_5_MINI_OUTPUT)
+                Timber.i("GPT-5 mini pricing added")
+            }
+            
             if (existingPricing.isEmpty()) {
                 Timber.i("Initializing default pricing configuration")
                 GeminiPricingConfig.getAllDefaultPricing().forEach { pricing ->
@@ -245,6 +278,24 @@ class CostCalculationService @Inject constructor(
             }
         } catch (e: Exception) {
             Timber.e(e, "Error initializing default pricing")
+        }
+    }
+    
+    /**
+     * Normalize model names for consistent pricing lookup
+     */
+    private fun normalizeModelName(modelName: String): String {
+        return when {
+            // Remove models/ prefix from Gemma models
+            modelName.startsWith("models/") -> {
+                val cleanName = modelName.removePrefix("models/")
+                // Handle Gemma model variants - map e4b back to e2b for pricing
+                when {
+                    cleanName.contains("gemma-3n-e4b-it") -> "gemma-3n-e2b-it"
+                    else -> cleanName
+                }
+            }
+            else -> modelName
         }
     }
 }

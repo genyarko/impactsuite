@@ -311,7 +311,7 @@ class OptimizedOfflineRAG @Inject constructor(
         val fullResponse = gemma.generateTextAsync(
             prompt,
             UnifiedGemmaService.GenerationConfig(
-                maxTokens = 512,
+                maxTokens = 200,
                 temperature = 0.7f
             )
         )

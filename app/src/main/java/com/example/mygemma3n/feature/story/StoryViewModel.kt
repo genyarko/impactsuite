@@ -191,22 +191,8 @@ class StoryViewModel @Inject constructor(
                 try {
                     storyRepository.updateCurrentPage(currentStory.id, newPage)
                     
-                    // If this is the last page, mark story as completed
-                    if (newPage == currentStory.totalPages - 1) {
-                        storyRepository.markStoryCompleted(currentStory.id)
-                        val updatedStory = currentStory.copy(
-                            currentPage = newPage,
-                            isCompleted = true,
-                            completedAt = System.currentTimeMillis()
-                        )
-                        _state.value = _state.value.copy(currentStory = updatedStory)
-                        
-                        // Update reading progress for completing a story
-                        updateReadingProgress(storiesCompleted = 1)
-                    } else {
-                        // Update reading progress for reading a page
-                        updateReadingProgress(pagesRead = 1)
-                    }
+                    // Update reading progress for reading a page (story completion handled separately)
+                    updateReadingProgress(pagesRead = 1)
                 } catch (e: Exception) {
                     Timber.e(e, "Failed to update page progress")
                 }
@@ -285,6 +271,30 @@ class StoryViewModel @Inject constructor(
 
     fun clearError() {
         _state.value = _state.value.copy(error = null)
+    }
+
+    fun completeStory() {
+        val currentStory = _state.value.currentStory ?: return
+        
+        viewModelScope.launch {
+            try {
+                // Mark story as completed
+                storyRepository.markStoryCompleted(currentStory.id)
+                val updatedStory = currentStory.copy(
+                    isCompleted = true,
+                    completedAt = System.currentTimeMillis()
+                )
+                _state.value = _state.value.copy(currentStory = updatedStory)
+                
+                // Update reading progress for completing a story
+                updateReadingProgress(storiesCompleted = 1)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to complete story")
+                _state.value = _state.value.copy(
+                    error = "Failed to complete story: ${e.message}"
+                )
+            }
+        }
     }
 
     fun showNewStoryDialog() {

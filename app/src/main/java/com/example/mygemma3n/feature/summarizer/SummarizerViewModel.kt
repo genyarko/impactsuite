@@ -35,6 +35,7 @@ class SummarizerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val gemmaService: UnifiedGemmaService,
     private val geminiApiService: GeminiApiService,
+    private val openAIService: com.example.mygemma3n.feature.chat.OpenAIChatService,
     private val settingsRepository: SettingsRepository
 ) : ViewModel() {
 
@@ -68,14 +69,32 @@ class SummarizerViewModel @Inject constructor(
     private suspend fun shouldUseOnlineService(): Boolean {
         return try {
             val useOnlineService = settingsRepository.useOnlineServiceFlow.first()
-            val hasApiKey = settingsRepository.apiKeyFlow.first().isNotBlank()
             val hasNetwork = hasNetworkConnection()
             
-            Timber.d("shouldUseOnlineService: useOnlineService=$useOnlineService, hasApiKey=$hasApiKey, hasNetwork=$hasNetwork")
+            if (!useOnlineService || !hasNetwork) return false
             
-            useOnlineService && hasApiKey && hasNetwork
+            // Check if any API key is available
+            val modelProvider = settingsRepository.modelProviderFlow.first()
+            val hasValidApiKey = when (modelProvider) {
+                "openai" -> openAIService.isInitialized()
+                "gemini" -> settingsRepository.apiKeyFlow.first().isNotBlank()
+                else -> settingsRepository.apiKeyFlow.first().isNotBlank() // Default to Gemini
+            }
+            
+            Timber.d("shouldUseOnlineService: useOnlineService=$useOnlineService, provider=$modelProvider, hasValidApiKey=$hasValidApiKey, hasNetwork=$hasNetwork")
+            
+            hasValidApiKey
         } catch (e: Exception) {
             Timber.w(e, "Error checking service preference, defaulting to offline")
+            false
+        }
+    }
+
+    private suspend fun shouldUseOpenAI(): Boolean {
+        return try {
+            val modelProvider = settingsRepository.modelProviderFlow.first()
+            modelProvider == "openai" && openAIService.isInitialized()
+        } catch (e: Exception) {
             false
         }
     }
@@ -103,13 +122,18 @@ class SummarizerViewModel @Inject constructor(
         
         return if (useOnline) {
             try {
-                Timber.d("Using online service for summarization")
-                initializeApiServiceIfNeeded()
-                geminiApiService.generateTextComplete(
-                    "Summarize the following text in a clear, concise manner. " +
-                    "Focus on the main points and key information:\n\n$text",
-                    "summarizer"
-                )
+                if (shouldUseOpenAI()) {
+                    Timber.d("Using OpenAI service for summarization")
+                    generateSummaryWithOpenAI(text)
+                } else {
+                    Timber.d("Using Gemini service for summarization")
+                    initializeApiServiceIfNeeded()
+                    geminiApiService.generateTextComplete(
+                        "Summarize the following text in a clear, concise manner. " +
+                        "Focus on the main points and key information:\n\n$text",
+                        "summarizer"
+                    )
+                }
             } catch (e: Exception) {
                 Timber.w(e, "Online service failed, falling back to offline")
                 generateSummaryOffline(text)
@@ -117,6 +141,23 @@ class SummarizerViewModel @Inject constructor(
         } else {
             Timber.d("Using offline service for summarization")
             generateSummaryOffline(text)
+        }
+    }
+
+    private suspend fun generateSummaryWithOpenAI(text: String): String {
+        return try {
+            val summaryPrompt = buildSummaryPrompt(text)
+            
+            // Use OpenAI's chat completion with optimized settings for summarization
+            openAIService.generateChatResponseOnline(
+                userMessage = summaryPrompt,
+                conversationHistory = emptyList(), // No history needed for summarization
+                maxTokens = 800, // Increased limit for detailed summaries
+                temperature = 0.3f // Lower temperature for more focused, consistent summaries
+            )
+        } catch (e: Exception) {
+            Timber.e(e, "OpenAI summarization failed")
+            throw e
         }
     }
 
@@ -129,6 +170,38 @@ class SummarizerViewModel @Inject constructor(
             "Summarize the following text in a clear, concise manner. " +
             "Focus on the main points and key information:\n\n$text"
         )
+    }
+
+    private fun buildSummaryPrompt(text: String): String {
+        // Determine text length and adjust prompt accordingly
+        val wordCount = text.split("\\s+".toRegex()).size
+        
+        return when {
+            wordCount > 2000 -> {
+                """Please provide a comprehensive summary of the following text. Focus on:
+                - Main themes and key points
+                - Important conclusions or findings
+                - Critical details that should not be omitted
+                - Logical structure and flow of ideas
+                
+                Text to summarize:
+                $text"""
+            }
+            wordCount > 500 -> {
+                """Please summarize the following text in 3-4 well-structured paragraphs. Capture:
+                - Primary objectives and main points
+                - Key insights and important details
+                - Conclusions and implications
+                
+                Text to summarize:
+                $text"""
+            }
+            else -> {
+                """Please provide a concise summary of the following text in 2-3 sentences, highlighting the most important information:
+                
+                $text"""
+            }
+        }
     }
 
     /* ---------- Public API ---------- */
@@ -190,7 +263,12 @@ class SummarizerViewModel @Inject constructor(
 
     private suspend fun initializeModelIfNeeded() {
         if (shouldUseOnlineService()) {
-            initializeApiServiceIfNeeded()
+            if (shouldUseOpenAI()) {
+                // OpenAI service is already initialized if the API key is valid
+                Timber.d("Using OpenAI for summarization - no additional initialization needed")
+            } else {
+                initializeApiServiceIfNeeded()
+            }
         } else {
             if (!gemmaService.isInitialized()) {
                 gemmaService.initializeBestAvailable()
@@ -400,27 +478,43 @@ class SummarizerViewModel @Inject constructor(
             return generateDirectSummary(extractedText)
         }
 
-        val chunks = extractedText.chunked(MAX_INPUT_CHARS)
+        // For OpenAI, we can use larger chunks due to higher token limits
+        val usingOpenAI = shouldUseOpenAI()
+        val chunkSize = if (usingOpenAI) MAX_INPUT_CHARS * 2 else MAX_INPUT_CHARS
+        val chunks = extractedText.chunked(chunkSize)
         val chunkSummaries = mutableListOf<String>()
 
-        Timber.d("Processing ${chunks.size} chunks sequentially to avoid model reinitialization")
+        Timber.d("Processing ${chunks.size} chunks sequentially (OpenAI: $usingOpenAI)")
 
-        for (chunk in chunks.take(3)) {          // limit to 3 chunks
-            val summary = withContext(Dispatchers.Default) {  // ✅ replaces async/await
-                val prompt = "Key points in 2 sentences: $chunk"
+        val maxChunks = if (usingOpenAI) 5 else 3 // OpenAI can handle more chunks efficiently
+        
+        for (chunk in chunks.take(maxChunks)) {
+            val summary = withContext(Dispatchers.Default) {
+                val prompt = if (usingOpenAI) {
+                    // More detailed instruction for OpenAI
+                    "Extract the key points from this text in 2-3 concise sentences, focusing on the most important information: $chunk"
+                } else {
+                    "Key points in 2 sentences: $chunk"
+                }
+                
                 Timber.d("Chunk prompt length: ${prompt.length} chars (~${prompt.length / 4} tokens)")
-
                 generateSummaryWithService(prompt).trim()
             }
             chunkSummaries.add(summary)
         }
 
         val combinedSummary = chunkSummaries.joinToString(" ")
-        val finalText = if (combinedSummary.length > MAX_INPUT_CHARS) {
-            combinedSummary.take(MAX_INPUT_CHARS) + "..."
+        val maxFinalSize = if (usingOpenAI) MAX_INPUT_CHARS * 3 else MAX_INPUT_CHARS
+        val finalText = if (combinedSummary.length > maxFinalSize) {
+            combinedSummary.take(maxFinalSize) + "..."
         } else combinedSummary
 
-        val finalPrompt = "Combine into 3-4 sentences: $finalText"
+        val finalPrompt = if (usingOpenAI) {
+            "Please synthesize the following key points into a coherent, well-structured summary of 3-4 sentences: $finalText"
+        } else {
+            "Combine into 3-4 sentences: $finalText"
+        }
+        
         Timber.d("Final prompt length: ${finalPrompt.length} chars (~${finalPrompt.length / 4} tokens)")
 
         return generateSummaryWithService(finalPrompt).trim()

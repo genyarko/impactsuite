@@ -43,6 +43,7 @@ class CrisisHandbookViewModel @Inject constructor(
     @ApplicationContext private val appContext: Context,
     private val unifiedGemmaService: UnifiedGemmaService,
     private val geminiApiService: GeminiApiService,
+    private val openAIService: com.example.mygemma3n.feature.chat.OpenAIChatService,
     private val googlePlacesService: GooglePlacesService,
     private val settingsRepository: SettingsRepository,
     private val functionCalling: CrisisFunctionCalling,
@@ -292,6 +293,15 @@ SPLINTING BASICS:
         }
     }
 
+    private suspend fun shouldUseOpenAI(): Boolean {
+        return try {
+            val modelProvider = settingsRepository.modelProviderFlow.first()
+            modelProvider == "openai" && openAIService.isInitialized() && shouldUseOnlineService()
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     private suspend fun initializeApiServiceIfNeeded() {
         if (!geminiApiService.isInitialized()) {
             val apiKey = settingsRepository.apiKeyFlow.first()
@@ -334,8 +344,9 @@ SPLINTING BASICS:
 
         viewModelScope.launch {
             try {
-                // Update service mode indicator
+                // Update service mode indicator  
                 val usingOnline = shouldUseOnlineService()
+                val usingOpenAI = shouldUseOpenAI()
                 
                 // Clear previous state and show processing
                 _state.update {
@@ -348,6 +359,9 @@ SPLINTING BASICS:
                         isUsingOnlineService = usingOnline
                     )
                 }
+
+                // Log which service is being used for debugging
+                Timber.d("Crisis service selection: online=$usingOnline, openAI=$usingOpenAI")
 
                 Timber.d("Processing emergency query: $query")
 
@@ -513,8 +527,12 @@ SPLINTING BASICS:
     private suspend fun generateFirstAidResponseWithService(query: String): String {
         return if (shouldUseOnlineService()) {
             try {
-                initializeApiServiceIfNeeded()
-                generateFirstAidResponseOnline(query)
+                if (shouldUseOpenAI()) {
+                    generateFirstAidResponseWithOpenAI(query)
+                } else {
+                    initializeApiServiceIfNeeded()
+                    generateFirstAidResponseOnline(query)
+                }
             } catch (e: Exception) {
                 Timber.w(e, "Online first aid response failed, falling back to offline")
                 generateFirstAidResponseOptimized(query)
@@ -524,6 +542,41 @@ SPLINTING BASICS:
         }
     }
     
+    private suspend fun generateFirstAidResponseWithOpenAI(query: String): String {
+        val prompt = """You are a certified emergency first aid instructor providing life-saving guidance. 
+
+EMERGENCY SITUATION: "$query"
+
+Provide clear, actionable first aid instructions:
+
+**IMMEDIATE SAFETY:**
+- Quick safety assessment
+- Scene security steps
+
+**FIRST AID STEPS:**
+- Step-by-step instructions
+- Clear, numbered actions
+- Critical warnings
+
+**EMERGENCY SERVICES:**
+- When to call 112/193 immediately
+- What to tell emergency responders
+
+**ADDITIONAL CARE:**
+- Monitoring vital signs
+- Comfort measures until help arrives
+
+Keep instructions concise but comprehensive. Focus on immediate life-saving actions first."""
+
+        val response = openAIService.generateTextResponseOnline(
+            userMessage = prompt,
+            maxTokens = 1200,
+            temperature = 0.3f, // Lower temperature for medical accuracy
+            serviceType = "crisis_first_aid"
+        )
+        return if (response.isBlank()) genericFallback else response
+    }
+
     private suspend fun generateFirstAidResponseOnline(query: String): String {
         val prompt = """You are a qualified first aid instructor. For this situation: "$query"
         
@@ -581,14 +634,62 @@ $response
     private suspend fun generateEmergencyResponseWithService(query: String): String {
         return if (shouldUseOnlineService()) {
             try {
-                initializeApiServiceIfNeeded()
-                generateEmergencyResponseOnline(query)
+                if (shouldUseOpenAI()) {
+                    generateEmergencyResponseWithOpenAI(query)
+                } else {
+                    initializeApiServiceIfNeeded()
+                    generateEmergencyResponseOnline(query)
+                }
             } catch (e: Exception) {
                 Timber.w(e, "Online emergency response failed, falling back to offline")
                 generateEmergencyResponseWithFallback(query)
             }
         } else {
             generateEmergencyResponseWithFallback(query)
+        }
+    }
+
+    private suspend fun generateEmergencyResponseWithOpenAI(query: String): String {
+        val prompt = """You are an emergency response coordinator providing critical assistance.
+
+EMERGENCY SITUATION: "$query"
+
+Provide immediate emergency guidance following this format:
+
+🚨 **IMMEDIATE ACTIONS:**
+- Most critical first steps
+- Safety priority measures
+- Time-sensitive actions
+
+📞 **EMERGENCY SERVICES:**
+- When to call 112 or 193
+- What information to provide
+- Who to contact first
+
+⚠️ **SAFETY WARNINGS:**
+- What NOT to do
+- Danger signs to watch for
+- When situation is life-threatening
+
+🎯 **NEXT STEPS:**
+- Follow-up actions
+- Continued monitoring
+- Ongoing care instructions
+
+Keep response practical, clear, and focused on immediate safety. Prioritize life-saving actions."""
+
+        return try {
+            withTimeoutOrNull(45_000) { // Increased from 8s to 45s to allow for OpenAI response time
+                val response = openAIService.generateTextResponseOnline(
+                    userMessage = prompt,
+                    maxTokens = 2500,
+                    temperature = 0.2f // Very low temperature for emergency accuracy
+                )
+                if (response.isBlank()) noResponseFallback else response
+            } ?: timeoutFallback
+        } catch (e: Exception) {
+            Timber.e(e, "Error generating OpenAI emergency response")
+            throw e
         }
     }
     
@@ -798,8 +899,37 @@ Keep response brief but comprehensive. Focus on safety."""
                 if (distanceToCapital > 100) {
                     // Use AI for remote area guidance
                     val aiGuidance = withTimeoutOrNull(6_000) {
-                        geminiApiService.generateTextComplete(
-                            """The user is in a remote area ${distanceToCapital.toInt()}km from ${nearestCapital.capital}, ${nearestCapital.country}.
+                        if (shouldUseOpenAI()) {
+                            val prompt = """REMOTE EMERGENCY LOCATION: ${distanceToCapital.toInt()}km from ${nearestCapital.capital}, ${nearestCapital.country}
+
+Provide critical medical guidance for remote area:
+
+**FINDING MEDICAL CARE:**
+- Nearest medical facilities in rural ${nearestCapital.country}
+- Alternative healthcare options
+- Community health resources
+
+**EMERGENCY CONTACTS:**
+- Emergency numbers for ${nearestCapital.country}
+- Regional rescue services
+- Medical evacuation contacts
+
+**EVACUATION GUIDANCE:**
+- When to seek evacuation to ${nearestCapital.capital}
+- Transportation options
+- Preparation for medical transfer
+
+Keep guidance practical and location-specific."""
+
+                            openAIService.generateTextResponseOnline(
+                                userMessage = prompt,
+                                maxTokens = 1000,
+                                temperature = 0.3f,
+                                serviceType = "crisis_emergency"
+                            )
+                        } else {
+                            geminiApiService.generateTextComplete(
+                                """The user is in a remote area ${distanceToCapital.toInt()}km from ${nearestCapital.capital}, ${nearestCapital.country}.
                             
 Provide emergency medical guidance:
                             1. How to find nearest medical facilities in rural ${nearestCapital.country}
@@ -807,8 +937,9 @@ Provide emergency medical guidance:
                             3. When to seek evacuation to ${nearestCapital.capital}
                             
 Keep response brief and practical.""",
-                            "crisis"
-                        )
+                                "crisis"
+                            )
+                        }
                     }
                     
                     if (aiGuidance != null && aiGuidance.isNotBlank()) {

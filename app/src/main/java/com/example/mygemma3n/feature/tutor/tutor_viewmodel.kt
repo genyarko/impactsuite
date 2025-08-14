@@ -15,6 +15,7 @@ import com.example.mygemma3n.service.AudioCaptureService
 import com.example.mygemma3n.shared_utilities.OfflineRAG
 import com.example.mygemma3n.shared_utilities.TextToSpeechManager
 import com.example.mygemma3n.feature.chat.ChatMessage
+import com.example.mygemma3n.feature.chat.OpenAIChatService
 import com.example.mygemma3n.data.cache.CurriculumCache
 import com.example.mygemma3n.feature.analytics.LearningAnalyticsRepository
 import com.example.mygemma3n.feature.analytics.InteractionType
@@ -43,6 +44,7 @@ class TutorViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
     private val gemmaService: UnifiedGemmaService,
     private val geminiApiService: GeminiApiService,
+    private val openAIChatService: OpenAIChatService,
     private val settingsRepository: SettingsRepository,
     private val offlineRAG: OfflineRAG,
     private val speechService: SpeechRecognitionService,
@@ -96,7 +98,7 @@ class TutorViewModel @Inject constructor(
     private suspend fun shouldUseOnlineService(): Boolean {
         return try {
             val useOnlineService = settingsRepository.useOnlineServiceFlow.first()
-            val hasApiKey = settingsRepository.apiKeyFlow.first().isNotBlank()
+            val hasApiKey = hasValidApiKey()
             val hasNetwork = hasNetworkConnection()
             
             useOnlineService && hasApiKey && hasNetwork
@@ -104,6 +106,18 @@ class TutorViewModel @Inject constructor(
             Timber.w(e, "Error checking service preference, defaulting to offline")
             false
         }
+    }
+
+    private suspend fun hasValidApiKey(): Boolean {
+        val modelProvider = settingsRepository.modelProviderFlow.first()
+        return when (modelProvider) {
+            "openai" -> openAIChatService.isInitialized()
+            else -> settingsRepository.apiKeyFlow.first().isNotBlank()
+        }
+    }
+
+    private suspend fun shouldUseOpenAI(): Boolean {
+        return settingsRepository.modelProviderFlow.first() == "openai"
     }
 
     private suspend fun initializeApiServiceIfNeeded() {
@@ -126,7 +140,16 @@ class TutorViewModel @Inject constructor(
     private suspend fun warmUpApiService() {
         try {
             val warmupPrompt = "Hi" // Minimal prompt
-            geminiApiService.generateTextComplete(warmupPrompt, "warmup")
+            if (shouldUseOpenAI()) {
+                openAIChatService.generateChatResponseOnline(
+                    userMessage = warmupPrompt,
+                    conversationHistory = emptyList(),
+                    maxTokens = 500,  // Increased from 50 to 500 to prevent warmup truncation
+                    temperature = 1.0f  // GPT-5-mini only supports default temperature
+                )
+            } else {
+                geminiApiService.generateTextComplete(warmupPrompt, "warmup")
+            }
             Timber.d("API service warmed up successfully")
         } catch (e: Exception) {
             Timber.w(e, "API warmup failed, but service should still work")
@@ -631,8 +654,24 @@ private suspend fun generateAdaptiveResponseOnline(
     )
 
     try {
-        val response = withTimeoutOrNull(12_000) { // 12 second timeout
-            geminiApiService.generateTextComplete(fullPrompt, "tutor")
+        val response = withTimeoutOrNull(30_000) { // Increased from 12s to 30s timeout
+            if (shouldUseOpenAI()) {
+                // Convert tutor prompt to chat format for OpenAI
+                val chatHistory = _state.value.messages.takeLast(5).map { msg ->
+                    if (msg.isUser) {
+                        ChatMessage.User(msg.content)
+                    } else {
+                        ChatMessage.AI(msg.content)
+                    }
+                }
+                openAIChatService.generateConversationalResponse(
+                    userMessage = fullPrompt,
+                    conversationHistory = chatHistory,
+                    personalityType = "educational"
+                )
+            } else {
+                geminiApiService.generateTextComplete(fullPrompt, "tutor")
+            }
         } ?: throw IllegalStateException("Response timeout")
 
         return if (response.isBlank()) {

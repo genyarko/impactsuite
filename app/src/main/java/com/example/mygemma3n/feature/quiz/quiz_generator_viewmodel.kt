@@ -8,6 +8,7 @@ import com.example.mygemma3n.data.UnifiedGemmaService
 import com.example.mygemma3n.data.GeminiApiService
 import com.example.mygemma3n.data.GeminiApiConfig
 import com.example.mygemma3n.domain.repository.SettingsRepository
+import com.example.mygemma3n.feature.chat.OpenAIChatService
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import com.example.mygemma3n.feature.analytics.LearningAnalyticsRepository
@@ -47,7 +48,14 @@ class QuizGeneratorViewModel @Inject constructor(
     private val studentIntegration: QuizStudentIntegration,
     private val analyticsRepository: LearningAnalyticsRepository,
     private val onlineQuizGenerator: OnlineQuizGenerator,
-    private val geminiApiService: GeminiApiService
+    private val geminiApiService: GeminiApiService,
+    private val openAIChatService: OpenAIChatService,
+    // New refactored components
+    private val networkManager: QuizNetworkManager,
+    private val jsonParser: QuizJsonParser,
+    private val promptGenerator: QuizPromptGenerator,
+    private val studentManager: QuizStudentManager,
+    private val progressTracker: QuizProgressTracker
 ) : ViewModel() {
 
     /* ───────── UI state ───────── */
@@ -149,27 +157,12 @@ class QuizGeneratorViewModel @Inject constructor(
 
     /* ───────── Online/Offline Service Selection ───────── */
 
-    private fun hasNetworkConnection(): Boolean {
-        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val activeNetwork = connectivityManager.activeNetwork ?: return false
-        val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
-        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
-                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
-    }
-
-    private suspend fun shouldUseOnlineService(): Boolean {
-        return try {
-            val useOnlineService = settingsRepo.useOnlineServiceFlow.first()
-            val hasApiKey = settingsRepo.apiKeyFlow.first().isNotBlank()
-            val hasNetwork = hasNetworkConnection()
-            
-            useOnlineService && hasApiKey && hasNetwork
-        } catch (e: Exception) {
-            Timber.w(e, "Error checking service preference, defaulting to offline")
-            false
-        }
-    }
+    // Replaced with QuizNetworkManager methods
+    private fun hasNetworkConnection(): Boolean = networkManager.hasNetworkConnection()
+    
+    private suspend fun shouldUseOnlineService(): Boolean = networkManager.shouldUseOnlineService()
+    
+    private suspend fun shouldUseOpenAI(): Boolean = networkManager.shouldUseOpenAI()
 
     private suspend fun initializeApiServiceIfNeeded() {
         if (!geminiApiService.isInitialized()) {
@@ -246,20 +239,17 @@ class QuizGeneratorViewModel @Inject constructor(
         _state.update { it.copy(isLoadingCurriculum = true) }
 
         try {
-            // This would load topics from curriculum files
-            // You can expand this to actually parse the curriculum
-            val topics = listOf(
-                "Numbers and Operations",
-                "Geometry and Shapes",
-                "Measurement",
-                "Data and Graphs"
-            )
-
-            _state.update {
-                it.copy(
-                    curriculumTopics = topics,
-                    isLoadingCurriculum = false
-                )
+            // Use QuizStudentManager to load curriculum topics
+            studentManager.loadCurriculumTopics(gradeLevel)
+            
+            // Observe the topics from studentManager
+            studentManager.curriculumTopics.collect { topics ->
+                _state.update {
+                    it.copy(
+                        curriculumTopics = topics,
+                        isLoadingCurriculum = false
+                    )
+                }
             }
         } catch (e: Exception) {
             Timber.e(e, "Failed to load curriculum")
@@ -271,21 +261,19 @@ class QuizGeneratorViewModel @Inject constructor(
 
     private suspend fun loadUserProgress() {
         try {
-            val subjects = _state.value.subjects
-            val progressMap = mutableMapOf<Subject, Float>()
-
-            subjects.forEach { subject ->
-                val oneWeekAgo = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000L)
-                val accuracy = quizRepo.progressDao().recentAccuracy(subject, oneWeekAgo)
-                progressMap[subject] = accuracy
-
-                // Check for review questions
-                val reviewQuestions = quizRepo.getQuestionsForSpacedReview(subject)
-                _state.update {
-                    it.copy(
-                        userProgress = progressMap,
-                        reviewQuestionsAvailable = reviewQuestions.size
-                    )
+            // Use QuizProgressTracker to load comprehensive user progress
+            progressTracker.loadUserProgress()
+            
+            // Observe progress data from the tracker
+            viewModelScope.launch {
+                progressTracker.userProgress.collect { progressMap ->
+                    _state.update { it.copy(userProgress = progressMap) }
+                }
+            }
+            
+            viewModelScope.launch {
+                progressTracker.reviewQuestionsAvailable.collect { reviewCount ->
+                    _state.update { it.copy(reviewQuestionsAvailable = reviewCount) }
                 }
             }
         } catch (e: Exception) {
@@ -308,6 +296,9 @@ class QuizGeneratorViewModel @Inject constructor(
                 score = score
             )
             quizRepo.saveQuiz(completedQuiz)
+            
+            // Record quiz completion in QuizProgressTracker for enhanced analytics
+            progressTracker.recordQuizCompletion(completedQuiz)
         }
 
         // Clear current quiz state
@@ -372,15 +363,32 @@ class QuizGeneratorViewModel @Inject constructor(
                 _state.update { it.copy(generationPhase = "Generating online quiz...") }
                 try {
                     initializeApiServiceIfNeeded()
-                    val onlineQuestions = onlineQuizGenerator.generateCurriculumAwareOnlineQuiz(
-                        subject = subject,
-                        gradeLevel = gradeLevel,
-                        topic = topic,
-                        count = questionCount,
-                        country = _state.value.studentCountry,
-                        studentName = _state.value.studentName,
-                        previousQuestions = getRecentQuestionTexts(subject, topic)
-                    )
+                    val onlineQuestions = if (shouldUseOpenAI()) {
+                        // Use OpenAI for quiz generation
+                        _state.update { it.copy(generationPhase = "Generating quiz with OpenAI...") }
+                        val response = openAIChatService.generateCurriculumAwareQuiz(
+                            subject = subject.name,
+                            gradeLevel = gradeLevel,
+                            topic = topic,
+                            count = questionCount,
+                            country = _state.value.studentCountry,
+                            studentName = _state.value.studentName,
+                            previousQuestions = getRecentQuestionTexts(subject, topic)
+                        )
+                        parseOpenAIQuizResponse(response)
+                    } else {
+                        // Use Gemini for quiz generation
+                        _state.update { it.copy(generationPhase = "Generating quiz with Gemini...") }
+                        onlineQuizGenerator.generateCurriculumAwareOnlineQuiz(
+                            subject = subject,
+                            gradeLevel = gradeLevel,
+                            topic = topic,
+                            count = questionCount,
+                            country = _state.value.studentCountry,
+                            studentName = _state.value.studentName,
+                            previousQuestions = getRecentQuestionTexts(subject, topic)
+                        )
+                    }
                     
                     // Check if we got any questions from online generation
                     if (onlineQuestions.isNotEmpty()) {
@@ -724,7 +732,13 @@ class QuizGeneratorViewModel @Inject constructor(
             // For fill-in-blank and short answer, check for acceptable variations
             if (!correct && (q.questionType == QuestionType.FILL_IN_BLANK ||
                         q.questionType == QuestionType.SHORT_ANSWER)) {
-                correct = checkAnswerVariations(normalizedUserAnswer, normalizedCorrectAnswer, q)
+                
+                // Special handling for flexible/open-ended answers
+                if (!correct) {
+                    correct = isFlexibleAnswer(normalizedCorrectAnswer, normalizedUserAnswer)
+                }
+                
+                correct = correct || checkAnswerVariations(normalizedUserAnswer, normalizedCorrectAnswer, q)
                 
                 // Additional lenient check for 6th graders - accept if user mentions any key concept
                 if (!correct) {
@@ -754,6 +768,11 @@ class QuizGeneratorViewModel @Inject constructor(
                 0L,
                 q.conceptsCovered
             )
+            
+            // Also record in QuizProgressTracker for enhanced analytics
+            viewModelScope.launch {
+                progressTracker.recordQuestionAttempt(q, correct, 0L)
+            }
 
             // Track quiz interaction for analytics
             viewModelScope.launch {
@@ -818,291 +837,66 @@ class QuizGeneratorViewModel @Inject constructor(
         return "Not quite. The correct answer is '${q.correctAnswer}'. ${q.explanation}"
     }
 
-    // Helper function to normalize answers
-    private fun normalizeAnswer(answer: String): String {
-        return answer
-            .trim()
-            .lowercase()
-            // Remove common articles at the beginning
-            .replace(Regex("^(the|a|an)\\s+"), "")
-            // Remove punctuation
-            .replace(Regex("[.,!?;:'\"-]"), "")
-            // Normalize whitespace
-            .replace(Regex("\\s+"), " ")
-            .trim()
-    }
-
-    // 4. ENHANCED ANSWER VARIATIONS CHECK
-    private fun checkAnswerVariations(userAnswer: String, correctAnswer: String, question: Question): Boolean {
-        // Check for compound answers with parenthetical explanations
-        val compoundAnswerPattern = """(.+?)\s*\([^)]*\)\s*(or|and)\s*(.+?)\s*\([^)]*\)""".toRegex()
-        val singleAnswerPattern = """(.+?)\s*\([^)]*\)""".toRegex()
-        
-        // Extract main terms from compound answers
-        val correctAnswerParts = when {
-            compoundAnswerPattern.containsMatchIn(correctAnswer) -> {
-                // Handle "term1 (explanation) or term2 (explanation)" format
-                compoundAnswerPattern.find(correctAnswer)?.let { match ->
-                    listOf(
-                        normalizeAnswer(match.groupValues[1].trim()),
-                        normalizeAnswer(match.groupValues[3].trim())
-                    )
-                } ?: listOf(normalizeAnswer(correctAnswer))
-            }
-            singleAnswerPattern.containsMatchIn(correctAnswer) -> {
-                // Handle "term (explanation)" format
-                singleAnswerPattern.find(correctAnswer)?.let { match ->
-                    listOf(normalizeAnswer(match.groupValues[1].trim()))
-                } ?: listOf(normalizeAnswer(correctAnswer))
-            }
-            correctAnswer.contains(" or ") -> {
-                // Handle simple "term1 or term2" format
-                correctAnswer.split(" or ").map { normalizeAnswer(it.trim()) }
-            }
-            correctAnswer.contains(" and ") -> {
-                // Handle simple "term1 and term2" format
-                correctAnswer.split(" and ").map { normalizeAnswer(it.trim()) }
-            }
-            else -> listOf(normalizeAnswer(correctAnswer))
-        }
-        
-        // Check if user answer matches any of the acceptable parts
-        if (correctAnswerParts.any { it == userAnswer || it.contains(userAnswer) || userAnswer.contains(it) }) {
-            return true
-        }
-
-        // Direct variations mapping
-        val answerVariations = mapOf(
-            "industrial revolution" to listOf(
-                "industrial revolution",
-                "the industrial revolution",
-                "industrialization",
-                "industrial age",
-                "industrial era"
-            ),
-            "photosynthesis" to listOf(
-                "photosynthesis",
-                "photo synthesis",
-                "photosynthetic process",
-                "the process of photosynthesis"
-            ),
-            "evaporation" to listOf(
-                "evaporation",
-                "evaporating",
-                "water evaporation",
-                "the evaporation process"
-            ),
-            "mitochondria" to listOf(
-                "mitochondria",
-                "mitochondrion",
-                "the mitochondria",
-                "mitochondrial"
-            ),
-            "karma" to listOf(
-                "karma",
-                "good deeds and bad deeds",
-                "actions and consequences",
-                "law of karma"
-            ),
-            "dharma" to listOf(
-                "dharma",
-                "righteous duty",
-                "moral law",
-                "religious duty"
-            )
-        )
-
-        // Check if the user answer or any correct answer part has known variations
-        val allAnswerParts = correctAnswerParts + listOf(normalizeAnswer(correctAnswer))
-        for (answerPart in allAnswerParts) {
-            val variations = answerVariations[answerPart] ?: emptyList()
-            if (variations.any { normalizeAnswer(it) == userAnswer }) {
-                return true
-            }
-        }
-
-        // Enhanced semantic matching for better coverage
-        val userWords = userAnswer.split(" ").filter { it.length > 2 }
-        val correctWords = correctAnswerParts.flatMap { it.split(" ").filter { word -> word.length > 2 } }
-
-        if (userWords.isEmpty() || correctWords.isEmpty()) {
-            return false
-        }
-
-        // Semantic word mappings for better matching
-        val semanticMappings = mapOf(
-            "water" to listOf("water", "drinking", "irrigation", "hydration"),
-            "food" to listOf("food", "farming", "agriculture", "crops", "harvest"),
-            "transport" to listOf("transport", "transportation", "trade", "travel", "movement"),
-            "provided" to listOf("provided", "gave", "supplied", "offered", "made"),
-            "easier" to listOf("easier", "better", "improved", "facilitated"),
-            "climate" to listOf("climate", "weather", "environment", "conditions"),
-            "egyptian" to listOf("egyptian", "egypt", "ancient"),
-            "nile" to listOf("nile", "river")
-        )
-
-        val matchingWords = userWords.count { userWord ->
-            correctWords.any { correctWord ->
-                // Direct match
-                userWord == correctWord ||
-                // Substring matching
-                (userWord.length > 3 && correctWord.contains(userWord)) ||
-                (correctWord.length > 3 && userWord.contains(correctWord)) ||
-                // Prefix matching
-                (userWord.length > 4 && correctWord.startsWith(userWord)) ||
-                (correctWord.length > 4 && userWord.startsWith(correctWord)) ||
-                // Semantic mapping check
-                semanticMappings[userWord]?.contains(correctWord) == true ||
-                semanticMappings[correctWord]?.contains(userWord) == true
-            }
-        }
-
-        // Expanded key concepts for better coverage (more lenient for 6th graders)
-        val keyConceptsSet = setOf(
-            "water", "food", "transport", "transportation", "trade", "farming", "agriculture",
-            "leader", "leadership", "ruler", "king", "queen", "government", "rule", "control",
-            "egypt", "egyptian", "nile", "river", "flood", "flooding", "harvest", "planting",
-            "ancient", "civilization", "empire", "kingdom", "city", "culture", "religion",
-            "democracy", "republic", "monarchy", "organize", "organization", "skill", "skills",
-            "communication", "roads", "canals", "harbors", "travel", "commerce", "goods",
-            "agreement", "exchange", "infrastructure", "customers", "business", "economy"
-        )
-        
-        val keyConceptsInUser = userWords.intersect(keyConceptsSet)
-        val keyConceptsInCorrect = correctWords.intersect(keyConceptsSet)
-        val conceptCoverage = if (keyConceptsInCorrect.isNotEmpty()) {
-            keyConceptsInUser.size.toFloat() / keyConceptsInCorrect.size
-        } else 0f
-
-        val similarity = matchingWords.toFloat() / maxOf(userWords.size, correctWords.size)
-        
-        // More lenient thresholds for 6th graders:
-        // - Accept if user mentions ANY key concept (even just one)
-        // - Lower word similarity requirement
-        // - Accept if user answer contains at least one important word
-        val hasKeyWords = keyConceptsInUser.isNotEmpty()
-        val hasReasonableSimilarity = similarity >= 0.3f  // Lowered from 0.6f
-        val hasGoodConceptCoverage = conceptCoverage >= 0.5f  // Lowered from 0.7f
-        
-        return hasKeyWords || hasReasonableSimilarity || hasGoodConceptCoverage
-    }
 
     /**
-     * Enhanced keyword matching - accept if user demonstrates understanding of key concepts
+     * Check if the expected answer indicates this is an open-ended question that should accept any reasonable response
      */
-    private fun checkSimpleKeywordMatch(userAnswer: String, correctAnswer: String): Boolean {
-        val userWords = userAnswer.split(" ").filter { it.length > 2 }.map { it.lowercase() }
-        val correctWords = correctAnswer.split(" ").filter { it.length > 2 }.map { it.lowercase() }
-        
-        // Expanded key educational concepts across all subjects
-        val importantConcepts = setOf(
-            // History & Government
-            "trade", "trading", "leader", "leadership", "ruler", "rule", "government", 
-            "skill", "skills", "organization", "communicate", "communication",
-            "roads", "infrastructure", "agriculture", "farming", "water", "nile",
-            "egypt", "egyptian", "ancient", "civilization", "democracy", "republic",
-            
-            // Geography & Demographics
-            "population", "people", "density", "coastal", "coast", "cities", "city",
-            "urban", "rural", "mountain", "mountains", "plains", "rivers", "river",
-            "fertile", "land", "resources", "climate", "migrate", "move", "settlement",
-            "region", "area", "location", "northern", "southern", "eastern", "western",
-            
-            // Science & Nature
-            "climate", "weather", "temperature", "precipitation", "ecosystem", "habitat",
-            "species", "adaptation", "environment", "natural", "resources", "energy",
-            
-            // Economics & Social
-            "economy", "economic", "jobs", "employment", "industry", "services",
-            "culture", "cultural", "society", "social", "community", "family"
+    private fun isFlexibleAnswer(expectedAnswer: String, userAnswer: String): Boolean {
+        // Common patterns that indicate open-ended questions
+        val flexibleAnswerPatterns = listOf(
+            "answers will vary",
+            "answers may vary",
+            "various answers",
+            "multiple answers",
+            "depends on",
+            "student answers",
+            "open response",
+            "personal opinion",
+            "individual response",
+            "varies",
+            "different answers",
+            "any reasonable",
+            "sample answer",
+            "example answer",
+            "possible answer",
+            "could include",
+            "might include"
         )
         
-        // Check for semantic word overlap (more lenient)
-        val userConcepts = userWords.intersect(importantConcepts)
-        val correctConcepts = correctWords.intersect(importantConcepts)
-        
-        // Accept if user mentions relevant concepts
-        if (userConcepts.isNotEmpty() && correctConcepts.isNotEmpty()) {
-            val hasOverlap = userConcepts.intersect(correctConcepts).isNotEmpty()
-            val hasRelevantConcept = userConcepts.size >= 1
-            return hasOverlap || hasRelevantConcept
+        // Check if the expected answer contains any flexible patterns
+        val isFlexibleExpected = flexibleAnswerPatterns.any { pattern ->
+            expectedAnswer.contains(pattern, ignoreCase = true)
         }
         
-        // Additional lenient check: partial word matching for key terms
-        val keyTermsInCorrect = correctWords.filter { word ->
-            importantConcepts.any { concept -> word.contains(concept) || concept.contains(word) }
-        }
-        val keyTermsInUser = userWords.filter { word ->
-            importantConcepts.any { concept -> word.contains(concept) || concept.contains(word) }
-        }
-        
-        // Accept if user mentions any key geographic/demographic terms for population questions
-        val isPopulationQuestion = correctWords.any { it in setOf("population", "density", "people", "coastal", "cities") }
-        val userMentionsPopulationConcepts = userWords.any { it in setOf("people", "population", "cities", "coastal", "move", "southern", "northern") }
-        
-        return (keyTermsInCorrect.isNotEmpty() && keyTermsInUser.isNotEmpty()) ||
-               (isPopulationQuestion && userMentionsPopulationConcepts)
-    }
-
-    /**
-     * Special lenient checking for geographic and demographic questions
-     */
-    private fun checkGeographicConceptMatch(userAnswer: String, correctAnswer: String, question: Question): Boolean {
-        val userWords = userAnswer.lowercase().split(" ").filter { it.length > 2 }
-        val correctWords = correctAnswer.lowercase().split(" ").filter { it.length > 2 }
-        
-        // Check if this is a population/demographic question
-        val isPopulationQuestion = correctWords.any { 
-            it in setOf("population", "density", "people", "coastal", "cities", "plains", "rivers", "fertile", "mountainous") 
-        }
-        
-        if (isPopulationQuestion) {
-            // For population questions, accept if user shows understanding of:
-            // 1. Where people live (coastal, cities, south, north, etc.)
-            // 2. Why people live there (resources, fertile, etc.)
-            val populationConcepts = setOf(
-                "people", "population", "live", "move", "cities", "city", "urban",
-                "coastal", "coast", "southern", "northern", "eastern", "western",
-                "plains", "rivers", "fertile", "resources", "farming", "mountains",
-                "density", "higher", "lower", "areas", "regions"
+        if (isFlexibleExpected) {
+            // For flexible questions, accept any non-empty response that shows effort
+            val trimmedUserAnswer = userAnswer.trim()
+            
+            // Reject obviously incomplete or non-effort responses
+            val rejectedResponses = setOf(
+                "", "i don't know", "dont know", "idk", "no idea", "nothing", 
+                "not sure", "dunno", "?", "??", "???"
             )
             
-            val userPopulationConcepts = userWords.intersect(populationConcepts)
-            val correctPopulationConcepts = correctWords.intersect(populationConcepts)
-            
-            // Accept if user mentions relevant population concepts
-            if (userPopulationConcepts.isNotEmpty() && correctPopulationConcepts.isNotEmpty()) {
-                return true
+            if (trimmedUserAnswer.lowercase() in rejectedResponses) {
+                return false
             }
             
-            // Specific pattern matching for population distribution answers
-            val userMentionsLocation = userWords.any { it in setOf("southern", "coastal", "cities", "plains") }
-            val correctMentionsLocation = correctWords.any { it in setOf("southern", "coastal", "cities", "plains") }
-            
-            if (userMentionsLocation && correctMentionsLocation) {
-                return true
-            }
-        }
-        
-        // Check for climate/geography questions
-        val isGeographyQuestion = correctWords.any {
-            it in setOf("climate", "weather", "temperature", "rainfall", "desert", "forest", "mountain", "ocean")
-        }
-        
-        if (isGeographyQuestion) {
-            val geographyConcepts = setOf(
-                "climate", "weather", "hot", "cold", "dry", "wet", "rain", "rainfall",
-                "desert", "forest", "mountain", "ocean", "temperature", "season"
-            )
-            
-            val userGeoConcepts = userWords.intersect(geographyConcepts)
-            val correctGeoConcepts = correctWords.intersect(geographyConcepts)
-            
-            return userGeoConcepts.isNotEmpty() && correctGeoConcepts.isNotEmpty()
+            // Accept if user provided any meaningful response (at least 2 characters)
+            return trimmedUserAnswer.length >= 2
         }
         
         return false
     }
+
+    // NOTE: checkAnswerVariations function has been moved to AnswerCheckingUtils class
+    // This consolidates all answer checking logic in a single, reusable utility class
+
+    // NOTE: checkSimpleKeywordMatch function has been moved to AnswerCheckingUtils class
+    // This consolidates all answer checking logic in a single, reusable utility class
+
+    // NOTE: checkGeographicConceptMatch function has been moved to AnswerCheckingUtils class
+    // This consolidates all answer checking logic in a single, reusable utility class
 
     /* ─────────────────────── Enhanced Question generation with retry ─────────────────────── */
 
@@ -1124,17 +918,34 @@ class QuizGeneratorViewModel @Inject constructor(
                 val question = if (useOnline) {
                     try {
                         initializeApiServiceIfNeeded()
-                        val onlineQuestions = onlineQuizGenerator.generateQuestionsOnline(
-                            subject = subject,
-                            topic = topic,
-                            difficulty = difficulty,
-                            questionTypes = listOf(questionType),
-                            count = 1,
-                            previousQuestions = previousQuestions,
-                            studentName = _state.value.studentName,
-                            gradeLevel = _state.value.studentGrade,
-                            country = _state.value.studentCountry
-                        )
+                        val onlineQuestions = if (shouldUseOpenAI()) {
+                            // Use OpenAI for individual question generation
+                            val response = openAIChatService.generateQuizQuestionsOnline(
+                                subject = subject.name,
+                                topic = topic,
+                                difficulty = difficulty.name,
+                                questionTypes = listOf(questionType.name),
+                                count = 1,
+                                previousQuestions = previousQuestions,
+                                studentName = _state.value.studentName,
+                                gradeLevel = _state.value.studentGrade,
+                                country = _state.value.studentCountry
+                            )
+                            parseOpenAIQuizResponse(response)
+                        } else {
+                            // Use Gemini for individual question generation
+                            onlineQuizGenerator.generateQuestionsOnline(
+                                subject = subject,
+                                topic = topic,
+                                difficulty = difficulty,
+                                questionTypes = listOf(questionType),
+                                count = 1,
+                                previousQuestions = previousQuestions,
+                                studentName = _state.value.studentName,
+                                gradeLevel = _state.value.studentGrade,
+                                country = _state.value.studentCountry
+                            )
+                        }
                         onlineQuestions.firstOrNull() ?: throw Exception("No question generated online")
                     } catch (e: Exception) {
                         Timber.w(e, "Online generation failed, falling back to offline")
@@ -1193,7 +1004,7 @@ class QuizGeneratorViewModel @Inject constructor(
         previousQuestions: List<String>,
         attempt: Int
     ): Question = withContext(Dispatchers.IO) {
-        val prompt = createStructuredPrompt(
+        val prompt = promptGenerator.createStructuredPrompt(
             questionType = questionType,
             subject = subject,
             topic = topic,
@@ -1320,655 +1131,18 @@ class QuizGeneratorViewModel @Inject constructor(
 
     private val recentQuestionHashes = mutableSetOf<Int>()
 
-    private fun createStructuredPrompt(
-        questionType: QuestionType,
-        subject: Subject,
-        topic: String,
-        difficulty: Difficulty,
-        learnerProfile: LearnerProfile,
-        previousQuestions: List<String>,
-        attemptNumber: Int = 0
-    ): String {
-        val typeInstructions = when (questionType) {
-            QuestionType.MULTIPLE_CHOICE -> """
-            Create a multiple-choice question with these EXACT requirements:
-            1. "question": A clear, specific question (NOT "Sample question")
-            2. "options": Array of EXACTLY 4 different answer choices
-            3. "correctAnswer": Must be one of the 4 options
-            4. "explanation": 1-2 sentences explaining why the answer is correct
-            5. "hint": Optional helpful clue
-            6. "conceptsCovered": Array of 1-3 concept tags
-        """.trimIndent()
-
-            QuestionType.TRUE_FALSE -> """
-            Create a true/false question with these EXACT requirements:
-            1. "question": A clear statement that is definitively true or false
-            2. "options": ["True", "False"] 
-            3. "correctAnswer": Either "True" or "False"
-            4. "explanation": Why the statement is true/false
-            5. "hint": Optional clue
-            6. "conceptsCovered": Array of concept tags
-        """.trimIndent()
-
-            QuestionType.FILL_IN_BLANK -> """
-            Create a fill-in-the-blank question with these EXACT requirements:
-            1. "question": Sentence with ONE blank shown as _____ 
-            2. "options": [] (empty array)
-            3. "correctAnswer": The word/phrase that fills the blank (1-3 words)
-            4. "explanation": Brief explanation
-            5. "hint": Optional clue about the answer
-            6. "conceptsCovered": Array of concept tags
-        """.trimIndent()
-
-            QuestionType.SHORT_ANSWER -> """
-            Create a short-answer question with these EXACT requirements:
-            1. "question": Open-ended question requiring brief explanation
-            2. "options": [] (empty array)
-            3. "correctAnswer": Concise 1-2 sentence answer
-            4. "explanation": Additional context
-            5. "hint": Optional guidance
-            6. "conceptsCovered": Array of concept tags
-        """.trimIndent()
-
-            else -> ""
-        }
-
-        val examplesByType = mapOf(
-            QuestionType.MULTIPLE_CHOICE to """
-            {
-              "question": "What causes tides in Earth's oceans?",
-              "options": ["The Moon's gravity", "Earth's rotation", "Ocean currents", "Wind patterns"],
-              "correctAnswer": "The Moon's gravity",
-              "explanation": "The Moon's gravitational pull creates bulges in Earth's oceans.",
-              "hint": "Think about what celestial body is closest to Earth.",
-              "conceptsCovered": ["tides", "gravity", "moon"]
-            }
-        """.trimIndent(),
-
-            QuestionType.TRUE_FALSE to """
-            {
-              "question": "Diamond is the hardest naturally occurring substance on Earth.",
-              "options": ["True", "False"],
-              "correctAnswer": "True",
-              "explanation": "Diamond ranks 10 on the Mohs hardness scale.",
-              "hint": "This substance is used in cutting tools.",
-              "conceptsCovered": ["minerals", "hardness"]
-            }
-        """.trimIndent(),
-
-            QuestionType.FILL_IN_BLANK to """
-            {
-              "question": "The smallest unit of life is the _____.",
-              "options": [],
-              "correctAnswer": "cell",
-              "explanation": "Cells are the basic building blocks of all living things.",
-              "hint": "Robert Hooke discovered these in cork.",
-              "conceptsCovered": ["biology", "cells"]
-            }
-        """.trimIndent(),
-
-            QuestionType.SHORT_ANSWER to """
-            {
-              "question": "What causes earthquakes?",
-              "options": [],
-              "correctAnswer": "Earthquakes are caused by the movement of tectonic plates releasing energy",
-              "explanation": "Most occur along plate boundaries where plates interact.",
-              "hint": "Think about the Earth's crust structure.",
-              "conceptsCovered": ["geology", "earthquakes", "plate-tectonics"]
-            }
-        """.trimIndent()
-        )
-
-        // Create variation prompts
-        val variations = listOf(
-            "Focus on practical applications",
-            "Test conceptual understanding",
-            "Use a real-world scenario",
-            "Challenge common misconceptions",
-            "Connect to everyday experiences"
-        )
-
-        val selectedVariation = variations[attemptNumber % variations.size]
-
-        return """
-        TASK: Generate ONE $questionType question about $topic in $subject.
-        
-        $typeInstructions
-        
-        IMPORTANT RULES:
-        - Make the question unique and interesting
-        - $selectedVariation
-        - Difficulty level: $difficulty
-        - Do NOT use generic placeholders like "Sample question"
-        - Do NOT use "Question text here" or similar
-        - Create actual, meaningful content
-        - Avoid these previous questions: ${previousQuestions.takeLast(2).joinToString("; ") { "\"${it.take(30)}...\"" }}
-        
-        EXAMPLE of correct format:
-        ${examplesByType[questionType]}
-        
-        Now generate a completely different question following this exact JSON format:
-    """.trimIndent()
-    }
+    // NOTE: createStructuredPrompt function has been moved to QuizPromptGenerator class
+    // for better separation of concerns and improved maintainability
 
     /* ─────────────────────── Enhanced Structured prompting ─────────────────────── */
 
-    private fun createEnhancedStructuredPrompt(
-        questionType: QuestionType,
-        subject: Subject,
-        topic: String,
-        difficulty: Difficulty,
-        learnerProfile: LearnerProfile,
-        previousQuestions: List<String>,
-        attemptNumber: Int
-    ): String {
-        // Use the enhanced prompt manager for varied instructions
-        val (instructions, exampleJson) = enhancedPromptManager.getVariedQuestionPrompt(
-            questionType = questionType,
-            subject = subject,
-            topic = topic,
-            difficulty = difficulty,
-            attemptNumber = attemptNumber
-        )
-
-        val weakConcepts = learnerProfile.weaknessesByConcept.keys.take(3)
-        val masteredConcepts = learnerProfile.masteredConcepts.take(5)
-
-        // Add more variety with different prompt structures
-        val promptStructures = listOf(
-            // Structure 1: Story-based
-            """
-            Create a $questionType question for $subject about $topic.
-            
-            Frame it as: ${getScenarioContext(subject, topic, attemptNumber)}
-            
-            Requirements:
-            - Difficulty: $difficulty
-            - Make it practical and engaging
-            - Test understanding, not memorization
-            
-            $instructions
-            
-            Example format (DO NOT copy content):
-            $exampleJson
-            
-            Previous questions to avoid:
-            ${previousQuestions.takeLast(5).joinToString("\n") { "- ${it.take(50)}..." }}
-            
-            Generate a unique question now:
-            """.trimIndent(),
-
-            // Structure 2: Problem-solving
-            """
-            Design a $difficulty $questionType problem for $subject.
-            Topic: $topic
-            
-            Focus: ${getProblemFocus(subject, topic, attemptNumber)}
-            
-            Student profile:
-            - Weak areas: ${if (weakConcepts.isNotEmpty()) weakConcepts.joinToString() else "none identified"}
-            - Strong areas: ${if (masteredConcepts.isNotEmpty()) masteredConcepts.take(3).joinToString() else "developing"}
-            
-            $instructions
-            
-            Format example:
-            $exampleJson
-            
-            Create an original question that's different from these:
-            ${previousQuestions.takeLast(3).joinToString("\n") { "- ${it.take(40)}..." }}
-            """.trimIndent(),
-
-            // Structure 3: Conceptual
-            """
-            Generate ONE $questionType question.
-            
-            Subject: $subject - $topic
-            Level: $difficulty
-            Angle: ${getConceptualAngle(questionType, attemptNumber)}
-            
-            Guidelines:
-            $instructions
-            
-            ${if (weakConcepts.isNotEmpty()) "Reinforce: ${weakConcepts.first()}" else ""}
-            
-            JSON format required:
-            $exampleJson
-            
-            Make it unique - avoid similarity to:
-            ${previousQuestions.takeLast(5).joinToString("\n") { "- \"${it.take(30)}...\"" }}
-            """.trimIndent()
-        )
-
-        // Select a structure based on attempt number for variety
-        return promptStructures[attemptNumber % promptStructures.size]
-    }
-
-    private fun getScenarioContext(subject: Subject, topic: String, attempt: Int): String {
-        val scenarios = when (subject) {
-            Subject.MATHEMATICS -> listOf(
-                "A student solving a real-world problem",
-                "A scientist analyzing data",
-                "A game designer creating mechanics",
-                "An architect planning a structure",
-                "A chef adjusting a recipe",
-                "A sports analyst reviewing statistics"
-            )
-            Subject.SCIENCE -> listOf(
-                "A researcher conducting an experiment",
-                "A doctor diagnosing a patient",
-                "An engineer solving a problem",
-                "A naturalist observing wildlife",
-                "A weather forecaster analyzing patterns",
-                "An inventor creating something new"
-            )
-            Subject.HISTORY -> listOf(
-                "A historian analyzing primary sources",
-                "A museum curator explaining an artifact",
-                "A journalist reporting on past events",
-                "An archaeologist making a discovery",
-                "A diplomat learning from history",
-                "A filmmaker researching a period"
-            )
-            else -> listOf(
-                "Someone applying this knowledge",
-                "A professional using this concept",
-                "A student discovering something new",
-                "A teacher explaining to others"
-            )
-        }
-
-        return scenarios[attempt % scenarios.size] + " involving $topic"
-    }
-
-    private fun getProblemFocus(subject: Subject, topic: String, attempt: Int): String {
-        val focuses = listOf(
-            "practical application",
-            "conceptual understanding",
-            "problem-solving skills",
-            "critical analysis",
-            "creative thinking",
-            "connecting ideas",
-            "real-world relevance"
-        )
-        return focuses[attempt % focuses.size]
-    }
-
-    private fun getConceptualAngle(questionType: QuestionType, attempt: Int): String {
-        val angles = when (questionType) {
-            QuestionType.MULTIPLE_CHOICE -> listOf(
-                "best answer among similar options",
-                "identifying the exception",
-                "analyzing cause and effect",
-                "comparing and contrasting",
-                "applying knowledge to new situation"
-            )
-            QuestionType.TRUE_FALSE -> listOf(
-                "common misconception",
-                "subtle distinction",
-                "general principle",
-                "specific exception",
-                "relationship between concepts"
-            )
-            else -> listOf(
-                "explanation of concept",
-                "application of knowledge",
-                "analysis of situation",
-                "synthesis of ideas"
-            )
-        }
-        return angles[attempt % angles.size]
-    }
-
-    // Helper methods for variety
-    private fun getRandomAngle(attempt: Int): String {
-        val angles = listOf(
-            "identifying the key difference",
-            "finding the best solution",
-            "analyzing the outcome",
-            "determining the cause",
-            "evaluating the method",
-            "comparing alternatives"
-        )
-        return angles[attempt % angles.size]
-    }
-
-    private fun getRandomStyle(attempt: Int): String {
-        val styles = listOf(
-            "analytical",
-            "practical problem",
-            "conceptual understanding",
-            "application-based",
-            "scenario-driven",
-            "comparative"
-        )
-        return styles[attempt % styles.size]
-    }
-
-    private fun getRandomContext(subject: Subject, attempt: Int): String {
-        val contexts = when (subject) {
-            Subject.MATHEMATICS -> listOf("real-world calculation", "pattern analysis", "problem-solving", "measurement")
-            Subject.SCIENCE -> listOf("experimental", "observational", "hypothesis-testing", "analytical")
-            else -> listOf("practical", "theoretical", "analytical", "contextual")
-        }
-        return contexts[attempt % contexts.size]
-    }
-
-    private fun getAvoidancePatterns(previousQuestions: List<String>): String {
-        val patterns = previousQuestions
-            .takeLast(3)
-            .mapNotNull { q ->
-                when {
-                    q.contains("What is") -> "\"What is...\""
-                    q.contains("Which") -> "\"Which...\""
-                    q.contains("How many") -> "\"How many...\""
-                    else -> null
-                }
-            }
-            .distinct()
-            .joinToString(", ")
-
-        return patterns.ifEmpty { "common phrasings" }
-    }
-
-    private fun getTrueFalseFocus(attempt: Int): String {
-        val focuses = listOf(
-            "a specific property or characteristic",
-            "a cause-and-effect relationship",
-            "a general principle with exceptions",
-            "a comparison between concepts",
-            "a definition or classification"
-        )
-        return focuses[attempt % focuses.size]
-    }
-
-    private fun getFillBlankContext(attempt: Int): String {
-        val contexts = listOf(
-            "definition completion",
-            "process description",
-            "concept application",
-            "relationship identification",
-            "characteristic naming"
-        )
-        return contexts[attempt % contexts.size]
-    }
-
-    private fun getTestingFocus(attempt: Int): String {
-        val focuses = listOf(
-            "key terminology",
-            "critical concept",
-            "important relationship",
-            "specific value or quantity",
-            "process or method name"
-        )
-        return focuses[attempt % focuses.size]
-    }
-
-    private fun getRandomApproach(attempt: Int): String {
-        val approaches = listOf(
-            "explanation-focused",
-            "comparison-based",
-            "application-oriented",
-            "analysis-driven",
-            "synthesis-focused"
-        )
-        return approaches[attempt % approaches.size]
-    }
-
-    private fun getComplexityDescriptor(difficulty: Difficulty): String {
-        return when (difficulty) {
-            Difficulty.EASY -> "straightforward and clear"
-            Difficulty.MEDIUM -> "moderately challenging with some nuance"
-            Difficulty.HARD -> "complex with subtle distinctions"
-            Difficulty.ADAPTIVE -> "appropriately challenging"
-        }
-    }
-
-    private fun getQuestionTypeInstructions(questionType: QuestionType): Pair<String, String> {
-        return when (questionType) {
-            QuestionType.MULTIPLE_CHOICE -> Pair(
-                """
-                Create a multiple choice question with:
-                - A clear question stem
-                - EXACTLY 4 answer options
-                - Only ONE correct answer
-                - 3 plausible distractors (wrong answers)
-                
-                Format: The question should naturally lead to choosing from options.
-                Example: "Which organ is responsible for...?" or "What is the primary function of...?"
-                """.trimIndent(),
-                """
-                {
-                    "question": "What is the powerhouse of the cell?",
-                    "options": ["Nucleus", "Mitochondria", "Ribosome", "Cell membrane"],
-                    "correctAnswer": "Mitochondria",
-                    "explanation": "Mitochondria produce ATP through cellular respiration.",
-                    "hint": "This organelle is involved in energy production.",
-                    "conceptsCovered": ["cell-biology", "organelles"]
-                }
-                """.trimIndent()
-            )
-
-            QuestionType.TRUE_FALSE -> Pair(
-                """
-                Create a TRUE/FALSE question with:
-                - A simple, clear declarative statement
-                - The statement must be definitively true or false
-                - NO "which of the following" phrasing
-                - options array should be ["True", "False"]
-                """.trimIndent(),
-                """
-                {
-                    "question": "All mammals lay eggs.",
-                    "options": ["True", "False"],
-                    "correctAnswer": "False",
-                    "explanation": "Most mammals give birth to live young. Only monotremes like platypuses lay eggs.",
-                    "hint": "Think about how most mammals reproduce.",
-                    "conceptsCovered": ["mammal-reproduction", "animal-classification"]
-                }
-                """.trimIndent()
-            )
-
-            QuestionType.FILL_IN_BLANK -> Pair(
-                """
-                Create a fill-in-the-blank question with:
-                - A sentence with ONE blank indicated by _____
-                - The blank should be a key term or concept
-                - The answer should be 1-3 words maximum
-                - NO multiple choice phrasing
-                - options array should be empty []
-                - CRITICAL: correctAnswer MUST be the exact word/phrase that fills the blank
-                
-                Example: "The process by which plants make food using sunlight is called _____." (Answer: photosynthesis)
-                """.trimIndent(),
-                """
-                {
-                    "question": "The process of water changing from liquid to gas is called _____.",
-                    "options": [],
-                    "correctAnswer": "evaporation",
-                    "explanation": "Evaporation occurs when water molecules gain enough energy to escape as vapor.",
-                    "hint": "This happens when water is heated or exposed to air.",
-                    "conceptsCovered": ["states-of-matter", "water-cycle"]
-                }
-                """.trimIndent()
-            )
-
-            QuestionType.SHORT_ANSWER -> Pair(
-                """
-                Create a short answer question with:
-                - An open-ended question requiring a brief explanation
-                - Answer should be 1-2 sentences
-                - NO "which of the following" phrasing
-                - options array should be empty []
-                - correctAnswer should directly answer the question
-                
-                Example: "Explain the main function of red blood cells."
-                """.trimIndent(),
-                """
-                {
-                    "question": "Describe the water cycle.",
-                    "options": [],
-                    "correctAnswer": "The water cycle is the continuous movement of water through evaporation, condensation, and precipitation",
-                    "explanation": "Water evaporates from bodies of water, forms clouds, and returns as rain or snow.",
-                    "hint": "Think about how water moves between earth and atmosphere.",
-                    "conceptsCovered": ["water-cycle", "earth-science"]
-                }
-                """.trimIndent()
-            )
-
-            else -> Pair(
-                "Create a basic question appropriate for the topic.",
-                """
-                {
-                    "question": "Sample question",
-                    "options": [],
-                    "correctAnswer": "Sample answer",
-                    "explanation": "Sample explanation",
-                    "hint": "Sample hint",
-                    "conceptsCovered": ["general"]
-                }
-                """.trimIndent()
-            )
-        }
-    }
+    // NOTE: The createEnhancedStructuredPrompt function and its helper methods have been moved 
+    // to the QuizPromptGenerator class for better separation of concerns and maintainability.
+    // This reduces code duplication and centralizes all prompt generation logic.
 
     /* ─────────────────────── Parse and validate questions ─────────────────────── */
 
-    private fun sanitizeJson(raw: String): String {
-        var cleaned = raw
-            .trim()
-            .replace(Regex("^```(?:json)?\\s*", RegexOption.MULTILINE), "")
-            .replace(Regex("\\s*```$", RegexOption.MULTILINE), "")
-            .trim()
 
-        // Remove any text before the first {
-        val jsonStart = cleaned.indexOf('{')
-        if (jsonStart > 0) {
-            cleaned = cleaned.substring(jsonStart)
-        }
-
-        // Remove any text after the last }
-        val jsonEnd = cleaned.lastIndexOf('}')
-        if (jsonEnd != -1 && jsonEnd < cleaned.length - 1) {
-            cleaned = cleaned.substring(0, jsonEnd + 1)
-        }
-
-        // Fix common JSON issues - using simple string replacements to avoid regex issues
-        // Remove trailing commas before closing braces
-        cleaned = cleaned.replace(Regex(",\\s*}"), "}")
-        // Remove trailing commas before closing brackets
-        cleaned = cleaned.replace(Regex(",\\s*]"), "]")
-
-        // Fix escaped quotes
-        cleaned = cleaned.replace("\\\\\"", "\\\"")
-
-        // Remove newlines within quoted strings (more complex, needs careful handling)
-        val sb = StringBuilder()
-        var inString = false
-        var escapeNext = false
-        var prevChar = ' '
-
-        for (char in cleaned) {
-            when {
-                escapeNext -> {
-                    sb.append(char)
-                    escapeNext = false
-                }
-                char == '\\' -> {
-                    sb.append(char)
-                    escapeNext = true
-                }
-                char == '"' && prevChar != '\\' -> {
-                    sb.append(char)
-                    inString = !inString
-                }
-                char == '\n' && inString -> {
-                    sb.append(' ') // Replace newline with space inside strings
-                }
-                else -> {
-                    sb.append(char)
-                }
-            }
-            prevChar = char
-        }
-        cleaned = sb.toString()
-
-        // Balance braces if needed
-        val openBraces = cleaned.count { it == '{' }
-        val closeBraces = cleaned.count { it == '}' }
-        if (openBraces > closeBraces) {
-            cleaned += "}".repeat(openBraces - closeBraces)
-        }
-
-        return cleaned
-    }
-
-    private fun sanitizeJsonSimple(raw: String): String {
-        // Step 1: Extract JSON content
-        var content = raw.trim()
-
-        // Remove markdown code blocks
-        if (content.startsWith("```")) {
-            val startIdx = content.indexOf('\n')
-            if (startIdx != -1) {
-                content = content.substring(startIdx + 1)
-            }
-        }
-        if (content.endsWith("```")) {
-            val endIdx = content.lastIndexOf("```")
-            if (endIdx != -1) {
-                content = content.substring(0, endIdx)
-            }
-        }
-
-        // Find the JSON object boundaries
-        val firstBrace = content.indexOf('{')
-        val lastBrace = content.lastIndexOf('}')
-
-        if (firstBrace != -1 && lastBrace != -1 && lastBrace > firstBrace) {
-            content = content.substring(firstBrace, lastBrace + 1)
-        }
-
-        // Simple cleanup without regex
-        val result = StringBuilder()
-        var inString = false
-        var escapeNext = false
-        var lastNonWhitespace = ' '
-
-        for (i in content.indices) {
-            val char = content[i]
-            val nextChar = if (i < content.length - 1) content[i + 1] else ' '
-
-            when {
-                escapeNext -> {
-                    result.append(char)
-                    escapeNext = false
-                }
-                char == '\\' && inString -> {
-                    result.append(char)
-                    escapeNext = true
-                }
-                char == '"' && !escapeNext -> {
-                    result.append(char)
-                    inString = !inString
-                }
-                char == '\n' && inString -> {
-                    result.append(' ') // Replace newlines in strings with space
-                }
-                char == ',' && !inString && (nextChar == '}' || nextChar == ']') -> {
-                    // Skip trailing commas
-                }
-                else -> {
-                    result.append(char)
-                }
-            }
-
-            if (!char.isWhitespace()) {
-                lastNonWhitespace = char
-            }
-        }
-
-        return result.toString()
-    }
 
     private fun parseAndValidateQuestion(
         raw: String,
@@ -1976,101 +1150,30 @@ class QuizGeneratorViewModel @Inject constructor(
         difficulty: Difficulty
     ): Question {
         return try {
-            Timber.d("Raw response length: ${raw.length} characters")
-
-            val preprocessed = preprocessModelResponse(raw)
-            val cleaned = sanitizeJsonSimple(preprocessed) // Use simple version
-
-            // Log cleaned JSON for debugging
-            Timber.d("Cleaned JSON: ${cleaned.take(200)}...")
-
-            // Check if JSON was truncated
-            if (cleaned.contains("...") && !cleaned.contains("explanation")) {
-                Timber.w("JSON appears truncated, using fallback")
-                return generateFallbackQuestionForType(expectedType, difficulty)
+            // Use our new QuizJsonParser to handle JSON parsing and validation
+            val question = jsonParser.parseAndValidateQuestion(raw, expectedType, difficulty)
+            if (question != null) {
+                question
+            } else {
+                Timber.w("JSON parsing failed, using fallback")
+                generateFallbackQuestionForType(expectedType, difficulty)
             }
-
-            // Additional validation
-            if (!cleaned.trim().startsWith("{") || !cleaned.trim().endsWith("}")) {
-                Timber.e("Invalid JSON structure: starts with '${cleaned.take(10)}', ends with '${cleaned.takeLast(10)}'")
-                return generateFallbackQuestionForType(expectedType, difficulty)
-            }
-
-            val obj = org.json.JSONObject(cleaned)
-
-            // Extract fields with proper validation
-            val questionText = obj.optString("question", "").trim()
-            if (questionText.isEmpty() || questionText == "Sample question" ||
-                questionText.length < 10 || questionText.contains("question here")) {
-                Timber.e("Invalid question text: '$questionText'")
-                return generateFallbackQuestionForType(expectedType, difficulty)
-            }
-
-            val correctAnswer = obj.optString("correctAnswer", "").trim()
-            if (correctAnswer.isEmpty() || correctAnswer == "Sample answer" ||
-                correctAnswer.contains("answer here")) {
-                Timber.e("Invalid correct answer: '$correctAnswer'")
-                return generateFallbackQuestionForType(expectedType, difficulty)
-            }
-
-            // For multiple choice, ensure we have valid options
-            val options = when (expectedType) {
-                QuestionType.MULTIPLE_CHOICE -> {
-                    val opts = try {
-                        obj.optJSONArray("options")?.let { arr ->
-                            List(arr.length()) { arr.getString(it).trim() }
-                                .filter { it.isNotBlank() && !it.startsWith("Option") }
-                        } ?: emptyList()
-                    } catch (e: Exception) {
-                        Timber.e(e, "Error parsing options array")
-                        emptyList()
-                    }
-
-                    if (opts.size < 4) {
-                        Timber.w("Insufficient options (${opts.size}), using fallback")
-                        return generateFallbackQuestionForType(expectedType, difficulty)
-                    }
-
-                    // Ensure correct answer is in options
-                    if (!opts.contains(correctAnswer)) {
-                        Timber.w("Correct answer '$correctAnswer' not in options: $opts")
-                        val adjustedOpts = listOf(correctAnswer) + opts.filter { it != correctAnswer }.take(3)
-                        adjustedOpts.shuffled()
-                    } else {
-                        opts.take(4)
-                    }
-                }
-                QuestionType.TRUE_FALSE -> listOf("True", "False")
-                else -> emptyList()
-            }
-
-            // Build the question
-            val question = Question(
-                questionText = questionText,
-                questionType = expectedType,
-                options = options,
-                correctAnswer = correctAnswer,
-                explanation = obj.optString("explanation", "").takeIf { it.isNotBlank() }
-                    ?: "No explanation provided.",
-                hint = obj.optString("hint").takeIf { it.isNotBlank() },
-                conceptsCovered = try {
-                    obj.optJSONArray("conceptsCovered")?.let { arr ->
-                        List(arr.length()) { arr.getString(it) }
-                    } ?: listOf("general")
-                } catch (e: Exception) {
-                    listOf("general")
-                },
-                difficulty = difficulty
-            )
-
-            Timber.d("Successfully parsed ${expectedType} question: '${question.questionText.take(50)}...'")
-            question
-
         } catch (e: Exception) {
-            Timber.e(e, "Failed to parse question JSON, using fallback")
+            Timber.e(e, "Failed to parse question, using fallback")
             generateFallbackQuestionForType(expectedType, difficulty)
         }
     }
+
+    private fun parseOpenAIQuizResponse(response: String): List<Question> {
+        return try {
+            // Use our new QuizJsonParser to handle OpenAI response parsing
+            jsonParser.parseOpenAIQuizResponse(response)
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to parse OpenAI quiz response")
+            emptyList()
+        }
+    }
+
 
     private fun tryExtractFieldsFromPartialJson(
         raw: String,
@@ -2543,7 +1646,7 @@ class QuizGeneratorViewModel @Inject constructor(
         repeat(3) { retryCount ->
             try {
                 // Use enhanced prompt with more variety
-                val prompt = createEnhancedStructuredPrompt(
+                val prompt = promptGenerator.createStructuredPrompt(
                     questionType = questionType,
                     subject = subject,
                     topic = topic,

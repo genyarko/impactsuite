@@ -370,7 +370,7 @@ class CBTSessionManager @Inject constructor(
             val response = gemmaService.generateTextAsync(
                 prompt,
                 UnifiedGemmaService.GenerationConfig(
-                    maxTokens = 300,
+                    maxTokens = 200,
                     temperature = 0.7f
                 )
             )
@@ -429,7 +429,7 @@ class CBTSessionManager @Inject constructor(
             val response = gemmaService.generateTextAsync(
                 prompt,
                 UnifiedGemmaService.GenerationConfig(
-                    maxTokens = 400,
+                    maxTokens = 250,
                     temperature = 0.7f
                 )
             )

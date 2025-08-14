@@ -164,7 +164,7 @@ class OfflineRAG @Inject constructor(
         gemma.generateTextAsync(
             prompt,
             UnifiedGemmaService.GenerationConfig(
-                maxTokens = 512,
+                maxTokens = 200,
                 temperature = 0.7f
             )
         )
