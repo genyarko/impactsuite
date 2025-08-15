@@ -14,3 +14,9 @@
 .cxx
 local.properties
 /app/src/main/assets/models/
+
+# Release builds and large binaries (should not be in version control)
+/app/release/
+*.aab
+*.apk
+/app/build/outputs/
