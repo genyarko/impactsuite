@@ -39,7 +39,10 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SummarizerScreen(viewModel: SummarizerViewModel = hiltViewModel()) {
+fun SummarizerScreen(
+    onNavigateToQuiz: () -> Unit = {},
+    viewModel: SummarizerViewModel = hiltViewModel()
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var showTextInput by remember { mutableStateOf(false) }
     var inputText by remember { mutableStateOf("") }
@@ -124,7 +127,15 @@ fun SummarizerScreen(viewModel: SummarizerViewModel = hiltViewModel()) {
                         ) {
                             SummaryCard(
                                 summary = summary,
-                                textLength = state.extractedTextLength
+                                textLength = state.extractedTextLength,
+                                onGenerateQuiz = { content ->
+                                    // Store content for quiz generation
+                                    com.mygemma3n.aiapp.shared_utilities.QuizContentManager.setContent(
+                                        content = content,
+                                        title = "Document Summary Quiz"
+                                    )
+                                    onNavigateToQuiz()
+                                }
                             )
                         }
                     }
@@ -388,7 +399,8 @@ private fun ErrorCard(
 @Composable
 private fun SummaryCard(
     summary: String,
-    textLength: Int
+    textLength: Int,
+    onGenerateQuiz: (String) -> Unit = {}
 ) {
     Card(
         modifier = Modifier
@@ -449,6 +461,25 @@ private fun SummaryCard(
                     lineHeight = MaterialTheme.typography.bodyLarge.lineHeight * 1.3f
                 )
             }
+
+            // Generate Quiz button
+            Spacer(modifier = Modifier.height(12.dp))
+            AssistChip(
+                onClick = { onGenerateQuiz(summary) },
+                label = { Text("Generate Quiz") },
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.Quiz,
+                        contentDescription = "Generate quiz from summary",
+                        modifier = Modifier.size(16.dp)
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = AssistChipDefaults.assistChipColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    labelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            )
         }
     }
 }

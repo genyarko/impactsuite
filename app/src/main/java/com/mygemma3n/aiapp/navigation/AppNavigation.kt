@@ -76,7 +76,9 @@ fun AppNavigation(
         composable("quiz_generator") {
             SafeScreen(navController, unifiedGemmaService) {
                 if (isFeatureAvailable("quiz_generator")) {
-                    com.mygemma3n.aiapp.feature.quiz.QuizScreen()
+                    com.mygemma3n.aiapp.feature.quiz.QuizScreen(
+                        onNavigateBack = { navController.popBackStack() }
+                    )
                 } else {
                     UnifiedChatScreen(navController)
                 }
@@ -96,7 +98,9 @@ fun AppNavigation(
         composable("summarizer") {
             SafeScreen(navController, unifiedGemmaService) {
                 if (isFeatureAvailable("summarizer")) {
-                    com.mygemma3n.aiapp.feature.summarizer.SummarizerScreen()
+                    com.mygemma3n.aiapp.feature.summarizer.SummarizerScreen(
+                        onNavigateToQuiz = { navController.navigate("quiz_generator") }
+                    )
                 } else {
                     UnifiedChatScreen(navController)
                 }
@@ -124,7 +128,9 @@ fun AppNavigation(
         ) {
             SafeScreen(navController, unifiedGemmaService) {
                 if (isFeatureAvailable("chat_session")) {
-                    com.mygemma3n.aiapp.feature.chat.ChatScreen()
+                    com.mygemma3n.aiapp.feature.chat.ChatScreen(
+                        onNavigateToQuiz = { navController.navigate("quiz_generator") }
+                    )
                 } else {
                     UnifiedChatScreen(navController)
                 }
@@ -171,7 +177,8 @@ fun AppNavigation(
                 if (isFeatureAvailable("tutor")) {
                     com.mygemma3n.aiapp.feature.tutor.TutorScreen(
                         onNavigateBack = { navController.popBackStack() },
-                        onNavigateToChatList = { navController.navigate("chat_list") }
+                        onNavigateToChatList = { navController.navigate("chat_list") },
+                        onNavigateToQuiz = { navController.navigate("quiz_generator") }
                     )
                 } else {
                     UnifiedChatScreen(navController)

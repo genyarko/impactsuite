@@ -58,10 +58,13 @@ typealias QuizGeneratorViewModelState = QuizGeneratorViewModel.QuizState
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuizScreen(
-    viewModel: QuizGeneratorViewModel = hiltViewModel()
+    viewModel: QuizGeneratorViewModel = hiltViewModel(),
+    onNavigateBack: (() -> Unit)? = null
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    var showStudentDialog by remember { mutableStateOf(true) }
+    // Skip student dialog if we have custom content to process
+    val hasCustomContent = com.mygemma3n.aiapp.shared_utilities.QuizContentManager.hasContent()
+    var showStudentDialog by remember { mutableStateOf(!hasCustomContent) }
     var studentName by remember { mutableStateOf("") }
     var studentGrade by remember { mutableIntStateOf(5) }
     var studentCountry by remember { mutableStateOf("") }
@@ -86,6 +89,11 @@ fun QuizScreen(
     LaunchedEffect(Unit) {
         if (state.subjects.isEmpty()) {
             viewModel.loadSubjects()
+        }
+        
+        // Check for custom content and generate quiz if available
+        if (com.mygemma3n.aiapp.shared_utilities.QuizContentManager.hasContent()) {
+            viewModel.generateQuizFromCustomContent()
         }
     }
 
@@ -115,6 +123,16 @@ fun QuizScreen(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
                 ),
+                navigationIcon = {
+                    onNavigateBack?.let { callback ->
+                        IconButton(onClick = callback) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Navigate back"
+                            )
+                        }
+                    }
+                },
                 actions = {
                     if (state.reviewQuestionsAvailable > 0) {
                         Badge(

@@ -62,35 +62,54 @@ Real-time audio processing with translation capabilities:
 ### 🧠 Voice CBT Coach
 **Location**: `app/src/main/java/com/example/mygemma3n/feature/cbt/`
 
-Cognitive Behavioral Therapy assistance with emotion detection:
+Cognitive Behavioral Therapy assistance with robust hybrid functionality:
 
 #### Capabilities:
 - **Emotion Detection**: Analyzes voice patterns to identify emotional states
 - **CBT Techniques**: Provides evidence-based therapeutic interventions
 - **Session Management**: Tracks therapy sessions and progress
-- **Privacy-Focused**: All analysis happens on-device
+- **Privacy-Focused**: All analysis happens on-device when possible
+- **Hybrid Processing**: Seamless fallback between offline and online AI services
+
+#### Recent Improvements:
+- **Enhanced UX**: Collapsible emotion and technique cards for better screen space
+- **Robust Error Handling**: Comprehensive offline/online fallback system
+- **User-Friendly Messages**: Clear, actionable error messages instead of technical errors
+- **Smart Service Selection**: Automatic detection and switching between AI services
+- **Audio Processing**: Improved voice recording and transcription reliability
 
 #### Implementation Details:
 - **Audio Analysis**: Voice pattern recognition for emotion detection
 - **Therapeutic Algorithms**: Rule-based CBT technique suggestions
 - **Session Persistence**: Local storage of therapy sessions
+- **Fallback Architecture**: Smart routing between Gemma (offline) and cloud AI services
+- **Error Recovery**: Graceful degradation and user guidance during failures
 
 ### 📊 Offline Quiz Generator
 **Location**: `app/src/main/java/com/example/mygemma3n/feature/quiz/`
 
-Intelligent quiz generation system:
+Intelligent quiz generation system with enhanced content integration:
 
 #### Features:
 - **Topic-Based Generation**: Creates quizzes from any subject area
+- **Content Integration**: Generate quizzes directly from AI Tutor and Chat sessions
 - **Multiple Choice Format**: Standardized quiz format with scoring
 - **Performance Analytics**: Tracks quiz performance and learning gaps
 - **Curriculum Integration**: Aligned with educational standards
+- **Smart Navigation**: Seamless quiz creation from conversation content
+
+#### Recent Enhancements:
+- **Generate Quiz Buttons**: Added to AI Tutor and Chat screens for easy quiz creation
+- **Content Manager**: QuizContentManager singleton for cross-screen content sharing
+- **Hybrid Generation**: Online/offline AI-powered question generation
+- **Question Type Intelligence**: Grade-appropriate question type selection
 
 #### Technical Architecture:
 - **AI Generation**: Uses Gemma models to create contextually relevant questions
 - **Caching System**: Question history cache prevents duplication
 - **Analytics Engine**: Comprehensive performance tracking
 - **Offline Storage**: Room database for quiz persistence
+- **Content Pipeline**: Automatic content analysis and topic extraction
 
 ### 📄 Document Summarizer
 **Location**: `app/src/main/java/com/example/mygemma3n/feature/summarizer/`
@@ -140,6 +159,36 @@ On-device image recognition system:
 - **MobileNet Architecture**: Efficient CNN for mobile devices
 - **Image Processing**: Advanced preprocessing pipelines
 - **Camera Utils**: Custom camera handling utilities
+
+## 🌐 Accessibility & User Experience
+
+### Accessibility Enhancements
+**Location**: Throughout the application with focus on core screens
+
+#### Comprehensive Accessibility Support:
+- **Screen Reader Compatibility**: Complete content descriptions for all interactive elements
+- **Semantic Navigation**: Proper role definitions and semantic properties for navigation elements
+- **Keyboard Navigation**: Enhanced support for keyboard and switch navigation
+- **State Awareness**: Context-sensitive descriptions that reflect current app state
+
+#### Key Improvements:
+- **Content Descriptions**: Added meaningful descriptions to all icons, buttons, and interactive elements
+- **Navigation Semantics**: Feature cards and buttons include proper `Role.Button` semantics
+- **Error Accessibility**: Error messages are screen reader friendly with clear guidance
+- **Dynamic Descriptions**: State-aware descriptions (e.g., "Current emotion: neutral")
+
+### User Experience Improvements
+#### Error Message Enhancement:
+- **User-Friendly Language**: Transformed technical error messages into clear, actionable guidance
+- **Solution-Oriented**: Error messages now guide users toward solutions rather than just stating problems
+- **Context-Aware**: Error messages adapt based on the specific feature and situation
+
+#### Examples of Improved Messages:
+- **Before**: `"Failed to initialize: ${e.message}"`
+- **After**: `"Unable to start CBT Coach. Please check your internet connection and try again."`
+
+- **Before**: `"Recording error: ${e.message}"`
+- **After**: `"Recording failed. Please check microphone permissions and try again."`
 
 ### 🚨 Crisis Handbook
 **Location**: `app/src/main/java/com/example/mygemma3n/feature/crisis/`
@@ -268,6 +317,52 @@ Optimized storage for embeddings and RAG:
 - **Index Management**: Optimized indexing for query performance
 - **Memory Optimization**: Chunked loading for large datasets
 
+## Recent Development Updates
+
+### Version 2.1.0 - August 2025
+
+#### 🆕 Major Feature Additions:
+- **Generate Quiz Feature**: Revolutionary quiz creation from AI conversations
+  - One-click quiz generation from AI Tutor sessions
+  - Smart content analysis and question extraction from chat sessions
+  - Seamless navigation from conversation to quiz taking
+  - Content preservation across screen transitions using QuizContentManager
+
+#### 🔧 Critical Bug Fixes:
+- **CBT Coach Reliability**: Complete overhaul of offline/online fallback system
+  - Fixed crashes when offline models unavailable
+  - Implemented robust error recovery mechanisms
+  - Enhanced audio processing reliability
+  - Smart service detection and automatic switching
+
+#### 🎨 User Experience Enhancements:
+- **Accessibility Improvements**: Comprehensive accessibility support implementation
+  - Added complete content descriptions for screen readers
+  - Enhanced navigation semantics with proper role definitions
+  - Improved keyboard and switch navigation support
+  - Context-aware accessibility descriptions
+
+- **Error Message Redesign**: User-friendly error communication
+  - Replaced technical error messages with actionable guidance
+  - Solution-oriented error descriptions
+  - Context-sensitive help suggestions
+
+- **UI/UX Polish**: Enhanced interface design
+  - Collapsible emotion and technique cards in CBT Coach
+  - Improved navigation flow between features
+  - Better visual hierarchy and information density
+
+#### 🏗️ Technical Improvements:
+- **Build System Optimization**: Production-ready deployment configuration
+  - R8/ProGuard optimization for Play Store
+  - Deobfuscation mapping for crash analysis
+  - Asset pack delivery optimization
+
+- **Hybrid AI Architecture**: Enhanced online/offline AI service management
+  - Intelligent service selection based on availability
+  - Graceful degradation patterns
+  - Improved error recovery and fallback mechanisms
+
 ## Installation & Setup
 
 ### Prerequisites
@@ -275,6 +370,7 @@ Optimized storage for embeddings and RAG:
 - **Android SDK**: API Level 36 (Android 14)
 - **Git LFS**: Required for model file handling
 - **Device Requirements**: Minimum 4GB RAM recommended for AI features
+- **Gradle**: Version 8.13 or newer
 
 ### Step-by-Step Installation
 
@@ -661,4 +757,23 @@ For additional support or contributions, refer to the project's GitHub repositor
 
 ---
 
+## 📚 Related Documentation
+
+### Additional Resources:
+- **LATEST_UPDATES_SUMMARY.md** - Comprehensive summary of recent feature additions and improvements
+- **CLAUDE.md** - Development guidelines and project architecture notes
+- **API_KEYS_SETUP.md** - Step-by-step API configuration instructions
+- **SPEECH_RESTORATION_ROADMAP.md** - Audio feature development roadmap
+- **UNIVERSAL_EMBEDDER_RESTORATION_GUIDE.md** - Text embedding system setup guide
+
+### Quick Reference:
+- **Recent Features**: See `LATEST_UPDATES_SUMMARY.md` for detailed changelog
+- **Build Issues**: Check `CLAUDE.md` for build commands and troubleshooting
+- **API Setup**: Follow `API_KEYS_SETUP.md` for online feature configuration
+- **Architecture**: Review architecture diagrams and patterns in this document
+
+---
+
 *Generated with Claude Code - Last updated: August 2025*
+
+**Major Update**: Version 2.1.0 includes Generate Quiz feature, enhanced CBT Coach reliability, comprehensive accessibility improvements, and user-friendly error messages. See `LATEST_UPDATES_SUMMARY.md` for complete details.

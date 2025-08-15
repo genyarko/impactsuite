@@ -32,6 +32,7 @@ import kotlinx.coroutines.CancellationException
 import timber.log.Timber
 import javax.inject.Inject
 import kotlin.random.Random
+import com.mygemma3n.aiapp.shared_utilities.QuizContentManager
 
 @HiltViewModel
 class QuizGeneratorViewModel @Inject constructor(
@@ -331,6 +332,294 @@ class QuizGeneratorViewModel @Inject constructor(
         } catch (e: Exception) {
             Timber.e(e, "Failed to clear quiz history")
         }
+    }
+
+    /**
+     * Generate quiz from custom content (AI tutor/chat responses)
+     */
+    fun generateQuizFromCustomContent() = viewModelScope.launch {
+        if (!QuizContentManager.hasContent()) {
+            Timber.w("No custom content available for quiz generation")
+            return@launch
+        }
+
+        val content = QuizContentManager.getContent() ?: return@launch
+        val title = QuizContentManager.getTitle() ?: "Custom Content Quiz"
+        
+        try {
+            _state.update { 
+                it.copy(
+                    isGenerating = true, 
+                    error = null,
+                    generationPhase = "Analyzing content..."
+                ) 
+            }
+            
+            // Direct content-based generation without curriculum application
+            // Generate more questions based on content length
+            val targetCount = when {
+                content.length > 2000 -> 10  // Long content gets more questions
+                content.length > 1000 -> 8   // Medium content 
+                content.length > 500 -> 6    // Short content
+                else -> 5                    // Minimum questions
+            }
+            val questions = generateDirectQuestionsFromContent(content, title, targetCount)
+            
+            if (questions.isNotEmpty()) {
+                val quiz = Quiz(
+                    id = java.util.UUID.randomUUID().toString(),
+                    subject = Subject.GENERAL,
+                    topic = title,
+                    questions = questions,
+                    difficulty = Difficulty.MEDIUM,
+                    createdAt = System.currentTimeMillis()
+                )
+                
+                // Save and set current quiz immediately
+                quizRepo.saveQuiz(quiz)
+                _state.update { 
+                    it.copy(
+                        currentQuiz = quiz,
+                        isGenerating = false,
+                        mode = QuizMode.NORMAL,
+                        generationPhase = "Quiz ready!"
+                    ) 
+                }
+                
+                // Clear the custom content after use
+                QuizContentManager.clearContent()
+                Timber.i("Generated quiz from custom content: ${questions.size} questions on topic: $title")
+            } else {
+                _state.update { 
+                    it.copy(
+                        isGenerating = false,
+                        error = "Unable to create quiz questions from the provided content. The content may not contain enough educational material.",
+                        generationPhase = "Generation failed"
+                    ) 
+                }
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Error generating quiz from custom content")
+            _state.update { 
+                it.copy(
+                    isGenerating = false,
+                    error = "Sorry, I couldn't create a quiz from this content. Please try with different content or check your internet connection.",
+                    generationPhase = "Error occurred"
+                ) 
+            }
+        }
+    }
+
+    /**
+     * Extract topics from custom content using simple keyword analysis
+     */
+    private fun extractTopicsFromContent(content: String): List<String> {
+        val text = content.lowercase()
+        val topics = mutableListOf<String>()
+        
+        // Simple keyword extraction - look for educational terms
+        val keywordMap = mapOf(
+            "mathematics" to listOf("math", "equation", "calculation", "number", "algebra", "geometry"),
+            "science" to listOf("science", "experiment", "hypothesis", "biology", "chemistry", "physics"),
+            "history" to listOf("history", "historical", "ancient", "century", "war", "civilization"),
+            "english" to listOf("grammar", "literature", "writing", "reading", "essay", "language"),
+            "geography" to listOf("geography", "continent", "country", "map", "climate", "region"),
+            "programming" to listOf("code", "programming", "function", "algorithm", "software", "computer")
+        )
+        
+        for ((topic, keywords) in keywordMap) {
+            if (keywords.any { text.contains(it) }) {
+                topics.add(topic.replaceFirstChar { it.uppercase() })
+            }
+        }
+        
+        return topics.ifEmpty { listOf("General Knowledge") }
+    }
+
+    /**
+     * Generate questions from custom content using AI
+     */
+    private suspend fun generateQuestionsFromContent(content: String, topic: String): List<Question> {
+        return try {
+            // Check if we should use online service
+            val useOnline = shouldUseOnlineService()
+            
+            if (useOnline) {
+                generateQuestionsOnline(content, topic)
+            } else {
+                generateQuestionsOffline(content, topic)
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to generate questions from content")
+            emptyList()
+        }
+    }
+
+    /**
+     * Generate questions online using API
+     */
+    private suspend fun generateQuestionsOnline(content: String, topic: String): List<Question> {
+        val prompt = """
+        Based on the following content, create 5 multiple-choice questions to test understanding:
+        
+        Content: "${content.take(1000)}"
+        
+        Generate questions that test comprehension, application, and analysis of the key concepts discussed.
+        
+        Format each question as JSON with this structure:
+        {
+          "question": "Question text",
+          "options": ["A", "B", "C", "D"],
+          "correctAnswer": 0,
+          "explanation": "Why this answer is correct"
+        }
+        
+        Return a JSON array of 5 questions.
+        """.trimIndent()
+
+        return try {
+            if (shouldUseOpenAI()) {
+                val response = openAIChatService.generateTextResponseOnline(prompt)
+                parseQuestionsFromJSON(response)
+            } else {
+                initializeApiServiceIfNeeded()
+                val response = geminiApiService.generateTextComplete(prompt, "custom_quiz")
+                parseQuestionsFromJSON(response)
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Online question generation failed")
+            emptyList()
+        }
+    }
+
+    /**
+     * Generate questions offline using Gemma
+     */
+    private suspend fun generateQuestionsOffline(content: String, topic: String): List<Question> {
+        return try {
+            if (!gemmaService.isInitialized()) {
+                gemmaService.initializeBestAvailable()
+            }
+
+            val prompt = """
+            Content: ${content.take(500)}
+            
+            Create 3 quiz questions about this content. Format: Question? A) option B) option C) option D) option. Answer: A
+            """.trimIndent()
+
+            val response = gemmaService.generateTextAsync(prompt)
+            parseQuestionsFromText(response)
+        } catch (e: Exception) {
+            Timber.e(e, "Offline question generation failed")
+            // Return basic fallback questions
+            listOf(
+                Question(
+                    id = "fallback_1",
+                    questionText = "What was the main topic discussed in this content?",
+                    questionType = QuestionType.MULTIPLE_CHOICE,
+                    options = listOf("Topic A", "Topic B", "Topic C", "The content shown"),
+                    correctAnswer = "The content shown",
+                    explanation = "This question tests basic comprehension of the content.",
+                    difficulty = Difficulty.MEDIUM
+                )
+            )
+        }
+    }
+
+    /**
+     * Parse questions from JSON response
+     */
+    private fun parseQuestionsFromJSON(response: String): List<Question> {
+        return try {
+            // Clean the response to extract JSON array, handling markdown code blocks
+            var cleanResponse = response.trim()
+            
+            // Remove markdown code block indicators
+            if (cleanResponse.startsWith("```json")) {
+                cleanResponse = cleanResponse.removePrefix("```json").trim()
+            }
+            if (cleanResponse.startsWith("```")) {
+                cleanResponse = cleanResponse.removePrefix("```").trim()
+            }
+            if (cleanResponse.endsWith("```")) {
+                cleanResponse = cleanResponse.removeSuffix("```").trim()
+            }
+            
+            val jsonStart = cleanResponse.indexOf("[")
+            val jsonEnd = cleanResponse.lastIndexOf("]") + 1
+            
+            if (jsonStart == -1 || jsonEnd <= jsonStart) {
+                Timber.w("No JSON array found in response: ${response.take(100)}")
+                return emptyList()
+            }
+            
+            val jsonString = cleanResponse.substring(jsonStart, jsonEnd)
+            Timber.d("Parsing JSON: ${jsonString.take(200)}...")
+            
+            // Parse JSON array
+            val jsonArray = org.json.JSONArray(jsonString)
+            val questions = mutableListOf<Question>()
+            
+            for (i in 0 until jsonArray.length()) {
+                val questionObj = jsonArray.getJSONObject(i)
+                
+                val questionText = questionObj.optString("question", "")
+                val explanation = questionObj.optString("explanation", "Generated question")
+                val correctAnswer = questionObj.optString("correctAnswer", "")
+                
+                // Parse options
+                val optionsArray = questionObj.optJSONArray("options")
+                val options = mutableListOf<String>()
+                if (optionsArray != null) {
+                    for (j in 0 until optionsArray.length()) {
+                        options.add(optionsArray.getString(j))
+                    }
+                }
+                
+                // Only add valid questions
+                if (questionText.isNotBlank() && options.size >= 2 && correctAnswer.isNotBlank()) {
+                    questions.add(
+                        Question(
+                            id = generateQuestionId(),
+                            questionText = questionText,
+                            questionType = QuestionType.MULTIPLE_CHOICE,
+                            options = options,
+                            correctAnswer = correctAnswer,
+                            explanation = explanation,
+                            difficulty = Difficulty.MEDIUM
+                        )
+                    )
+                } else {
+                    Timber.w("Skipping invalid question: text='$questionText', options=${options.size}, answer='$correctAnswer'")
+                }
+            }
+            
+            Timber.i("Successfully parsed ${questions.size} questions from JSON")
+            return questions
+            
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to parse JSON response: ${response.take(200)}")
+            return emptyList()
+        }
+    }
+
+    /**
+     * Parse questions from plain text response
+     */
+    private fun parseQuestionsFromText(response: String): List<Question> {
+        // Implementation would parse text format and create Question objects
+        // For now, return a simple fallback
+        return listOf(
+            Question(
+                id = generateQuestionId(),
+                questionText = "What can you conclude from this information?",
+                questionType = QuestionType.MULTIPLE_CHOICE,
+                options = listOf("Option A", "Option B", "Option C", "Need more information"),
+                correctAnswer = "Option C",
+                explanation = "This tests analytical thinking about the content.",
+                difficulty = Difficulty.MEDIUM
+            )
+        )
     }
 
     // Also update loadSubjects method
@@ -1703,7 +1992,137 @@ class QuizGeneratorViewModel @Inject constructor(
         return null
     }
 
+    /**
+     * Generate questions directly from content without curriculum overhead
+     */
+    private suspend fun generateDirectQuestionsFromContent(
+        content: String, 
+        topic: String, 
+        targetCount: Int = 5
+    ): List<Question> {
+        return try {
+            // Simple content-based generation focusing on the provided material
+            val prompt = """
+            Based on this content, create exactly $targetCount multiple choice questions:
+            
+            "$content"
+            
+            Guidelines:
+            - Questions should test understanding of the main concepts
+            - Make questions educational and appropriate
+            - Provide 4 options (A, B, C, D) for each question
+            - Include clear explanations for correct answers
+            - Focus on the key information presented
+            
+            Return a JSON array of questions with this format:
+            [
+              {
+                "question": "Question text here?",
+                "options": ["Option A", "Option B", "Option C", "Option D"],
+                "correctAnswer": "Option B",
+                "explanation": "Explanation of why this is correct"
+              }
+            ]
+            """.trimIndent()
+
+            val response = if (shouldUseOpenAI()) {
+                openAIChatService.generateTextResponseOnline(prompt)
+            } else {
+                initializeApiServiceIfNeeded()
+                geminiApiService.generateTextComplete(prompt, "content_quiz")
+            }
+
+            // Parse the JSON response or fall back to simple generation
+            parseQuestionsFromJSON(response).ifEmpty {
+                // Fallback: create basic questions from content analysis
+                generateFallbackQuestions(content, topic, targetCount)
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to generate questions directly, using fallback")
+            generateFallbackQuestions(content, topic, targetCount)
+        }
+    }
+
+    /**
+     * Generate simple fallback questions when AI generation fails
+     */
+    private fun generateFallbackQuestions(content: String, topic: String, count: Int): List<Question> {
+        val fallbackQuestions = listOf(
+            Question(
+                id = generateQuestionId(),
+                questionText = "What is the main topic discussed in this content?",
+                questionType = QuestionType.MULTIPLE_CHOICE,
+                options = listOf("$topic", "General information", "Technical details", "Other topic"),
+                correctAnswer = topic,
+                explanation = "This question tests basic comprehension of the main topic.",
+                difficulty = Difficulty.EASY
+            ),
+            Question(
+                id = generateQuestionId(),
+                questionText = "Based on the content, which statement is most accurate?",
+                questionType = QuestionType.MULTIPLE_CHOICE,
+                options = listOf(
+                    "The content provides detailed information",
+                    "The content is unclear", 
+                    "The content is too basic",
+                    "The content is irrelevant"
+                ),
+                correctAnswer = "The content provides detailed information",
+                explanation = "This tests understanding of the content quality and relevance.",
+                difficulty = Difficulty.MEDIUM
+            ),
+            Question(
+                id = generateQuestionId(),
+                questionText = "What can you learn from this content about $topic?",
+                questionType = QuestionType.MULTIPLE_CHOICE,
+                options = listOf(
+                    "Key concepts and important details",
+                    "Only basic information",
+                    "Nothing useful",
+                    "Confusing details"
+                ),
+                correctAnswer = "Key concepts and important details",
+                explanation = "Educational content typically provides valuable learning opportunities.",
+                difficulty = Difficulty.MEDIUM
+            ),
+            Question(
+                id = generateQuestionId(),
+                questionText = "How would you describe the information presented?",
+                questionType = QuestionType.MULTIPLE_CHOICE,
+                options = listOf(
+                    "Educational and informative",
+                    "Too complex to understand",
+                    "Not relevant to learning",
+                    "Completely unclear"
+                ),
+                correctAnswer = "Educational and informative",
+                explanation = "Well-presented content should be educational and help with understanding.",
+                difficulty = Difficulty.EASY
+            ),
+            Question(
+                id = generateQuestionId(),
+                questionText = "What is the best way to use this information about $topic?",
+                questionType = QuestionType.MULTIPLE_CHOICE,
+                options = listOf(
+                    "Study it further and apply the knowledge",
+                    "Ignore it completely",
+                    "Only memorize without understanding",
+                    "Share it without reading"
+                ),
+                correctAnswer = "Study it further and apply the knowledge",
+                explanation = "The best approach to learning is to understand and apply new knowledge.",
+                difficulty = Difficulty.MEDIUM
+            )
+        )
+        
+        return fallbackQuestions.take(count)
+    }
+
     /* ───── Helper functions ───── */
+
+    private fun generateQuestionId(): String {
+        return java.util.UUID.randomUUID().toString()
+    }
 
     private fun recreateQuestionFromHistory(history: QuestionHistory): Question {
         val concepts = try {

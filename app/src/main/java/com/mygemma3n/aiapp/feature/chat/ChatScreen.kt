@@ -35,7 +35,10 @@ import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
+fun ChatScreen(
+    onNavigateToQuiz: () -> Unit = {},
+    viewModel: ChatViewModel = hiltViewModel()
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
@@ -101,7 +104,7 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
                     ) {
                         Icon(
                             Icons.Default.Mic,
-                            contentDescription = null,
+                            contentDescription = "Recording audio",
                             tint = MaterialTheme.colorScheme.error,
                             modifier = Modifier.size(16.dp)
                         )
@@ -146,7 +149,17 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
                             items = state.conversation.reversed(),
                             key = { "${it.timestamp}_${it.content.take(10)}" }
                         ) { message ->
-                            AnimatedMessage(message = message)
+                            AnimatedMessage(
+                                message = message,
+                                onGenerateQuiz = { content ->
+                                    // Store content for quiz generation
+                                    com.mygemma3n.aiapp.shared_utilities.QuizContentManager.setContent(
+                                        content = content,
+                                        title = "Chat Content Quiz"
+                                    )
+                                    onNavigateToQuiz()
+                                }
+                            )
                         }
                     }
                 }
@@ -223,7 +236,7 @@ private fun ChatTopBar() {
                 ) {
                     Icon(
                         Icons.Default.Psychology,
-                        contentDescription = null,
+                        contentDescription = "AI Assistant avatar",
                         tint = Color.White,
                         modifier = Modifier.size(24.dp)
                     )
@@ -263,7 +276,7 @@ private fun EmptyChatState() {
         ) {
             Icon(
                 Icons.AutoMirrored.Filled.Chat,
-                contentDescription = null,
+                contentDescription = "Start a new conversation",
                 modifier = Modifier.size(64.dp),
                 tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
             )
@@ -284,7 +297,10 @@ private fun EmptyChatState() {
 }
 
 @Composable
-private fun AnimatedMessage(message: ChatMessage) {
+private fun AnimatedMessage(
+    message: ChatMessage,
+    onGenerateQuiz: (String) -> Unit = {}
+) {
     var isVisible by remember { mutableStateOf(false) }
 
     LaunchedEffect(message) {
@@ -299,7 +315,7 @@ private fun AnimatedMessage(message: ChatMessage) {
     ) {
         when (message) {
             is ChatMessage.User -> UserMessageBubble(message)
-            is ChatMessage.AI -> AIMessageBubble(message)
+            is ChatMessage.AI -> AIMessageBubble(message, onGenerateQuiz)
         }
     }
 }
@@ -353,7 +369,10 @@ private fun UserMessageBubble(message: ChatMessage.User) {
 }
 
 @Composable
-private fun AIMessageBubble(message: ChatMessage.AI) {
+private fun AIMessageBubble(
+    message: ChatMessage.AI,
+    onGenerateQuiz: (String) -> Unit = {}
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Start,
@@ -376,7 +395,7 @@ private fun AIMessageBubble(message: ChatMessage.AI) {
         ) {
             Icon(
                 Icons.Default.AutoAwesome,
-                contentDescription = null,
+                contentDescription = "AI message",
                 tint = Color.White,
                 modifier = Modifier.size(18.dp)
             )
@@ -412,6 +431,32 @@ private fun AIMessageBubble(message: ChatMessage.AI) {
                     ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyLarge
+                )
+            }
+
+            // Generate Quiz button for AI messages with sufficient content
+            if (message.content.length > 100) {
+                Spacer(modifier = Modifier.height(8.dp))
+                AssistChip(
+                    onClick = { onGenerateQuiz(message.content) },
+                    label = { 
+                        Text(
+                            text = "Generate Quiz",
+                            style = MaterialTheme.typography.labelMedium
+                        ) 
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Quiz,
+                            contentDescription = "Generate quiz from this conversation",
+                            modifier = Modifier.size(16.dp)
+                        )
+                    },
+                    colors = AssistChipDefaults.assistChipColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                        labelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    ),
+                    modifier = Modifier.height(32.dp)
                 )
             }
 

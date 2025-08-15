@@ -115,7 +115,7 @@ fun CBTCoachScreen(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Psychology,
-                                    contentDescription = null,
+                                    contentDescription = "CBT Coach",
                                     tint = MaterialTheme.colorScheme.onPrimary,
                                     modifier = Modifier.size(24.dp)
                                 )
@@ -169,7 +169,7 @@ fun CBTCoachScreen(
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.Mood,
-                                                contentDescription = null,
+                                                contentDescription = "Current emotion: ${sessionState.currentEmotion}",
                                                 tint = getEmotionColor(sessionState.currentEmotion)
                                             )
                                             Text(
@@ -229,7 +229,7 @@ fun CBTCoachScreen(
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.AutoFixHigh,
-                                                contentDescription = null,
+                                                contentDescription = "CBT technique in progress",
                                                 tint = MaterialTheme.colorScheme.primary
                                             )
                                             Text(
@@ -370,7 +370,7 @@ fun CBTCoachScreen(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Error,
-                            contentDescription = null,
+                            contentDescription = "Error occurred",
                             tint = MaterialTheme.colorScheme.error
                         )
                         Text(
@@ -400,7 +400,7 @@ fun CBTCoachScreen(
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.Note,
-                                contentDescription = null,
+                                contentDescription = "Create thought record",
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -605,7 +605,7 @@ fun CBTCoachScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.PlayArrow,
-                                contentDescription = null,
+                                contentDescription = "Start CBT session",
                                 modifier = Modifier.size(24.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
@@ -629,7 +629,7 @@ fun CBTCoachScreen(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Delete,
-                                contentDescription = null,
+                                contentDescription = "Clear session",
                                 modifier = Modifier.size(20.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))

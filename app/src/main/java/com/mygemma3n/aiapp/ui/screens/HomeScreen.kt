@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -243,7 +244,15 @@ private fun FeatureCard(
 ) {
     Card(
         onClick = onClick,
-        modifier = modifier.aspectRatio(1f),
+        modifier = modifier.aspectRatio(1f)
+            .semantics {
+                contentDescription = if (feature.enabled) {
+                    "Open ${feature.title}"
+                } else {
+                    "${feature.title} is not available"
+                }
+                role = Role.Button
+            },
         enabled = feature.enabled,
         colors = CardDefaults.cardColors(
             containerColor = if (feature.enabled) {
@@ -265,7 +274,7 @@ private fun FeatureCard(
         ) {
             Icon(
                 imageVector = feature.icon,
-                contentDescription = null,
+                contentDescription = feature.title,
                 modifier = Modifier.size(32.dp),
                 tint = if (feature.enabled) {
                     MaterialTheme.colorScheme.primary

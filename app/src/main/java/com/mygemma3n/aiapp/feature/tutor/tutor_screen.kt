@@ -45,6 +45,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mygemma3n.aiapp.data.StudentProfileEntity
 import com.mygemma3n.aiapp.data.TutorSessionType
 import com.mygemma3n.aiapp.shared_utilities.OfflineRAG
+import com.mygemma3n.aiapp.shared_utilities.QuizContentManager
 import com.mygemma3n.aiapp.components.*
 import com.mygemma3n.aiapp.feature.tutor.TutorProgressDisplay
 import com.mygemma3n.aiapp.feature.tutor.FloatingProgressSummary
@@ -59,6 +60,7 @@ import java.util.Locale
 fun TutorScreen(
     onNavigateBack: () -> Unit = {},
     onNavigateToChatList: () -> Unit = {},
+    onNavigateToQuiz: () -> Unit = {},
     viewModel: TutorViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -174,6 +176,14 @@ fun TutorScreen(
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             viewModel.bookmarkMessage(messageId)
                         },
+                        onGenerateQuiz = { content ->
+                            // Store content for quiz generation
+                            QuizContentManager.setContent(
+                                content = content,
+                                title = "AI Tutor Content Quiz"
+                            )
+                            onNavigateToQuiz()
+                        },
                         onViewProgressDetails = {
                             viewModel.showFloatingProgressSummary()
                         },
@@ -255,6 +265,7 @@ private fun TutorChatInterface(
     onMessageDoubleTap: (String) -> Unit,
     onTopicSelected: (String) -> Unit,
     onBookmarkMessage: (String) -> Unit,
+    onGenerateQuiz: (String) -> Unit,
     onViewProgressDetails: () -> Unit,
     onDismissProgressSummary: () -> Unit,
     onSelectConceptFromProgress: (String) -> Unit,
@@ -430,7 +441,8 @@ private fun TutorChatInterface(
                             .fillMaxWidth()
                             .animateItem(), // Updated from animateItemPlacement()
                         onDoubleTap = onMessageDoubleTap,
-                        onBookmark = { onBookmarkMessage(message.id) }
+                        onBookmark = { onBookmarkMessage(message.id) },
+                        onGenerateQuiz = onGenerateQuiz
                     )
                 }
 
@@ -786,7 +798,8 @@ private fun TutorMessageBubble(
     message: TutorViewModel.TutorMessage,
     modifier: Modifier = Modifier,
     onDoubleTap: (String) -> Unit = {},
-    onBookmark: () -> Unit = {}
+    onBookmark: () -> Unit = {},
+    onGenerateQuiz: (String) -> Unit = {}
 ) {
     val haptic = LocalHapticFeedback.current
 
@@ -875,6 +888,37 @@ private fun TutorMessageBubble(
                     else
                         MaterialTheme.colorScheme.onSurfaceVariant
                 )
+
+                // Generate Quiz button for AI messages
+                if (!message.isUser && message.content.length > 100) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        AssistChip(
+                            onClick = { onGenerateQuiz(message.content) },
+                            label = { 
+                                Text(
+                                    text = "Generate Quiz",
+                                    style = MaterialTheme.typography.labelMedium
+                                ) 
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Quiz,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            },
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                                labelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            ),
+                            modifier = Modifier.height(32.dp)
+                        )
+                    }
+                }
 
                 // Metadata and timestamp
                 message.metadata?.let { metadata ->

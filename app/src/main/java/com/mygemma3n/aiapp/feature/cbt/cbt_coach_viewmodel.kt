@@ -204,7 +204,7 @@ Let's explore what you're experiencing together. Can you tell me more about what
             } catch (e: Exception) {
                 Timber.e(e, "Failed to initialize Gemma model or knowledge base")
                 _sessionState.update {
-                    it.copy(error = "Failed to initialize: ${e.message}")
+                    it.copy(error = "Unable to start CBT Coach. Please check your internet connection and try again.")
                 }
             }
         }
@@ -283,7 +283,7 @@ Let's explore what you're experiencing together. Can you tell me more about what
             }
             .catch { e ->
                 Timber.e(e, "Audio collection error")
-                _sessionState.update { it.copy(error = "Recording error: ${e.message}") }
+                _sessionState.update { it.copy(error = "Recording failed. Please check microphone permissions and try again.") }
             }
             .launchIn(viewModelScope + Dispatchers.IO)
     }
@@ -308,7 +308,7 @@ Let's explore what you're experiencing together. Can you tell me more about what
                     _sessionState.update {
                         it.copy(
                             userTypedInput = "",
-                            error = "No audio recorded. Please try again."
+                            error = "No audio was recorded. Please hold the microphone button and speak clearly."
                         )
                     }
                     return@launch
@@ -337,7 +337,7 @@ Let's explore what you're experiencing together. Can you tell me more about what
                     _sessionState.update {
                         it.copy(
                             userTypedInput = "",
-                            error = "No speech detected. Please speak clearly into the microphone."
+                            error = "We couldn't hear you clearly. Please speak louder or closer to the microphone."
                         )
                     }
                 }
@@ -346,7 +346,7 @@ Let's explore what you're experiencing together. Can you tell me more about what
                 _sessionState.update {
                     it.copy(
                         userTypedInput = "",
-                        error = "Transcription failed: ${e.message}"
+                        error = "We couldn't understand what you said. Please try typing your message instead."
                     )
                 }
             }
@@ -611,7 +611,7 @@ Respond as a CBT therapist in under 50 words. Be empathetic and helpful."""
 
             if (transcribedText.isEmpty()) {
                 _sessionState.update {
-                    it.copy(error = "Could not transcribe audio. Please try again.")
+                    it.copy(error = "We couldn't understand your voice message. Please try speaking more clearly.")
                 }
                 return
             }
@@ -622,7 +622,7 @@ Respond as a CBT therapist in under 50 words. Be empathetic and helpful."""
         } catch (e: Exception) {
             Timber.e(e, "Error processing voice input")
             _sessionState.update {
-                it.copy(error = "Voice processing failed: ${e.message}")
+                it.copy(error = "Voice message processing failed. Please try typing your message instead.")
             }
         } finally {
             _isLoading.value = false

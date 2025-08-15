@@ -134,7 +134,7 @@ class ChatViewModel @Inject constructor(
             if (!speechService.isInitialized) {
                 Timber.w("SpeechRecognitionService is not initialized - transcription will not work")
                 _uiState.update {
-                    it.copy(error = "Voice transcription is not available. Please check API settings.")
+                    it.copy(error = "Voice recording isn't available right now. Please type your message instead.")
                 }
             } else {
                 Timber.d("SpeechRecognitionService is initialized and ready")
@@ -212,7 +212,7 @@ class ChatViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             isTranscribing = false,
-                            error = "No audio recorded. Please try again."
+                            error = "No voice message was recorded. Please hold the microphone button and speak clearly."
                         )
                     }
                     return@launch
@@ -233,7 +233,7 @@ class ChatViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             isTranscribing = false,
-                            error = "Could not transcribe audio. Please try again or check your internet connection."
+                            error = "We couldn't understand your voice message. Please speak more clearly or check your internet connection."
                         )
                     }
                 }
@@ -242,7 +242,7 @@ class ChatViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isTranscribing = false,
-                        error = "Transcription failed: ${e.message}"
+                        error = "Voice message processing failed. Please try typing your message instead."
                     )
                 }
             }
@@ -335,7 +335,7 @@ class ChatViewModel @Inject constructor(
                 repo.addMessage(sessionId, aiMsg)
             } catch (e: Exception) {
                 Timber.e(e, "Error generating AI response")
-                _uiState.update { it.copy(error = "Failed to generate response: ${e.message}") }
+                _uiState.update { it.copy(error = "I'm having trouble responding right now. Please check your internet connection and try again.") }
             } finally {
                 _uiState.update { it.copy(isLoading = false) }
             }
@@ -417,7 +417,7 @@ class ChatViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 Timber.e(e, "Error generating streaming response")
-                _uiState.update { it.copy(error = "Failed to generate response: ${e.message}") }
+                _uiState.update { it.copy(error = "I'm having trouble responding right now. Please check your internet connection and try again.") }
             } finally {
                 _uiState.update { it.copy(isLoading = false) }
             }
