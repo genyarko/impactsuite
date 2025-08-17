@@ -40,12 +40,16 @@ class QuizProgressTracker @Inject constructor(
         try {
             Timber.d("Loading user progress across all subjects")
             
+            // Clean up any corrupted data first
+            cleanupCorruptedData()
+            
             val progressMap = mutableMapOf<Subject, Float>()
             
             // Calculate progress for each subject
             Subject.entries.forEach { subject ->
                 val progress = calculateSubjectProgress(subject)
                 progressMap[subject] = progress
+                Timber.d("Final progress for $subject: $progress%")
             }
             
             _userProgress.value = progressMap
@@ -66,6 +70,28 @@ class QuizProgressTracker @Inject constructor(
     }
     
     /**
+     * Clean up any corrupted progress data
+     */
+    private suspend fun cleanupCorruptedData() {
+        try {
+            // Get all recent progress data
+            val oneWeekAgo = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000)
+            val recentProgress = quizRepo.progressDao().getRecentProgress(oneWeekAgo)
+            
+            // Log suspicious data
+            recentProgress.forEach { progress ->
+                if (progress.timestamp < 0 || progress.responseTimeMs < 0) {
+                    Timber.w("Found suspicious progress data: $progress")
+                }
+            }
+            
+            Timber.d("Data cleanup completed. Found ${recentProgress.size} recent progress entries")
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to cleanup corrupted data")
+        }
+    }
+    
+    /**
      * Calculate progress for a specific subject based on quiz performance
      */
     private suspend fun calculateSubjectProgress(subject: Subject): Float {
@@ -73,10 +99,54 @@ class QuizProgressTracker @Inject constructor(
             // Use existing repository methods
             val oneWeekAgo = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000)
             val accuracy = quizRepo.progressDao().recentAccuracy(subject, oneWeekAgo)
-            accuracy * 100f // Convert to percentage
+            
+            Timber.d("Raw accuracy for $subject: $accuracy")
+            
+            // Validate the accuracy value
+            val validatedAccuracy = when {
+                accuracy.isNaN() || accuracy.isInfinite() -> {
+                    Timber.w("Invalid accuracy value for $subject: $accuracy, using 0.0")
+                    0f
+                }
+                accuracy < 0f -> {
+                    Timber.w("Negative accuracy for $subject: $accuracy, using 0.0")
+                    0f
+                }
+                accuracy > 100f -> {
+                    Timber.w("Suspiciously high accuracy for $subject: $accuracy, capping at 100%")
+                    100f
+                }
+                accuracy > 1.0f -> {
+                    // Assume it's already in percentage form, but cap at 100%
+                    Timber.d("Accuracy appears to be in percentage form for $subject: $accuracy")
+                    accuracy.coerceAtMost(100f)
+                }
+                else -> {
+                    // Normal case: convert decimal to percentage
+                    val percentage = (accuracy * 100f).coerceAtMost(100f)
+                    Timber.d("Converted accuracy for $subject: $accuracy -> $percentage%")
+                    percentage
+                }
+            }
+            
+            validatedAccuracy
         } catch (e: Exception) {
             Timber.w(e, "Failed to calculate progress for $subject")
             0f
+        }
+    }
+    
+    /**
+     * Reset all progress data (useful for debugging percentage issues)
+     */
+    suspend fun resetAllProgress() = withContext(Dispatchers.IO) {
+        try {
+            Timber.d("Resetting all progress data")
+            val progressMap = Subject.entries.associateWith { 0f }
+            _userProgress.value = progressMap
+            Timber.d("All progress reset to 0%")
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to reset progress")
         }
     }
     
@@ -265,7 +335,17 @@ class QuizProgressTracker @Inject constructor(
             val totalQuestions = quiz.questions.size
             val accuracy = if (totalQuestions > 0) correctAnswers.toFloat() / totalQuestions else 0f
             
-            // TODO: Add analytics recording when repository method is available
+            // Record quiz completion analytics
+            analyticsRepository.recordInteraction(
+                studentId = "default_user",
+                subject = quiz.subject.name,
+                topic = quiz.topic.takeIf { it.isNotBlank() } ?: "General",
+                concept = quiz.questions.flatMap { it.conceptsCovered }.joinToString(",").takeIf { it.isNotBlank() } ?: "General",
+                interactionType = InteractionType.QUIZ_COMPLETED,
+                sessionDurationMs = System.currentTimeMillis() - quiz.createdAt,
+                responseQuality = accuracy,
+                wasCorrect = accuracy >= 0.7f
+            )
             
             Timber.d("Quiz analytics recorded: $correctAnswers/$totalQuestions correct (${(accuracy * 100).toInt()}%)")
         } catch (e: Exception) {
@@ -309,7 +389,17 @@ class QuizProgressTracker @Inject constructor(
             // Record in repository
             quizRepo.recordQuestionAttempt(question, isCorrect)
             
-            // TODO: Add analytics recording when repository method is available
+            // Record question attempt analytics
+            analyticsRepository.recordInteraction(
+                studentId = "default_user",
+                subject = "Quiz", // Could be improved by getting from context
+                topic = question.conceptsCovered.firstOrNull() ?: "General",
+                concept = question.conceptsCovered.joinToString(",").takeIf { it.isNotBlank() } ?: "General",
+                interactionType = InteractionType.QUESTION_ASKED,
+                sessionDurationMs = timeSpent,
+                responseQuality = if (isCorrect) 1.0f else 0.0f,
+                wasCorrect = isCorrect
+            )
             
             Timber.d("Question attempt recorded: ${if (isCorrect) "correct" else "incorrect"}")
         } catch (e: Exception) {

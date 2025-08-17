@@ -56,9 +56,9 @@ class OnlineStoryGenerator @Inject constructor(
                 createStoryPrompt(request, targetPageCount)
             }
             
-            withTimeoutOrNull(180_000) { // 180 second timeout for entire story (allows time for image generation)
+            withTimeoutOrNull(120_000) { // Reduced timeout to 120 seconds for text generation only
                 val response = if (usingOpenAI) {
-                    openAIService.generateStoryContent(prompt, maxTokens = 6000, temperature = 1.0f)
+                    openAIService.generateStoryContent(prompt, maxTokens = 12000, temperature = 1.0f)
                 } else {
                     require(geminiApiService.isInitialized()) { "GeminiApiService not initialized" }
                     geminiApiService.generateTextComplete(prompt, "story")
@@ -66,29 +66,49 @@ class OnlineStoryGenerator @Inject constructor(
                 
                 val story = parseStoryResponse(response, request, targetPageCount, usingOpenAI)
                 
-                // Generate images if story was created successfully
-                val finalStory = if (story != null) {
+                // Return story immediately without images - images will be generated later
+                if (story != null) {
                     // Simulate progress updates for better UX
                     story.pages.forEachIndexed { index, _ ->
                         onPageGenerated(index + 1, story.totalPages)
                         delay(100) // Small delay to show progress
                     }
                     
-                    // Generate images for appropriate age groups
-                    if (storyImageGenerator.shouldGenerateImages(story.targetAudience)) {
-                        storyImageGenerator.generateImagesForStory(story, usingOpenAI)
-                    } else {
-                        story
-                    }
+                    // Mark if images should be generated later, but don't generate them now
+                    story.copy(
+                        hasImages = false,
+                        imageGenerationScript = null
+                    )
                 } else {
                     null
                 }
-                
-                finalStory
             }
         } catch (e: Exception) {
             Timber.e(e, "Failed to generate story online, creating fallback story")
             createFallbackStory(request, targetPageCount)
+        }
+    }
+
+    /**
+     * Generates images for an existing story. This can be called independently
+     * after story creation to add images without affecting the story content.
+     */
+    suspend fun generateImagesForExistingStory(story: Story): Story? = withContext(Dispatchers.IO) {
+        return@withContext try {
+            val usingOpenAI = shouldUseOpenAI()
+            
+            // Generate images for appropriate age groups
+            if (storyImageGenerator.shouldGenerateImages(story.targetAudience)) {
+                Timber.d("Generating images for existing story: ${story.title}")
+                storyImageGenerator.generateImagesForStory(story, usingOpenAI)
+            } else {
+                Timber.d("Story target audience ${story.targetAudience} does not require images")
+                story.copy(hasImages = false)
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to generate images for existing story: ${story.id}")
+            // Return original story if image generation fails
+            story.copy(hasImages = false)
         }
     }
 
@@ -136,14 +156,22 @@ class OnlineStoryGenerator @Inject constructor(
             "Include a positive, age-appropriate message"
         }
 
+        val promptSection = if (request.prompt.isNotBlank()) {
+            "- User Prompt: \"${request.prompt}\""
+        } else {
+            "- Create an original story using the characters and structure provided"
+        }
+
         return """
         You are a skilled children's story writer. Create an engaging ${request.genre.name.lowercase().replace('_', ' ')} story for ${request.targetAudience.name.lowercase().replace('_', ' ')} readers.
 
+        CRITICAL REQUIREMENT: YOU MUST CREATE EXACTLY $targetPageCount PAGES - NO MORE, NO LESS!
+
         STORY REQUIREMENTS:
-        - User Prompt: "${request.prompt}"
+        $promptSection
         - Genre: ${request.genre.name} ($genreContext)
         - Target Audience: ${request.targetAudience.name} ($audienceContext)
-        - Length: Exactly $targetPageCount pages
+        - MANDATORY LENGTH: EXACTLY $targetPageCount pages (this is non-negotiable)
         - $charactersText
         - $settingText
         - $themeText
@@ -160,7 +188,7 @@ class OnlineStoryGenerator @Inject constructor(
         $difficultyInstructions
 
         OUTPUT FORMAT:
-        Return ONLY valid JSON in this exact format:
+        Return ONLY valid JSON in this exact format with EXACTLY $targetPageCount pages:
         {
           "title": "Engaging Story Title",
           "pages": [
@@ -174,11 +202,13 @@ class OnlineStoryGenerator @Inject constructor(
               "title": "Page 2 Title (optional)", 
               "content": "Full content for page 2. Continue the story naturally from page 1."
             }
-            // ... continue for all $targetPageCount pages
+            // ... CONTINUE FOR ALL $targetPageCount PAGES (EXACTLY $targetPageCount, NOT MORE OR LESS)
           ],
           "characters": ["Character 1", "Character 2"],
           "setting": "Brief description of the main setting"
         }
+
+        REMINDER: Your response must contain EXACTLY $targetPageCount pages in the pages array!
 
         Generate the complete story now:
         """.trimIndent()
@@ -231,11 +261,13 @@ class OnlineStoryGenerator @Inject constructor(
         return """
         Create an engaging, high-quality ${request.genre.name.lowercase().replace('_', ' ')} story for ${request.targetAudience.name.lowercase().replace('_', ' ')} readers.
 
+        **CRITICAL REQUIREMENT: YOU MUST CREATE EXACTLY $targetPageCount PAGES - NO MORE, NO LESS!**
+
         **STORY SPECIFICATIONS:**
         - User's Creative Prompt: "${request.prompt}"
         - Genre: ${request.genre.name} ($genreContext)
         - Target Audience: ${request.targetAudience.name} ($audienceContext)
-        - Required Length: Exactly $targetPageCount pages
+        - MANDATORY LENGTH: EXACTLY $targetPageCount pages (this is absolutely required)
         - $charactersText
         - $settingText
         - $themeText
@@ -253,7 +285,7 @@ class OnlineStoryGenerator @Inject constructor(
         $difficultyInstructions
 
         **CRITICAL FORMATTING REQUIREMENT:**
-        You MUST return your response as a properly formatted JSON object with this EXACT structure:
+        You MUST return your response as a properly formatted JSON object with EXACTLY $targetPageCount pages:
 
         ```json
         {
@@ -269,12 +301,14 @@ class OnlineStoryGenerator @Inject constructor(
               "title": "Chapter 2 Title (optional but recommended)",
               "content": "Continuing the story naturally from page 1. Develop the plot, characters, and conflict. Each page should feel complete but also connect seamlessly to the next."
             }
-            // Continue this pattern for all $targetPageCount pages
+            // CONTINUE THIS PATTERN FOR ALL $targetPageCount PAGES (EXACTLY $targetPageCount, NOT MORE OR LESS)
           ],
           "characters": ["Main Character Name", "Supporting Character Name", "Other Characters"],
           "setting": "Detailed description of the primary story setting and world"
         }
         ```
+
+        **MANDATORY: Your JSON must contain exactly $targetPageCount pages in the pages array!**
 
         **IMPORTANT NOTES:**
         - The JSON must be valid and parseable

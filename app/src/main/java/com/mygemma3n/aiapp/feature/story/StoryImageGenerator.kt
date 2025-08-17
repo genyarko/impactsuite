@@ -3,6 +3,7 @@ package com.mygemma3n.aiapp.feature.story
 import android.content.Context
 import com.mygemma3n.aiapp.data.GeminiApiService
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.first
@@ -46,7 +47,7 @@ class StoryImageGenerator @Inject constructor(
             
             val response = if (usingOpenAI) {
                 Timber.d("Using OpenAI for image script generation")
-                openAIService.generateStoryContent(prompt, maxTokens = 6000, temperature = 1.0f)
+                openAIService.generateStoryContent(prompt, maxTokens = 8000, temperature = 1.0f)
             } else {
                 Timber.d("Using Gemini for image script generation")
                 require(geminiApiService.isInitialized()) { "GeminiApiService not initialized" }
@@ -166,28 +167,80 @@ class StoryImageGenerator @Inject constructor(
     }
 
     /**
-     * Generates image bytes using DALL-E API with retry logic
+     * Sanitizes description to avoid DALL-E content policy violations
+     */
+    private fun sanitizeDescriptionForDALLE(description: String): String {
+        var sanitized = description
+        
+        // Replace potentially problematic phrases
+        val replacements = mapOf(
+            "tangled and stuck in the web" to "standing near a colorful web pattern",
+            "arms trapped in" to "arms reaching toward",
+            "trapped in delicate, tight threads" to "surrounded by gentle, sparkly threads",
+            "face a mix of fear and shame" to "face showing surprise and curiosity",
+            "stuck in" to "standing near",
+            "trapped" to "surrounded by",
+            "fear and shame" to "surprise and wonder",
+            "crying" to "looking thoughtful",
+            "distress" to "concern",
+            "frightened" to "curious",
+            "scared" to "surprised"
+        )
+        
+        for ((problematic, safe) in replacements) {
+            sanitized = sanitized.replace(problematic, safe, ignoreCase = true)
+        }
+        
+        return sanitized
+    }
+
+    /**
+     * Generates image bytes using DALL-E API with timeout and retry logic
      */
     private suspend fun generateImageWithDALLE(description: String): ByteArray {
-        val maxRetries = 2
+        val maxRetries = 2 // Allow one retry for better reliability
         var lastException: Exception? = null
         
         repeat(maxRetries) { attempt ->
             try {
-                val imagePrompt = "Children's book illustration: $description. Style: colorful, friendly, and age-appropriate artwork suitable for children's storybooks."
+                // Sanitize description to avoid content policy violations
+                val sanitizedDescription = sanitizeDescriptionForDALLE(description)
+                
+                // Simplified prompt for faster generation
+                val imagePrompt = "Simple children's book illustration: $sanitizedDescription. Cartoon style, bright colors."
                 Timber.d("DALL-E attempt ${attempt + 1}/$maxRetries for image generation")
                 
-                return openAIService.generateImageWithDALLE(
-                    prompt = imagePrompt,
-                    size = "1024x1024",
-                    quality = "standard",
-                    style = "vivid"
-                )
+                // Use longer timeout per attempt to allow DALL-E sufficient time
+                val result = withTimeoutOrNull(300_000) { // 5 minute timeout per attempt (matches HTTP client)
+                    openAIService.generateImageWithDALLE(
+                        prompt = imagePrompt,
+                        size = "1024x1024", // Use supported DALL-E 3 size
+                        quality = "standard", // Standard quality is faster than HD
+                        style = "natural" // Natural style is often faster than vivid
+                    )
+                }
+                
+                if (result != null) {
+                    return result
+                } else {
+                    throw Exception("DALL-E request timed out after 5 minutes")
+                }
             } catch (e: Exception) {
                 lastException = e
-                Timber.w(e, "DALL-E attempt ${attempt + 1} failed, retrying...")
+                val errorType = when {
+                    e is kotlinx.coroutines.TimeoutCancellationException -> "timeout"
+                    e.message?.contains("content_policy_violation") == true -> "content policy"
+                    e.message?.contains("rate_limit") == true -> "rate limit"
+                    else -> "API error"
+                }
+                Timber.w(e, "DALL-E attempt ${attempt + 1} failed ($errorType)${if (attempt < maxRetries - 1) ", retrying..." else ""}")
                 if (attempt < maxRetries - 1) {
-                    kotlinx.coroutines.delay(2000) // Wait 2 seconds before retry
+                    val delayMs = when (errorType) {
+                        "rate limit" -> 30000L // 30s delay for rate limits
+                        "timeout" -> 5000L // 5s delay for timeouts
+                        else -> 2000L // 2s delay for other errors
+                    }
+                    delay(delayMs)
                 }
             }
         }
@@ -215,25 +268,71 @@ class StoryImageGenerator @Inject constructor(
         val descriptions = parseImageScript(imageScript, story.totalPages)
         Timber.d("Parsed ${descriptions.size} image descriptions from script")
         
+        // Circuit breaker pattern: allow some failures before stopping
+        var consecutiveFailures = 0
+        val maxConsecutiveFailures = 3 // Allow more failures for DALL-E which can be slow
+        var circuitBreakerOpen = false
+        
         val updatedPages = story.pages.mapIndexed { index, page ->
             val desc = descriptions.getOrNull(index)
             if (desc != null) {
+                // Check circuit breaker
+                if (circuitBreakerOpen) {
+                    Timber.w("Circuit breaker open, skipping image generation for page ${index + 1}")
+                    return@mapIndexed page.copy(imageDescription = desc)
+                }
+                
                 try {
                     Timber.d("Generating image for page ${index + 1} using ${if (usingOpenAI) "DALL-E" else "Gemini"}")
-                    // Add individual timeout for each image generation
-                    val uri = withTimeoutOrNull(60_000) { // 60 second timeout per image
-                        createRealImageUrl(index + 1, desc, usingOpenAI)
+                    
+                    var uri: String? = null
+                    var usedFallback = false
+                    
+                    // Try the primary method first
+                    try {
+                        // Increased timeout for individual image generation to allow DALL-E sufficient time
+                        uri = withTimeoutOrNull(600_000) { // 10 minute timeout per image (allows for 2 retries at 5min each)
+                            createRealImageUrl(index + 1, desc, usingOpenAI)
+                        }
+                    } catch (e: Exception) {
+                        // Check if this is a content policy violation and fallback to Gemini
+                        if (usingOpenAI && e.message?.contains("content_policy_violation") == true) {
+                            Timber.w("DALL-E content policy violation for page ${index + 1}, falling back to Gemini")
+                            try {
+                                uri = withTimeoutOrNull(180_000) { // 3 minute timeout for Gemini fallback
+                                    createRealImageUrl(index + 1, desc, false) // Use Gemini
+                                }
+                                usedFallback = true
+                            } catch (fallbackException: Exception) {
+                                Timber.e(fallbackException, "Gemini fallback also failed for page ${index + 1}")
+                                throw e // Throw original exception if fallback fails
+                            }
+                        } else {
+                            throw e // Re-throw if not a content policy issue
+                        }
                     }
                     
                     if (uri != null) {
-                        Timber.d("Successfully generated image for page ${index + 1}: $uri")
+                        val method = if (usedFallback) "Gemini (fallback)" else if (usingOpenAI) "DALL-E" else "Gemini"
+                        Timber.d("Successfully generated image for page ${index + 1} using $method: $uri")
+                        consecutiveFailures = 0 // Reset failure counter on success
                         page.copy(imageUrl = uri, imageDescription = desc)
                     } else {
-                        Timber.w("Image generation timed out for page ${index + 1}, continuing without image")
+                        consecutiveFailures++
+                        Timber.w("Image generation timed out for page ${index + 1} (failure $consecutiveFailures/$maxConsecutiveFailures)")
+                        if (consecutiveFailures >= maxConsecutiveFailures) {
+                            circuitBreakerOpen = true
+                            Timber.w("Opening circuit breaker after $maxConsecutiveFailures consecutive failures - stopping image generation for remaining pages")
+                        }
                         page.copy(imageDescription = desc) // Keep description but no image
                     }
                 } catch (e: Exception) {
-                    Timber.e(e, "Failed to generate image for page ${index + 1}")
+                    consecutiveFailures++
+                    Timber.e(e, "Failed to generate image for page ${index + 1} (failure $consecutiveFailures/$maxConsecutiveFailures)")
+                    if (consecutiveFailures >= maxConsecutiveFailures) {
+                        circuitBreakerOpen = true
+                        Timber.w("Opening circuit breaker after $maxConsecutiveFailures consecutive failures - stopping image generation for remaining pages")
+                    }
                     page.copy(imageDescription = desc) // Keep description but no image
                 }
             } else {

@@ -6,6 +6,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -115,7 +117,53 @@ class QuizPreferencesRepository @Inject constructor(
         }
     }
 
-    // Add other update methods...
+    suspend fun updateSoundEnabled(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.SOUND_ENABLED] = enabled
+        }
+    }
+
+    suspend fun updateHapticEnabled(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.HAPTIC_ENABLED] = enabled
+        }
+    }
+
+    suspend fun updateHighContrastMode(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.HIGH_CONTRAST] = enabled
+        }
+    }
+
+    suspend fun updateShowHints(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.SHOW_HINTS] = enabled
+        }
+    }
+
+    suspend fun updateAutoAdvance(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.AUTO_ADVANCE] = enabled
+        }
+    }
+
+    suspend fun updateShowExplanations(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.SHOW_EXPLANATIONS] = enabled
+        }
+    }
+
+    suspend fun updateTimeLimit(timeLimit: QuestionTimeLimit) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.TIME_LIMIT] = timeLimit.name
+        }
+    }
+
+    suspend fun updateTheme(theme: AppTheme) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.THEME] = theme.name
+        }
+    }
 }
 
 // ViewModel
@@ -136,7 +184,59 @@ class QuizSettingsViewModel @Inject constructor(
         }
     }
 
-    // Add other update methods...
+    fun updateAnimationsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            preferencesRepository.updateAnimationsEnabled(enabled)
+        }
+    }
+
+    fun updateSoundEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            preferencesRepository.updateSoundEnabled(enabled)
+        }
+    }
+
+    fun updateHapticEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            preferencesRepository.updateHapticEnabled(enabled)
+        }
+    }
+
+    fun updateHighContrastMode(enabled: Boolean) {
+        viewModelScope.launch {
+            preferencesRepository.updateHighContrastMode(enabled)
+        }
+    }
+
+    fun updateShowHints(enabled: Boolean) {
+        viewModelScope.launch {
+            preferencesRepository.updateShowHints(enabled)
+        }
+    }
+
+    fun updateAutoAdvance(enabled: Boolean) {
+        viewModelScope.launch {
+            preferencesRepository.updateAutoAdvance(enabled)
+        }
+    }
+
+    fun updateShowExplanations(enabled: Boolean) {
+        viewModelScope.launch {
+            preferencesRepository.updateShowExplanations(enabled)
+        }
+    }
+
+    fun updateTimeLimit(timeLimit: QuestionTimeLimit) {
+        viewModelScope.launch {
+            preferencesRepository.updateTimeLimit(timeLimit)
+        }
+    }
+
+    fun updateTheme(theme: AppTheme) {
+        viewModelScope.launch {
+            preferencesRepository.updateTheme(theme)
+        }
+    }
 }
 
 // Settings Screen
@@ -154,7 +254,7 @@ fun QuizSettingsScreen(
                 title = { Text("Quiz Settings") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
@@ -166,6 +266,7 @@ fun QuizSettingsScreen(
                 .padding(paddingValues),
             contentPadding = PaddingValues(vertical = 8.dp)
         ) {
+
             // Display Settings
             item {
                 SettingsSection(title = "Display") {
@@ -179,7 +280,7 @@ fun QuizSettingsScreen(
                         description = "Increase color contrast for better visibility",
                         icon = Icons.Default.Contrast,
                         checked = preferences.highContrastMode,
-                        onCheckedChange = { /* Update */ }
+                        onCheckedChange = viewModel::updateHighContrastMode
                     )
 
                     SwitchSetting(
@@ -187,7 +288,7 @@ fun QuizSettingsScreen(
                         description = "Minimize motion for users sensitive to animations",
                         icon = Icons.Default.Animation,
                         checked = !preferences.animationsEnabled,
-                        onCheckedChange = { /* Update */ }
+                        onCheckedChange = { viewModel.updateAnimationsEnabled(!it) }
                     )
                 }
             }
@@ -200,7 +301,7 @@ fun QuizSettingsScreen(
                         description = "Display hint button when available",
                         icon = Icons.Default.Lightbulb,
                         checked = preferences.showHints,
-                        onCheckedChange = { /* Update */ }
+                        onCheckedChange = viewModel::updateShowHints
                     )
 
                     SwitchSetting(
@@ -208,7 +309,7 @@ fun QuizSettingsScreen(
                         description = "Automatically move to next question after answering",
                         icon = Icons.Default.SkipNext,
                         checked = preferences.autoAdvanceQuestions,
-                        onCheckedChange = { /* Update */ }
+                        onCheckedChange = viewModel::updateAutoAdvance
                     )
 
                     SwitchSetting(
@@ -216,12 +317,12 @@ fun QuizSettingsScreen(
                         description = "Display explanations right after answering",
                         icon = Icons.Default.Info,
                         checked = preferences.showExplanationsImmediately,
-                        onCheckedChange = { /* Update */ }
+                        onCheckedChange = viewModel::updateShowExplanations
                     )
 
                     TimeLimitSetting(
                         currentLimit = preferences.questionTimeLimit,
-                        onLimitChange = { /* Update */ }
+                        onLimitChange = viewModel::updateTimeLimit
                     )
                 }
             }
@@ -232,9 +333,9 @@ fun QuizSettingsScreen(
                     SwitchSetting(
                         title = "Sound Effects",
                         description = "Play sounds for correct/incorrect answers",
-                        icon = Icons.Default.VolumeUp,
+                        icon = Icons.AutoMirrored.Filled.VolumeUp,
                         checked = preferences.soundEnabled,
-                        onCheckedChange = { /* Update */ }
+                        onCheckedChange = viewModel::updateSoundEnabled
                     )
 
                     SwitchSetting(
@@ -242,7 +343,7 @@ fun QuizSettingsScreen(
                         description = "Vibrate on interactions",
                         icon = Icons.Default.Vibration,
                         checked = preferences.hapticFeedbackEnabled,
-                        onCheckedChange = { /* Update */ }
+                        onCheckedChange = viewModel::updateHapticEnabled
                     )
                 }
             }
@@ -259,17 +360,47 @@ private fun SettingsSection(
     title: String,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    SettingsSection(title = title, onActionClick = null, content = content)
+}
+
+@Composable
+private fun SettingsSection(
+    title: String,
+    onActionClick: (() -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(vertical = 8.dp)
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            
+            onActionClick?.let { onClick ->
+                IconButton(
+                    onClick = onClick,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Settings,
+                        contentDescription = "Open $title settings",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
 
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -477,7 +608,7 @@ private fun TimeLimitSetting(
                 expanded = expanded,
                 onDismissRequest = { expanded = false }
             ) {
-                QuestionTimeLimit.values().forEach { limit ->
+                QuestionTimeLimit.entries.forEach { limit ->
                     DropdownMenuItem(
                         text = {
                             Text(

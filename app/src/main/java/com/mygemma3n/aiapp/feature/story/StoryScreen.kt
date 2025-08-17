@@ -52,6 +52,11 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.delay
 
+enum class CharacterScreenState {
+    NONE,           // Not showing any character screen
+    CHARACTER_MANAGEMENT // Showing character management (handles its own sub-navigation)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StoryScreen(
@@ -151,7 +156,10 @@ fun StoryScreen(
                         onCompleteStory = { viewModel.completeStory() },
                         onStartReadingAloud = { viewModel.startReadingAloud() },
                         onStopReadingAloud = { viewModel.stopReadingAloud() },
-                        onToggleAutoReadAloud = { viewModel.toggleAutoReadAloud() }
+                        onToggleAutoReadAloud = { viewModel.toggleAutoReadAloud() },
+                        onGenerateImages = { viewModel.regenerateImagesForStory(state.currentStory!!) },
+                        isGeneratingImages = state.imageGenerationStatus.isProcessing,
+                        imageQueueSize = state.imageGenerationStatus.queueSize
                     )
                 }
             }
@@ -208,6 +216,12 @@ fun StoryListScreen(
     onDeleteStory: (String) -> Unit
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
+    var characterScreenState by remember { mutableStateOf(CharacterScreenState.NONE) }
+
+    // Handle back button for character screens
+    BackHandler(enabled = characterScreenState != CharacterScreenState.NONE) {
+        characterScreenState = CharacterScreenState.NONE
+    }
 
     Column(
         modifier = Modifier
@@ -234,6 +248,18 @@ fun StoryListScreen(
             Icon(Icons.Default.Add, contentDescription = null)
             Spacer(modifier = Modifier.width(8.dp))
             Text("Create New Story")
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Character Creator button
+        OutlinedButton(
+            onClick = { characterScreenState = CharacterScreenState.CHARACTER_MANAGEMENT },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.Default.Person, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Manage Characters")
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -297,13 +323,25 @@ fun StoryListScreen(
 
     // Create story dialog
     if (showCreateDialog) {
-        CreateStoryDialog(
+        EnhancedCreateStoryDialog(
             onDismiss = { showCreateDialog = false },
             onCreateStory = { request ->
                 onCreateNewStory(request)
                 showCreateDialog = false
             }
         )
+    }
+    
+    // Character screens navigation
+    when (characterScreenState) {
+        CharacterScreenState.CHARACTER_MANAGEMENT -> {
+            CharacterManagementWithNavigation(
+                onBackClick = { characterScreenState = CharacterScreenState.NONE }
+            )
+        }
+        CharacterScreenState.NONE -> {
+            // Do nothing, show the main story list
+        }
     }
 }
 
@@ -748,7 +786,10 @@ fun StoryReadingScreen(
     onCompleteStory: () -> Unit,
     onStartReadingAloud: () -> Unit = {},
     onStopReadingAloud: () -> Unit = {},
-    onToggleAutoReadAloud: () -> Unit = {}
+    onToggleAutoReadAloud: () -> Unit = {},
+    onGenerateImages: () -> Unit = {},
+    isGeneratingImages: Boolean = false,
+    imageQueueSize: Int = 0
 ) {
     val currentStoryPage = story.pages.getOrNull(currentPage)
 
@@ -804,6 +845,9 @@ fun StoryReadingScreen(
                 onNextPage = onNextPage,
                 onPreviousPage = onPreviousPage,
                 onCompleteStory = onCompleteStory,
+                onGenerateImages = onGenerateImages,
+                isGeneratingImages = isGeneratingImages,
+                imageQueueSize = imageQueueSize,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 16.dp)
@@ -961,6 +1005,13 @@ fun StoryReadingScreen(
     }
 }
 
+private fun shouldShowImagePlaceholder(targetAudience: StoryTarget): Boolean {
+    return when (targetAudience) {
+        StoryTarget.KINDERGARTEN, StoryTarget.ELEMENTARY, StoryTarget.MIDDLE_SCHOOL -> true
+        StoryTarget.HIGH_SCHOOL, StoryTarget.ADULT -> false
+    }
+}
+
 @Composable
 fun StoryPageContent(
     story: Story,
@@ -969,6 +1020,9 @@ fun StoryPageContent(
     onNextPage: () -> Unit,
     onPreviousPage: () -> Unit,
     onCompleteStory: () -> Unit,
+    onGenerateImages: () -> Unit = {},
+    isGeneratingImages: Boolean = false,
+    imageQueueSize: Int = 0,
     modifier: Modifier = Modifier
 ) {
     val currentStoryPage = story.pages.getOrNull(pageIndex)
@@ -1023,13 +1077,22 @@ fun StoryPageContent(
                     .padding(24.dp)
                     .verticalScroll(scrollState)
             ) {
-                // Display image with zoom and character animation
-                currentStoryPage.imageUrl?.let { imageUrl ->
+                // Display image or placeholder with generation option
+                if (currentStoryPage.imageUrl != null) {
+                    // Display existing image with zoom and character animation
                     ZoomableImage(
-                        imageUrl = imageUrl,
+                        imageUrl = currentStoryPage.imageUrl,
                         contentDescription = currentStoryPage.imageDescription ?: "Story illustration for page ${pageIndex + 1}",
                         characterAnimation = characterFloat,
                         parallaxOffset = with(density) { scrollState.value.toDp() }
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                } else if (shouldShowImagePlaceholder(story.targetAudience)) {
+                    // Show placeholder for stories that should have images
+                    ImagePlaceholder(
+                        onGenerateImages = onGenerateImages,
+                        isGenerating = isGeneratingImages,
+                        queueSize = imageQueueSize
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                 }
@@ -1777,4 +1840,79 @@ fun EditGoalDialog(
             }
         }
     )
+}
+
+@Composable
+fun ImagePlaceholder(
+    onGenerateImages: () -> Unit,
+    isGenerating: Boolean,
+    queueSize: Int,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(200.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Image,
+                contentDescription = null,
+                modifier = Modifier.size(48.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Text(
+                text = if (isGenerating && queueSize > 0) {
+                    "Generating images... ($queueSize in queue)"
+                } else if (isGenerating) {
+                    "Generating images..."
+                } else {
+                    "No image yet"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                textAlign = TextAlign.Center
+            )
+            
+            if (!isGenerating) {
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                OutlinedButton(
+                    onClick = onGenerateImages,
+                    modifier = Modifier.size(width = 120.dp, height = 32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Generate",
+                        fontSize = 12.sp
+                    )
+                }
+            } else {
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                CircularProgressIndicator(
+                    modifier = Modifier.size(24.dp),
+                    strokeWidth = 2.dp
+                )
+            }
+        }
+    }
 }

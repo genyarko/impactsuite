@@ -38,7 +38,10 @@ data class Story(
     val characters: List<String> = emptyList(),
     val setting: String = "",
     val hasImages: Boolean = false,
-    val imageGenerationScript: String? = null // Script with visual descriptions for each page
+    val imageGenerationScript: String? = null, // Script with visual descriptions for each page
+    val customCharacterIds: List<String> = emptyList(), // IDs of custom characters used
+    val templateId: String? = null, // Template used for generation
+    val generatedFromMood: String? = null // ReadingMood that influenced generation
 )
 
 data class StoryPage(
@@ -59,7 +62,11 @@ data class StoryRequest(
     val characters: List<String> = emptyList(),
     val setting: String = "",
     val theme: String = "",
-    val exactPageCount: Int? = null // Exact page count from slider
+    val exactPageCount: Int? = null, // Exact page count from slider
+    val customCharacters: List<Character> = emptyList(), // Custom characters to include
+    val templateId: String? = null, // Template to use for structure
+    val moodContext: String? = null, // ReadingMood context
+    val templateCustomizations: Map<String, String> = emptyMap() // Custom beat modifications
 )
 
 data class ReadingStreak(
@@ -119,7 +126,10 @@ data class StoryEntity(
     val setting: String = "",
     val pagesJson: String, // JSON serialized pages
     val hasImages: Boolean = false,
-    val imageGenerationScript: String? = null
+    val imageGenerationScript: String? = null,
+    val customCharacterIds: String = "", // JSON array of character IDs
+    val templateId: String? = null,
+    val generatedFromMood: String? = null
 )
 
 @Entity(tableName = "story_reading_sessions")
@@ -538,7 +548,10 @@ class StoryRepository @Inject constructor(
         setting = setting,
         pagesJson = gson.toJson(pages),
         hasImages = hasImages,
-        imageGenerationScript = imageGenerationScript
+        imageGenerationScript = imageGenerationScript,
+        customCharacterIds = gson.toJson(customCharacterIds),
+        templateId = templateId,
+        generatedFromMood = generatedFromMood
     )
 
     private fun StoryEntity.toDomain(gson: Gson): Story = Story(
@@ -556,7 +569,10 @@ class StoryRepository @Inject constructor(
         characters = gson.fromJson(characters, Array<String>::class.java).toList(),
         setting = setting,
         hasImages = hasImages,
-        imageGenerationScript = imageGenerationScript
+        imageGenerationScript = imageGenerationScript,
+        customCharacterIds = gson.fromJson(customCharacterIds, Array<String>::class.java).toList(),
+        templateId = templateId,
+        generatedFromMood = generatedFromMood
     )
 
     private fun ReadingStreakEntity.toDomain() = ReadingStreak(

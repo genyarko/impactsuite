@@ -29,12 +29,14 @@ import com.mygemma3n.aiapp.dataStore
 import com.mygemma3n.aiapp.data.SpeechRecognitionService
 import com.mygemma3n.aiapp.util.GoogleServicesUtil
 import com.mygemma3n.aiapp.config.ApiConfiguration
+import com.mygemma3n.aiapp.ui.settings.QuizPreferencesRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.hilt.navigation.compose.hiltViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,7 +54,18 @@ fun ApiSettingsScreen(
     var modelProvider by remember { mutableStateOf("gemini") }
     var isLoading by remember { mutableStateOf(false) }
     var validationMessage by remember { mutableStateOf<String?>(null) }
+    
     val context = LocalContext.current
+    
+    // Access quiz preferences repository through DI
+    val quizPreferencesRepository = remember {
+        QuizPreferencesRepository(context.dataStore)
+    }
+    
+    // Quiz behavior settings with persistent storage
+    var showHints by remember { mutableStateOf(true) }
+    var autoAdvance by remember { mutableStateOf(false) }
+    var showExplanations by remember { mutableStateOf(true) }
 
     // Load existing API keys and settings
     LaunchedEffect(Unit) {
@@ -77,6 +90,13 @@ fun ApiSettingsScreen(
             modelProvider = it
         } ?: run {
             modelProvider = "gemini" // Default to Gemini
+        }
+        
+        // Load quiz preferences
+        quizPreferencesRepository.preferences.first().let { prefs ->
+            showHints = prefs.showHints
+            autoAdvance = prefs.autoAdvanceQuestions
+            showExplanations = prefs.showExplanationsImmediately
         }
     }
 
@@ -443,6 +463,116 @@ fun ApiSettingsScreen(
                         else
                             MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Quiz Behavior Settings
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Text(
+                        text = "Quiz Behavior Settings",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // Show Hints Setting
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Show Hints",
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            Text(
+                                text = "Display hint button when available",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = showHints,
+                            onCheckedChange = { newValue ->
+                                showHints = newValue
+                                CoroutineScope(Dispatchers.IO).launch {
+                                    quizPreferencesRepository.updateShowHints(newValue)
+                                }
+                            }
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    // Auto-advance Questions Setting
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Auto-advance Questions",
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            Text(
+                                text = "Move to next question after answering",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = autoAdvance,
+                            onCheckedChange = { newValue ->
+                                autoAdvance = newValue
+                                CoroutineScope(Dispatchers.IO).launch {
+                                    quizPreferencesRepository.updateAutoAdvance(newValue)
+                                }
+                            }
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    // Show Explanations Setting
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Show Explanations Immediately",
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            Text(
+                                text = "Display explanations right after answering",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = showExplanations,
+                            onCheckedChange = { newValue ->
+                                showExplanations = newValue
+                                CoroutineScope(Dispatchers.IO).launch {
+                                    quizPreferencesRepository.updateShowExplanations(newValue)
+                                }
+                            }
+                        )
+                    }
                 }
             }
 

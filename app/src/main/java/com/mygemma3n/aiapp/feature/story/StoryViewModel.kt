@@ -22,7 +22,11 @@ class StoryViewModel @Inject constructor(
     private val onlineStoryGenerator: OnlineStoryGenerator,
     private val textToSpeechManager: TextToSpeechManager,
     private val recommendationService: StoryRecommendationService,
-    private val difficultyAdapter: StoryDifficultyAdapter
+    private val difficultyAdapter: StoryDifficultyAdapter,
+    private val characterRepository: CharacterRepository,
+    private val templateRepository: StoryTemplateRepository,
+    private val moodDetectionService: ReadingMoodDetectionService,
+    private val imageGenerationQueue: ImageGenerationQueue
 ) : ViewModel() {
 
     data class StoryState(
@@ -51,7 +55,9 @@ class StoryViewModel @Inject constructor(
         val isAdaptingDifficulty: Boolean = false,
         val showDifficultyOptions: Boolean = false,
         // Retry functionality
-        val lastStoryRequest: StoryRequest? = null
+        val lastStoryRequest: StoryRequest? = null,
+        // Image generation status
+        val imageGenerationStatus: ImageGenerationQueue.QueueStatus = ImageGenerationQueue.QueueStatus()
     )
 
     private val _state = MutableStateFlow(StoryState())
@@ -60,6 +66,25 @@ class StoryViewModel @Inject constructor(
     init {
         loadAllStories()
         initializeReadingFeatures()
+        initializeEnhancedFeatures()
+        observeImageGenerationQueue()
+    }
+
+    private fun observeImageGenerationQueue() {
+        viewModelScope.launch {
+            imageGenerationQueue.queueStatus.collect { status ->
+                _state.value = _state.value.copy(imageGenerationStatus = status)
+            }
+        }
+        
+        // Set up callback for when stories are updated with images
+        imageGenerationQueue.setOnStoryUpdatedCallback { updatedStory ->
+            val currentStory = _state.value.currentStory
+            if (currentStory != null && currentStory.id == updatedStory.id) {
+                Timber.d("Updating current story UI with new images: ${updatedStory.title}")
+                _state.value = _state.value.copy(currentStory = updatedStory)
+            }
+        }
     }
 
     private fun loadAllStories() {
@@ -121,7 +146,7 @@ class StoryViewModel @Inject constructor(
                 )
 
                 if (story != null) {
-                    // Save the story to the database
+                    // Save the story to the database immediately after text generation
                     storyRepository.saveStory(story)
                     
                     _state.value = _state.value.copy(
@@ -131,6 +156,11 @@ class StoryViewModel @Inject constructor(
                         showStoryList = false,
                         generationPhase = "Story complete!"
                     )
+                    
+                    // Start background image generation if appropriate
+                    if (shouldGenerateImages(story.targetAudience)) {
+                        imageGenerationQueue.enqueueImageGeneration(story)
+                    }
                 } else {
                     _state.value = _state.value.copy(
                         isGenerating = false,
@@ -153,11 +183,12 @@ class StoryViewModel @Inject constructor(
             try {
                 _state.value = _state.value.copy(isLoading = true)
                 
-                val story = storyRepository.getStoryById(storyId)
-                if (story != null) {
+                // First, load the story once to set up the initial state
+                val initialStory = storyRepository.getStoryById(storyId)
+                if (initialStory != null) {
                     _state.value = _state.value.copy(
-                        currentStory = story,
-                        currentPage = story.currentPage,
+                        currentStory = initialStory,
+                        currentPage = initialStory.currentPage,
                         showStoryList = false,
                         isLoading = false
                     )
@@ -358,12 +389,43 @@ class StoryViewModel @Inject constructor(
         }
     }
     
-    private fun shouldGenerateImages(targetAudience: StoryTarget): Boolean {
+    fun shouldGenerateImages(targetAudience: StoryTarget): Boolean {
         return when (targetAudience) {
             StoryTarget.KINDERGARTEN, StoryTarget.ELEMENTARY, StoryTarget.MIDDLE_SCHOOL -> true
             StoryTarget.HIGH_SCHOOL, StoryTarget.ADULT -> false
         }
     }
+
+    /**
+     * Generates images for a story in the background without blocking the UI.
+     * Updates the story in the database when images are ready.
+     * DEPRECATED: Now using ImageGenerationQueue instead
+     */
+    private fun generateImagesInBackground(story: Story) {
+        // This method is now deprecated in favor of the ImageGenerationQueue
+        // which handles the background processing more robustly
+        imageGenerationQueue.enqueueImageGeneration(story)
+    }
+
+    /**
+     * Manually trigger image generation for an existing story.
+     * This can be called by the user to retry image generation.
+     */
+    fun regenerateImagesForStory(story: Story) {
+        if (shouldGenerateImages(story.targetAudience)) {
+            imageGenerationQueue.retryImageGeneration(story)
+            Timber.d("Added story ${story.id} to image generation queue for retry")
+        } else {
+            _state.value = _state.value.copy(
+                error = "This story type does not support images"
+            )
+        }
+    }
+
+    /**
+     * Get the current status of the image generation queue
+     */
+    fun getImageGenerationQueueStatus() = imageGenerationQueue.queueStatus
 
     // Text-to-Speech functionality
     fun startReadingAloud() {
@@ -429,6 +491,28 @@ class StoryViewModel @Inject constructor(
                 )
             } catch (e: Exception) {
                 Timber.e(e, "Failed to initialize reading features")
+            }
+        }
+    }
+
+    private fun initializeEnhancedFeatures() {
+        viewModelScope.launch {
+            try {
+                // Clean up duplicates and initialize preset characters if needed
+                characterRepository.removeDuplicateCharacters()
+                characterRepository.createPresetCharacters()
+                
+                // Clean up duplicates and initialize built-in story templates if needed
+                templateRepository.removeDuplicateTemplates()
+                templateRepository.initializeBuiltInTemplates()
+                
+                // Clean up old mood sessions (optional)
+                moodDetectionService.cleanupOldSessions()
+                
+                Timber.d("Enhanced personalization features initialized successfully")
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to initialize enhanced features")
+                // Don't fail the whole initialization, just log the error
             }
         }
     }

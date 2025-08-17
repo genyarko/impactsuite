@@ -69,7 +69,8 @@ fun UnifiedChatScreen(
             FeatureShortcut("Image Scan", "scan", Icons.Default.PhotoCamera, "plant_scanner", "Identify images"),
             FeatureShortcut("Crisis Help", "crisis", Icons.Default.LocalHospital, "crisis_handbook", "Emergency resources"),
             FeatureShortcut("Analytics", "analytics", Icons.Default.Analytics, "analytics", "Learning insights"),
-            FeatureShortcut("Story Mode", "story", Icons.AutoMirrored.Filled.MenuBook, "story_mode", "Interactive stories")
+            FeatureShortcut("Story Mode", "story", Icons.AutoMirrored.Filled.MenuBook, "story_mode", "Interactive stories"),
+            FeatureShortcut("Home Page", "home", Icons.Default.Home, "home", "Navigate to home page")
         )
     }
 
@@ -346,10 +347,10 @@ private fun UnifiedChatTopBar(
                 Icon(Icons.Default.Settings, contentDescription = "Settings")
             }
             IconButton(onClick = { 
-                // Navigate to original home screen for model download etc
-                navController.navigate("home")
+                // Navigate to summarizer for document upload
+                navController.navigate("summarizer")
             }) {
-                Icon(Icons.Default.Home, contentDescription = "Home")
+                Icon(Icons.Default.Upload, contentDescription = "Upload Document")
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(

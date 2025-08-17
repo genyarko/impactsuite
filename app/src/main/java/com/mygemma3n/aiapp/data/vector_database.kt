@@ -29,6 +29,12 @@ import com.mygemma3n.aiapp.feature.story.ReadingStreakDao
 import com.mygemma3n.aiapp.feature.story.ReadingGoalDao
 import com.mygemma3n.aiapp.feature.story.AchievementBadgeDao
 import com.mygemma3n.aiapp.feature.story.StoryConverters
+import com.mygemma3n.aiapp.feature.story.CustomCharacter
+import com.mygemma3n.aiapp.feature.story.StoryTemplate
+import com.mygemma3n.aiapp.feature.story.ReadingMoodSession
+import com.mygemma3n.aiapp.feature.story.CustomCharacterDao
+import com.mygemma3n.aiapp.feature.story.StoryTemplateDao
+import com.mygemma3n.aiapp.feature.story.ReadingMoodDao
 import com.mygemma3n.aiapp.data.local.entities.TokenUsageEntity  
 import com.mygemma3n.aiapp.data.local.TokenUsageDao
 import com.mygemma3n.aiapp.data.local.entities.UserQuotaEntity
@@ -141,9 +147,12 @@ interface VectorDao {
         TokenUsageEntity::class,
         UserQuotaEntity::class,
         PricingConfigEntity::class,
-        SpendingLimitEntity::class
+        SpendingLimitEntity::class,
+        CustomCharacter::class,
+        StoryTemplate::class,
+        ReadingMoodSession::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = false
 
 )
@@ -162,6 +171,9 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun userQuotaDao(): UserQuotaDao
     abstract fun pricingConfigDao(): PricingConfigDao
     abstract fun spendingLimitDao(): SpendingLimitDao
+    abstract fun customCharacterDao(): CustomCharacterDao
+    abstract fun storyTemplateDao(): StoryTemplateDao
+    abstract fun readingMoodDao(): ReadingMoodDao
 }
 
 

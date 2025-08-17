@@ -45,6 +45,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.runtime.DisposableEffect
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -183,7 +185,8 @@ fun QuizScreen(
                         quiz = quiz,
                         conceptCoverage = state.conceptCoverage,
                         onAnswerSubmit = viewModel::submitAnswer,
-                        onQuizComplete = viewModel::completeQuiz
+                        onQuizComplete = viewModel::completeQuiz,
+                        shouldAutoAdvance = state.shouldAutoAdvance
                     )
                 }
             }
@@ -517,14 +520,16 @@ fun EnhancedQuizSetupScreen(
                         Text(subject?.name ?: "Choose subject")
                         subject?.let { subj ->
                             val accuracy = userProgress[subj] ?: 0f
+                            // Convert percentage back to decimal for progress indicator (0.0 - 1.0)
+                            val progressValue = (accuracy / 100f).coerceIn(0f, 1f)
                             LinearProgressIndicator(
-                                progress = { accuracy },
+                                progress = { progressValue },
                                 modifier = Modifier
                                     .width(60.dp)
                                     .height(4.dp),
                                 color = when {
-                                    accuracy > 0.8f -> Color.Green
-                                    accuracy > 0.6f -> Color.Yellow
+                                    progressValue > 0.8f -> Color.Green
+                                    progressValue > 0.6f -> Color.Yellow
                                     else -> Color.Red
                                 }
                             )
@@ -546,11 +551,13 @@ fun EnhancedQuizSetupScreen(
                                 ) {
                                     Text(s.name)
                                     val accuracy = userProgress[s] ?: 0f
+                                    // accuracy is already in percentage form (0-100), no need to multiply by 100
+                                    val progressValue = (accuracy / 100f).coerceIn(0f, 1f)
                                     Text(
-                                        "${(accuracy * 100).toInt()}%",
+                                        "${accuracy.toInt()}%",
                                         color = when {
-                                            accuracy > 0.8f -> Color.Green
-                                            accuracy > 0.6f -> Color.Yellow
+                                            progressValue > 0.8f -> Color.Green
+                                            progressValue > 0.6f -> Color.Yellow
                                             else -> Color.Red
                                         }
                                     )
@@ -623,9 +630,24 @@ fun EnhancedQuizTakingScreen(
     conceptCoverage: Map<String, Int>,
     onAnswerSubmit: (String, String) -> Unit,
     onQuizComplete: () -> Unit,
+    shouldAutoAdvance: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     var index by remember { mutableIntStateOf(0) }
+    
+    // Handle auto-advance functionality  
+    LaunchedEffect(shouldAutoAdvance) {
+        if (shouldAutoAdvance) {
+            val currentQuestion = quiz.questions.getOrNull(index)
+            if (currentQuestion?.isAnswered == true && index < quiz.questions.size - 1) {
+                index++
+                // Note: chosenAnswer and showHint will be reset automatically due to remember(q.id)
+            } else if (currentQuestion?.isAnswered == true && index == quiz.questions.size - 1) {
+                // Auto-complete quiz if it's the last question
+                onQuizComplete()
+            }
+        }
+    }
     
     // Handle empty questions list
     if (quiz.questions.isEmpty()) {
@@ -993,8 +1015,10 @@ fun EnhancedQuizTakingScreen(
             when {
                 /* ─── Submit Answer (now with loading support) ─── */
                 !q.isAnswered && chosenAnswer != null -> {
+                    val hapticFeedback = LocalHapticFeedback.current
                     Button(
                         onClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             isSubmitting = true
                             onAnswerSubmit(q.id, chosenAnswer!!)
                             showHint = false

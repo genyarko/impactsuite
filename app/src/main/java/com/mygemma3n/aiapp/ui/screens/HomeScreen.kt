@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.animation.core.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -23,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.scale
 import androidx.navigation.NavHostController
 import com.mygemma3n.aiapp.data.UnifiedGemmaService
 import kotlinx.coroutines.CoroutineScope
@@ -185,6 +187,7 @@ fun HomeScreen(
                     FeatureCard(
                         feature = feature,
                         modifier = Modifier.weight(1f),
+                        isLoading = isPreparingModel,
                         onClick = { navController.navigate(feature.route) }
                     )
                 }
@@ -195,6 +198,7 @@ fun HomeScreen(
                 }
             }
         }
+
 
         // Settings Section
         item {
@@ -240,6 +244,7 @@ fun HomeScreen(
 private fun FeatureCard(
     feature: FeatureItem,
     modifier: Modifier = Modifier,
+    isLoading: Boolean = false,
     onClick: () -> Unit
 ) {
     Card(
@@ -272,10 +277,24 @@ private fun FeatureCard(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
+            // Add subtle pulse animation when models are loading
+            val infiniteTransition = rememberInfiniteTransition(label = "loading")
+            val scale by infiniteTransition.animateFloat(
+                initialValue = 1f,
+                targetValue = if (isLoading) 1.1f else 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(1000, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "icon_pulse"
+            )
+            
             Icon(
                 imageVector = feature.icon,
                 contentDescription = feature.title,
-                modifier = Modifier.size(32.dp),
+                modifier = Modifier
+                    .size(32.dp)
+                    .scale(scale),
                 tint = if (feature.enabled) {
                     MaterialTheme.colorScheme.primary
                 } else {

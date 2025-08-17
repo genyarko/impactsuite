@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
 import com.google.gson.JsonSyntaxException
@@ -110,7 +111,7 @@ class OpenAIChatService @Inject constructor(
     // Longer timeout client for story generation
     private val storyHttpClient = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(180, TimeUnit.SECONDS)  // 3 minutes for story generation
+        .readTimeout(300, TimeUnit.SECONDS)  // 5 minutes for story generation and DALL-E
         .writeTimeout(60, TimeUnit.SECONDS)
         .build()
 
@@ -425,15 +426,28 @@ class OpenAIChatService @Inject constructor(
         Timber.d("First choice details: message=${firstChoice.message != null}, finishReason=${firstChoice.finishReason}")
         
         val rawContent = firstChoice.message?.content
+        Timber.d("Raw content type: ${rawContent?.javaClass?.simpleName}, content: '$rawContent'")
+        
         val content = when (rawContent) {
             is String -> rawContent.trim()
-            else -> rawContent.toString().trim()
+            else -> rawContent?.toString()?.trim() ?: ""
         }
         
         if (content.isBlank()) {
             Timber.w("Empty or null content in OpenAI response choice. FinishReason: ${firstChoice.finishReason}")
             Timber.w("Message object: ${firstChoice.message}")
+            
+            // Special handling for length-limited responses with empty content
+            if (firstChoice.finishReason == "length") {
+                throw Exception("OpenAI response was truncated due to token limit before generating any content. The prompt may be too long or the max_tokens setting too low.")
+            }
+            
             throw Exception("No response content received from OpenAI (finish_reason: ${firstChoice.finishReason})")
+        }
+        
+        // Log warning if response was truncated due to length but still return content
+        if (firstChoice.finishReason == "length") {
+            Timber.w("OpenAI response was truncated due to token limit (finish_reason: length). Content length: ${content.length}")
         }
         
         Timber.d("Extracted OpenAI content length: ${content.length}")
@@ -488,7 +502,7 @@ class OpenAIChatService @Inject constructor(
             .build()
         
         try {
-            val response = httpClient.newCall(request).execute()
+            val response = storyHttpClient.newCall(request).execute()
             
             if (!response.isSuccessful) {
                 val errorBody = response.body?.string() ?: "Unknown error"
@@ -506,15 +520,19 @@ class OpenAIChatService @Inject constructor(
             
             // Record DALL-E usage (no token count, but track the request)
             try {
-                tokenUsageRepository.recordTokenUsage(
-                    serviceType = "dalle_image",
-                    modelName = "dall-e-3",
-                    inputTokens = 0, // DALL-E pricing is per image, not per token
-                    outputTokens = 1 // Count as 1 "output unit" representing 1 image
-                )
+                // Use a short timeout to prevent usage recording from blocking image generation
+                withTimeoutOrNull(5_000) { // 5 second timeout for usage recording
+                    tokenUsageRepository.recordTokenUsage(
+                        serviceType = "dalle_image",
+                        modelName = "dall-e-3",
+                        inputTokens = 0, // DALL-E pricing is per image, not per token
+                        outputTokens = 1 // Count as 1 "output unit" representing 1 image
+                    )
+                }
                 Timber.d("Recorded DALL-E image generation usage")
             } catch (e: Exception) {
                 Timber.e(e, "Failed to record DALL-E usage")
+                // Don't let usage recording failures affect image generation
             }
             
             // Decode base64 to byte array

@@ -28,6 +28,7 @@ import com.mygemma3n.aiapp.util.ApiKeyValidator
 import com.mygemma3n.aiapp.data.local.UserQuotaDao
 import com.mygemma3n.aiapp.data.local.PricingConfigDao
 import com.mygemma3n.aiapp.dataStore
+import com.mygemma3n.aiapp.ui.settings.QuizPreferencesRepository
 import com.mygemma3n.aiapp.feature.analytics.LearningAnalyticsRepository
 import com.mygemma3n.aiapp.feature.analytics.LearningInteractionDao
 import com.mygemma3n.aiapp.feature.analytics.TopicMasteryDao
@@ -56,6 +57,13 @@ import com.mygemma3n.aiapp.feature.story.AchievementBadgeDao
 import com.mygemma3n.aiapp.feature.story.ReadingStreakMemoryManager
 import com.mygemma3n.aiapp.feature.story.StoryRecommendationService
 import com.mygemma3n.aiapp.feature.story.StoryDifficultyAdapter
+import com.mygemma3n.aiapp.feature.story.CharacterRepository
+import com.mygemma3n.aiapp.feature.story.CustomCharacterDao
+import com.mygemma3n.aiapp.feature.story.StoryTemplateRepository
+import com.mygemma3n.aiapp.feature.story.StoryTemplateDao
+import com.mygemma3n.aiapp.feature.story.ReadingMoodDetectionService
+import com.mygemma3n.aiapp.feature.story.ReadingMoodDao
+import com.mygemma3n.aiapp.feature.story.ImageGenerationQueue
 import com.mygemma3n.aiapp.feature.tutor.TutorProgressIntegrationService
 import com.mygemma3n.aiapp.feature.tutor.TutorPromptManager
 import com.mygemma3n.aiapp.remote.EmergencyDatabase
@@ -393,6 +401,18 @@ object AppModule {
     @Provides
     @Singleton
     fun provideAchievementBadgeDao(db: AppDatabase): AchievementBadgeDao = db.achievementBadgeDao()
+    
+    @Provides
+    @Singleton
+    fun provideCustomCharacterDao(db: AppDatabase): CustomCharacterDao = db.customCharacterDao()
+    
+    @Provides
+    @Singleton
+    fun provideStoryTemplateDao(db: AppDatabase): StoryTemplateDao = db.storyTemplateDao()
+    
+    @Provides
+    @Singleton
+    fun provideReadingMoodDao(db: AppDatabase): ReadingMoodDao = db.readingMoodDao()
 
     @Provides
     @Singleton
@@ -428,6 +448,13 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideImageGenerationQueue(
+        onlineStoryGenerator: OnlineStoryGenerator,
+        storyRepository: StoryRepository
+    ): ImageGenerationQueue = ImageGenerationQueue(onlineStoryGenerator, storyRepository)
+
+    @Provides
+    @Singleton
     fun provideStoryRecommendationService(
         storyRepository: StoryRepository,
         gemmaService: UnifiedGemmaService
@@ -447,6 +474,12 @@ object AppModule {
         @Singleton
         fun provideDataStore(@ApplicationContext context: Context): DataStore<Preferences> {
             return context.dataStore
+        }
+
+        @Provides
+        @Singleton
+        fun provideQuizPreferencesRepository(dataStore: DataStore<Preferences>): QuizPreferencesRepository {
+            return QuizPreferencesRepository(dataStore)
         }
     }
 
@@ -564,5 +597,26 @@ object AppModule {
         costCalculationService,
         tokenUsageRepository
     )
+
+    @Provides
+    @Singleton
+    fun provideCharacterRepository(
+        characterDao: CustomCharacterDao,
+        gson: Gson
+    ): CharacterRepository = CharacterRepository(characterDao, gson)
+
+    @Provides
+    @Singleton
+    fun provideStoryTemplateRepository(
+        templateDao: StoryTemplateDao,
+        gson: Gson
+    ): StoryTemplateRepository = StoryTemplateRepository(templateDao, gson)
+
+    @Provides
+    @Singleton
+    fun provideReadingMoodDetectionService(
+        moodDao: ReadingMoodDao,
+        storyRepository: StoryRepository
+    ): ReadingMoodDetectionService = ReadingMoodDetectionService(moodDao, storyRepository)
 
 }

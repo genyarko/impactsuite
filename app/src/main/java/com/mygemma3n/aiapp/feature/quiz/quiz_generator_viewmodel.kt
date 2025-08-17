@@ -33,6 +33,7 @@ import timber.log.Timber
 import javax.inject.Inject
 import kotlin.random.Random
 import com.mygemma3n.aiapp.shared_utilities.QuizContentManager
+import com.mygemma3n.aiapp.ui.settings.QuizPreferencesRepository
 
 @HiltViewModel
 class QuizGeneratorViewModel @Inject constructor(
@@ -56,7 +57,8 @@ class QuizGeneratorViewModel @Inject constructor(
     private val jsonParser: QuizJsonParser,
     private val promptGenerator: QuizPromptGenerator,
     private val studentManager: QuizStudentManager,
-    private val progressTracker: QuizProgressTracker
+    private val progressTracker: QuizProgressTracker,
+    private val quizPreferencesRepository: QuizPreferencesRepository
 ) : ViewModel() {
 
     /* ───────── UI state ───────── */
@@ -80,6 +82,7 @@ class QuizGeneratorViewModel @Inject constructor(
         val generationPhase: String = "Starting...", // For animation variety
         val studentName: String? = null,
         val studentGrade: Int? = null,
+        val shouldAutoAdvance: Boolean = false, // Trigger for auto-advance functionality
         val studentCountry: String? = null,
         val curriculumTopics: List<String> = emptyList(),
         val isLoadingCurriculum: Boolean = false
@@ -1110,6 +1113,23 @@ class QuizGeneratorViewModel @Inject constructor(
                 }
             )
             _state.update { it.copy(currentQuiz = updated) }
+            
+            // Check if auto-advance is enabled and trigger it
+            viewModelScope.launch {
+                try {
+                    val preferences = quizPreferencesRepository.preferences.first()
+                    if (preferences.autoAdvanceQuestions) {
+                        // Add a small delay to show feedback before advancing
+                        delay(1500) // 1.5 seconds to read feedback
+                        _state.update { it.copy(shouldAutoAdvance = true) }
+                        // Reset the trigger after a brief moment
+                        delay(100)
+                        _state.update { it.copy(shouldAutoAdvance = false) }
+                    }
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to check auto-advance preference")
+                }
+            }
         }
     }
 
