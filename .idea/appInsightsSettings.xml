@@ -22,10 +22,10 @@
             <InsightsFilterSettings>
               <option name="connection">
                 <ConnectionSetting>
-                  <option name="appId" value="PLACEHOLDER" />
-                  <option name="mobileSdkAppId" value="" />
-                  <option name="projectId" value="" />
-                  <option name="projectNumber" value="" />
+                  <option name="appId" value="com.mygemma3n.aiapp" />
+                  <option name="mobileSdkAppId" value="1:133278522931:android:84486dc176f2b5df6e0d46" />
+                  <option name="projectId" value="gemma3n-f8c94" />
+                  <option name="projectNumber" value="133278522931" />
                 </ConnectionSetting>
               </option>
               <option name="signal" value="SIGNAL_UNSPECIFIED" />

@@ -6,6 +6,7 @@ import androidx.camera.core.ImageCaptureException
 import androidx.camera.view.CameraController
 import androidx.camera.view.LifecycleCameraController
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -18,6 +19,12 @@ import androidx.compose.material.icons.filled.Grass
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Quiz
 import androidx.compose.material3.*
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ProgressIndicatorDefaults
@@ -32,6 +39,19 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalOverscrollConfiguration
+import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.foundation.text.selection.SelectionContainer
+import android.content.Intent
+import android.widget.Toast
+import kotlinx.coroutines.launch
+import android.content.Context
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -43,7 +63,8 @@ import kotlin.math.roundToInt
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun PlantScannerScreen(
-    viewModel: PlantScannerViewModel = hiltViewModel()
+    viewModel: PlantScannerViewModel = hiltViewModel(),
+    onNavigateToQuiz: (() -> Unit)? = null
 ) {
     val scanState by viewModel.scanState.collectAsStateWithLifecycle()
 
@@ -54,7 +75,13 @@ fun PlantScannerScreen(
     val controller = remember {
         LifecycleCameraController(context).apply {
             setEnabledUseCases(CameraController.IMAGE_CAPTURE)
-            setImageCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            setImageCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+            
+            // OCR-optimized camera settings
+            if (scanState.isOcrMode) {
+                // Optimize for text capture
+                cameraControl?.enableTorch(false) // Use natural lighting when possible
+            }
         }
     }
 
@@ -78,10 +105,20 @@ fun PlantScannerScreen(
             modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Header with improved styling
+            // Header with improved styling and dynamic colors
+            val headerColor by animateColorAsState(
+                targetValue = if (scanState.isOcrMode) {
+                    MaterialTheme.colorScheme.tertiaryContainer
+                } else {
+                    MaterialTheme.colorScheme.primaryContainer
+                },
+                animationSpec = tween(400),
+                label = "headerColor"
+            )
+            
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.primaryContainer,
+                color = headerColor,
                 shadowElevation = 4.dp
             ) {
                 Row(
@@ -90,18 +127,64 @@ fun PlantScannerScreen(
                         .padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Grass,
-                        contentDescription = null,
-                        modifier = Modifier.size(32.dp),
-                        tint = MaterialTheme.colorScheme.primary
+                    val mainIconColor by animateColorAsState(
+                        targetValue = if (scanState.isOcrMode) {
+                            MaterialTheme.colorScheme.tertiary
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        },
+                        animationSpec = tween(300),
+                        label = "mainIconColor"
                     )
+                    
+                    Crossfade(
+                        targetState = scanState.isOcrMode,
+                        animationSpec = tween(300),
+                        label = "mainIconCrossfade"
+                    ) { isOcr ->
+                        Icon(
+                            imageVector = if (isOcr) Icons.Default.TextFields else Icons.Default.Grass,
+                            contentDescription = null,
+                            modifier = Modifier.size(32.dp),
+                            tint = mainIconColor
+                        )
+                    }
                     Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = "Plant & Food Scanner",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    Column(modifier = Modifier.weight(1f)) {
+                        val textColor by animateColorAsState(
+                            targetValue = if (scanState.isOcrMode) {
+                                MaterialTheme.colorScheme.onTertiaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            },
+                            animationSpec = tween(300),
+                            label = "textColor"
+                        )
+                        
+                        Text(
+                            text = if (scanState.isOcrMode) "OCR Text Scanner" else "Plant & Food Scanner",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = textColor
+                        )
+                        
+                        AnimatedVisibility(
+                            visible = scanState.isOcrMode,
+                            enter = fadeIn() + slideInVertically(),
+                            exit = fadeOut() + slideOutVertically()
+                        ) {
+                            Text(
+                                text = "Handwriting & Text Recognition",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = textColor.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
+                    
+                    // OCR mode toggle button with animation
+                    AnimatedToggleButton(
+                        isOcrMode = scanState.isOcrMode,
+                        onClick = { viewModel.toggleOcrMode() }
                     )
                 }
             }
@@ -123,6 +206,7 @@ fun PlantScannerScreen(
                     // Camera overlay with scanning frame
                     CameraScanningOverlay(
                         isScanning = scanState.isAnalyzing,
+                        isOcrMode = scanState.isOcrMode,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -131,15 +215,26 @@ fun PlantScannerScreen(
                 FloatingActionButton(
                     onClick = {
                         val photo = File(context.cacheDir, "${System.currentTimeMillis()}.jpg")
-                        val opts = ImageCapture.OutputFileOptions.Builder(photo).build()
+                        val opts = ImageCapture.OutputFileOptions.Builder(photo).apply {
+                            // OCR-optimized capture settings
+                            if (scanState.isOcrMode) {
+                                // Higher quality for text recognition
+                                setMetadata(ImageCapture.Metadata().apply {
+                                    isReversedHorizontal = false
+                                })
+                            }
+                        }.build()
                         val exec = ContextCompat.getMainExecutor(context)
 
                         controller.takePicture(opts, exec,
                             object : ImageCapture.OnImageSavedCallback {
                                 override fun onImageSaved(r: ImageCapture.OutputFileResults) {
-                                    viewModel.analyzeImage(
-                                        BitmapFactory.decodeFile(photo.absolutePath)
-                                    )
+                                    val bitmap = BitmapFactory.decodeFile(photo.absolutePath)
+                                    if (scanState.isOcrMode) {
+                                        viewModel.analyzeImageForOCR(bitmap)
+                                    } else {
+                                        viewModel.analyzeImage(bitmap)
+                                    }
                                 }
                                 override fun onError(e: ImageCaptureException) = e.printStackTrace()
                             })
@@ -167,16 +262,18 @@ fun PlantScannerScreen(
 
                 // Results section with improved styling
                 AnimatedVisibility(
-                    visible = scanState.error != null || scanState.currentAnalysis != null,
+                    visible = scanState.error != null || scanState.currentAnalysis != null || scanState.extractedText != null,
                     enter = slideInVertically() + fadeIn(),
                     exit = slideOutVertically() + fadeOut()
                 ) {
                     ResultsSection(
                         scanState = scanState,
+                        viewModel = viewModel,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp)
-                            .padding(bottom = 16.dp)
+                            .padding(bottom = 16.dp),
+                        onNavigateToQuiz = onNavigateToQuiz
                     )
                 }
 
@@ -194,8 +291,72 @@ fun PlantScannerScreen(
 }
 
 @Composable
+private fun AnimatedToggleButton(
+    isOcrMode: Boolean,
+    onClick: () -> Unit
+) {
+    // Animation values
+    val animationSpec = spring<Float>(
+        dampingRatio = Spring.DampingRatioMediumBouncy,
+        stiffness = Spring.StiffnessLow
+    )
+    
+    val rotationAngle by animateFloatAsState(
+        targetValue = if (isOcrMode) 360f else 0f,
+        animationSpec = animationSpec,
+        label = "rotation"
+    )
+    
+    val scale by animateFloatAsState(
+        targetValue = 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "scale"
+    )
+    
+    val iconColor by animateColorAsState(
+        targetValue = if (isOcrMode) {
+            MaterialTheme.colorScheme.tertiary
+        } else {
+            MaterialTheme.colorScheme.primary
+        },
+        animationSpec = tween(300),
+        label = "iconColor"
+    )
+    
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier
+            .scale(scale)
+    ) {
+        Box(
+            modifier = Modifier
+                .graphicsLayer {
+                    rotationZ = rotationAngle
+                }
+        ) {
+            Crossfade(
+                targetState = isOcrMode,
+                animationSpec = tween(300),
+                label = "iconCrossfade"
+            ) { ocrMode ->
+                Icon(
+                    imageVector = if (ocrMode) Icons.Default.Grass else Icons.Default.TextFields,
+                    contentDescription = if (ocrMode) "Switch to Scanner" else "Switch to OCR",
+                    tint = iconColor,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun CameraScanningOverlay(
     isScanning: Boolean,
+    isOcrMode: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Box(modifier = modifier) {
@@ -250,26 +411,47 @@ private fun CameraScanningOverlay(
         }
 
         // Instruction text
-        Text(
-            text = if (isScanning) "Analyzing..." else "Position object in frame",
-            color = Color.White,
-            style = MaterialTheme.typography.bodyMedium,
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 32.dp)
                 .background(
-                    Color.Black.copy(alpha = 0.6f),
+                    Color.Black.copy(alpha = 0.7f),
                     RoundedCornerShape(16.dp)
                 )
-                .padding(horizontal = 12.dp, vertical = 6.dp)
-        )
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = when {
+                    isScanning -> "Analyzing with enhanced recognition..."
+                    isOcrMode -> "Position handwritten text in frame"
+                    else -> "Position object in frame"
+                },
+                color = Color.White,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center
+            )
+            
+            if (isOcrMode && !isScanning) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "💡 Tip: Good lighting & clear writing work best",
+                    color = Color.White.copy(alpha = 0.8f),
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
     }
 }
 
 @Composable
 private fun ResultsSection(
     scanState: ImageScanState,
-    modifier: Modifier = Modifier
+    viewModel: PlantScannerViewModel,
+    modifier: Modifier = Modifier,
+    onNavigateToQuiz: (() -> Unit)? = null
 ) {
     Card(
         modifier = modifier,
@@ -286,6 +468,27 @@ private fun ResultsSection(
                 scanState.error != null -> {
                     ErrorCard(error = scanState.error)
                 }
+                scanState.isOcrMode && scanState.extractedText != null -> {
+                    val navigateToQuiz = onNavigateToQuiz
+                    val extractedText = scanState.extractedText
+                    
+                    OCRResultCard(
+                        extractedText = extractedText,
+                        viewModel = viewModel,
+                        isUsingGeminiOCR = scanState.isUsingGeminiOCR,
+                        onGenerateQuiz = if (navigateToQuiz != null) {
+                            {
+                                // Set up content for quiz generation
+                                com.mygemma3n.aiapp.shared_utilities.QuizContentManager.setContent(
+                                    content = extractedText,
+                                    title = "Handwritten Text Quiz"
+                                )
+                                // Navigate to quiz screen
+                                navigateToQuiz()
+                            }
+                        } else null
+                    )
+                }
                 scanState.currentAnalysis != null -> {
                     val analysis = scanState.currentAnalysis
                     AnalysisResultCard(
@@ -294,6 +497,287 @@ private fun ResultsSection(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun OCRResultCard(
+    extractedText: String,
+    viewModel: PlantScannerViewModel,
+    isUsingGeminiOCR: Boolean = false,
+    onGenerateQuiz: (() -> Unit)? = null
+) {
+    val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
+    
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Header with OCR indicator
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 4.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.TextFields,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = if (isUsingGeminiOCR) "Extracted Text (Gemini 2.5 Flash)" else "Extracted Text (Local ML Kit)",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        
+        // Main extracted text display
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer
+            ),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.TextFields,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Recognized Text",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        if (isUsingGeminiOCR) {
+                            Text(
+                                text = "✨ Enhanced AI Recognition",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                // Selectable text content
+                SelectionContainer {
+                    Text(
+                        text = extractedText.ifBlank { "No text detected in image" },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                MaterialTheme.colorScheme.surface.copy(alpha = 0.3f),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .padding(12.dp)
+                    )
+                }
+                
+                if (extractedText.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    // Action buttons - First Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Copy to clipboard button
+                        OutlinedButton(
+                            onClick = {
+                                clipboardManager.setText(AnnotatedString(extractedText))
+                                Toast.makeText(context, "Text copied to clipboard", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.primary
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Copy", style = MaterialTheme.typography.labelMedium)
+                        }
+                        
+                        // Share button
+                        OutlinedButton(
+                            onClick = {
+                                val shareIntent = Intent().apply {
+                                    action = Intent.ACTION_SEND
+                                    putExtra(Intent.EXTRA_TEXT, extractedText)
+                                    putExtra(Intent.EXTRA_SUBJECT, "OCR Extracted Text")
+                                    type = "text/plain"
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "Share text"))
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.primary
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Share", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    // Download buttons - Second Row
+                    DownloadButtonsRow(
+                        text = extractedText,
+                        viewModel = viewModel,
+                        context = context
+                    )
+                    
+                    // Generate Quiz Button - Third Row (if text is suitable for quiz generation)
+                    // Debug: Log button conditions
+                    val hasCallback = onGenerateQuiz != null
+                    val hasEnoughText = extractedText.length >= 10
+                    timber.log.Timber.d("Quiz button conditions: hasCallback=$hasCallback, textLength=${extractedText.length}, hasEnoughText=$hasEnoughText")
+                    
+                    if (hasEnoughText && hasCallback) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = { onGenerateQuiz() },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.tertiary
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Quiz,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Generate Quiz from Text",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DownloadButtonsRow(
+    text: String,
+    viewModel: PlantScannerViewModel,
+    context: Context
+) {
+    val coroutineScope = rememberCoroutineScope()
+    
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        // TXT Download
+        OutlinedButton(
+            onClick = {
+                coroutineScope.launch {
+                    val file = viewModel.downloadAsTXT(text)
+                    if (file != null) {
+                        Toast.makeText(context, "TXT saved: ${file.name}", Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(context, "Failed to save TXT file", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            },
+            modifier = Modifier.weight(1f),
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = MaterialTheme.colorScheme.secondary
+            )
+        ) {
+            Icon(
+                imageVector = Icons.Default.Download,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(3.dp))
+            Text("TXT", style = MaterialTheme.typography.labelSmall)
+        }
+        
+        // DOCX Download
+        OutlinedButton(
+            onClick = {
+                coroutineScope.launch {
+                    val file = viewModel.downloadAsDOCX(text)
+                    if (file != null) {
+                        Toast.makeText(context, "DOCX saved: ${file.name}", Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(context, "Failed to save DOCX file", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            },
+            modifier = Modifier.weight(1f),
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = MaterialTheme.colorScheme.secondary
+            )
+        ) {
+            Icon(
+                imageVector = Icons.Default.Download,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(3.dp))
+            Text("DOCX", style = MaterialTheme.typography.labelSmall)
+        }
+        
+        // PDF Download (text format for now)
+        OutlinedButton(
+            onClick = {
+                coroutineScope.launch {
+                    val file = viewModel.downloadAsPDF(text)
+                    if (file != null) {
+                        Toast.makeText(context, "PDF-ready text saved: ${file.name}", Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(context, "Failed to save PDF-ready file", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            },
+            modifier = Modifier.weight(1f),
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = MaterialTheme.colorScheme.secondary
+            )
+        ) {
+            Icon(
+                imageVector = Icons.Default.Download,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(3.dp))
+            Text("PDF", style = MaterialTheme.typography.labelSmall)
         }
     }
 }

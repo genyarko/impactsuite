@@ -141,7 +141,11 @@ fun AppNavigation(
         composable("plant_scanner") {
             SafeScreen(navController, unifiedGemmaService) {
                 if (isFeatureAvailable("plant_scanner")) {
-                    com.mygemma3n.aiapp.feature.plant.PlantScannerScreen()
+                    com.mygemma3n.aiapp.feature.plant.PlantScannerScreen(
+                        onNavigateToQuiz = {
+                            navController.navigate("quiz_generator")
+                        }
+                    )
                 } else {
                     UnifiedChatScreen(navController)
                 }

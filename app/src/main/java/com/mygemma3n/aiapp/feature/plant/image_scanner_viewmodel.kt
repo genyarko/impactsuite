@@ -14,6 +14,9 @@ import android.net.NetworkCapabilities
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.framework.image.MPImage
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,10 +24,19 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONObject
 import timber.log.Timber
 import java.util.UUID
 import javax.inject.Inject
+import org.apache.poi.xwpf.usermodel.XWPFDocument
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import android.os.Environment
 
 /**
  * General image‑scanner ViewModel powered by on‑device Gemma 3n.
@@ -44,6 +56,9 @@ class PlantScannerViewModel @Inject constructor(
     /* ---------- UI state ---------- */
     private val _scanState = MutableStateFlow(ImageScanState())
     val scanState: StateFlow<ImageScanState> = _scanState.asStateFlow()
+    
+    /* ---------- Text Recognition ---------- */
+    private val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
 
     /* ---------- Helper Methods ---------- */
     
@@ -104,15 +119,322 @@ class PlantScannerViewModel @Inject constructor(
         }
     }
 
+    private suspend fun extractTextFromImage(bitmap: Bitmap): String? {
+        return try {
+            // Preprocess image for better handwriting recognition
+            val preprocessedBitmap = preprocessImageForOCR(bitmap)
+            val image = InputImage.fromBitmap(preprocessedBitmap, 0)
+            val task = textRecognizer.process(image)
+            
+            // Convert to coroutine
+            kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+                task.addOnSuccessListener { visionText ->
+                    val extractedText = visionText.text
+                    continuation.resumeWith(Result.success(extractedText.takeIf { it.isNotBlank() }))
+                }.addOnFailureListener { exception ->
+                    Timber.w(exception, "Text recognition failed")
+                    continuation.resumeWith(Result.success(null))
+                }
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Text extraction failed")
+            null
+        }
+    }
+
+    private fun preprocessImageForOCR(bitmap: Bitmap): Bitmap {
+        return try {
+            // Convert to mutable bitmap
+            val mutableBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
+            
+            // Apply comprehensive preprocessing pipeline
+            val width = mutableBitmap.width
+            val height = mutableBitmap.height
+            val pixels = IntArray(width * height)
+            mutableBitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+            
+            // Step 1: Noise Reduction with Gaussian blur approximation
+            val blurredPixels = applyGaussianBlur(pixels, width, height)
+            
+            // Step 2: Convert to grayscale and enhance contrast
+            for (i in blurredPixels.indices) {
+                val pixel = blurredPixels[i]
+                val r = (pixel shr 16) and 0xff
+                val g = (pixel shr 8) and 0xff
+                val b = pixel and 0xff
+                
+                // Convert to grayscale
+                val gray = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
+                
+                // Enhance contrast for handwriting (make darks darker, lights lighter)
+                val enhanced = when {
+                    gray < 85 -> (gray * 0.7).toInt() // Darken dark areas
+                    gray > 170 -> 255 // Pure white for very light areas
+                    else -> ((gray - 127) * 1.5 + 127).toInt().coerceIn(0, 255) // Enhance mid-tones
+                }
+                
+                blurredPixels[i] = (255 shl 24) or (enhanced shl 16) or (enhanced shl 8) or enhanced
+            }
+            
+            mutableBitmap.setPixels(blurredPixels, 0, width, 0, 0, width, height)
+            mutableBitmap
+        } catch (e: Exception) {
+            Timber.w(e, "Image preprocessing failed, using original")
+            bitmap
+        }
+    }
+    
+    private fun applyGaussianBlur(pixels: IntArray, width: Int, height: Int): IntArray {
+        // Simple 3x3 Gaussian kernel approximation for noise reduction
+        val kernel = arrayOf(
+            intArrayOf(1, 2, 1),
+            intArrayOf(2, 4, 2),
+            intArrayOf(1, 2, 1)
+        )
+        val kernelSum = 16
+        
+        val result = IntArray(pixels.size)
+        
+        for (y in 1 until height - 1) {
+            for (x in 1 until width - 1) {
+                var totalR = 0
+                var totalG = 0
+                var totalB = 0
+                
+                // Apply kernel
+                for (ky in -1..1) {
+                    for (kx in -1..1) {
+                        val pixelIndex = (y + ky) * width + (x + kx)
+                        val pixel = pixels[pixelIndex]
+                        val weight = kernel[ky + 1][kx + 1]
+                        
+                        totalR += ((pixel shr 16) and 0xff) * weight
+                        totalG += ((pixel shr 8) and 0xff) * weight
+                        totalB += (pixel and 0xff) * weight
+                    }
+                }
+                
+                // Normalize and set pixel
+                val finalR = (totalR / kernelSum).coerceIn(0, 255)
+                val finalG = (totalG / kernelSum).coerceIn(0, 255)
+                val finalB = (totalB / kernelSum).coerceIn(0, 255)
+                
+                result[y * width + x] = (255 shl 24) or (finalR shl 16) or (finalG shl 8) or finalB
+            }
+        }
+        
+        // Copy edge pixels unchanged
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                if (y == 0 || y == height - 1 || x == 0 || x == width - 1) {
+                    result[y * width + x] = pixels[y * width + x]
+                }
+            }
+        }
+        
+        return result
+    }
+    
+    private fun applyEdgeDetection(bitmap: Bitmap): Bitmap {
+        // Sobel edge detection for text boundaries
+        val mutableBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
+        val width = mutableBitmap.width
+        val height = mutableBitmap.height
+        val pixels = IntArray(width * height)
+        mutableBitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+        
+        // Convert to grayscale first
+        val grayPixels = IntArray(pixels.size)
+        for (i in pixels.indices) {
+            val pixel = pixels[i]
+            val r = (pixel shr 16) and 0xff
+            val g = (pixel shr 8) and 0xff
+            val b = pixel and 0xff
+            val gray = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
+            grayPixels[i] = gray
+        }
+        
+        val result = IntArray(pixels.size)
+        
+        // Sobel kernels
+        val sobelX = arrayOf(
+            intArrayOf(-1, 0, 1),
+            intArrayOf(-2, 0, 2),
+            intArrayOf(-1, 0, 1)
+        )
+        val sobelY = arrayOf(
+            intArrayOf(-1, -2, -1),
+            intArrayOf(0, 0, 0),
+            intArrayOf(1, 2, 1)
+        )
+        
+        for (y in 1 until height - 1) {
+            for (x in 1 until width - 1) {
+                var gx = 0
+                var gy = 0
+                
+                // Apply Sobel kernels
+                for (ky in -1..1) {
+                    for (kx in -1..1) {
+                        val pixelIndex = (y + ky) * width + (x + kx)
+                        val grayValue = grayPixels[pixelIndex]
+                        
+                        gx += grayValue * sobelX[ky + 1][kx + 1]
+                        gy += grayValue * sobelY[ky + 1][kx + 1]
+                    }
+                }
+                
+                // Calculate magnitude
+                val magnitude = kotlin.math.sqrt((gx * gx + gy * gy).toDouble()).toInt()
+                val edgeValue = magnitude.coerceIn(0, 255)
+                
+                // Invert for text (make text dark, background light)
+                val finalValue = 255 - edgeValue
+                result[y * width + x] = (255 shl 24) or (finalValue shl 16) or (finalValue shl 8) or finalValue
+            }
+        }
+        
+        // Copy edge pixels
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                if (y == 0 || y == height - 1 || x == 0 || x == width - 1) {
+                    result[y * width + x] = (255 shl 24) or (255 shl 16) or (255 shl 8) or 255
+                }
+            }
+        }
+        
+        mutableBitmap.setPixels(result, 0, width, 0, 0, width, height)
+        return mutableBitmap
+    }
+    
+    private fun applyDilation(bitmap: Bitmap): Bitmap {
+        // Morphological dilation - makes text thicker/bolder
+        val mutableBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
+        val width = mutableBitmap.width
+        val height = mutableBitmap.height
+        val pixels = IntArray(width * height)
+        mutableBitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+        
+        // Convert to grayscale and binary
+        val binaryPixels = IntArray(pixels.size)
+        for (i in pixels.indices) {
+            val pixel = pixels[i]
+            val r = (pixel shr 16) and 0xff
+            val g = (pixel shr 8) and 0xff
+            val b = pixel and 0xff
+            val gray = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
+            binaryPixels[i] = if (gray < 128) 0 else 255 // Binary threshold
+        }
+        
+        val result = IntArray(pixels.size)
+        val structuringElement = arrayOf(
+            intArrayOf(0, 1, 0),
+            intArrayOf(1, 1, 1),
+            intArrayOf(0, 1, 0)
+        ) // Cross-shaped structuring element
+        
+        for (y in 1 until height - 1) {
+            for (x in 1 until width - 1) {
+                var maxValue = 0
+                
+                // Apply structuring element
+                for (ky in -1..1) {
+                    for (kx in -1..1) {
+                        if (structuringElement[ky + 1][kx + 1] == 1) {
+                            val pixelIndex = (y + ky) * width + (x + kx)
+                            maxValue = maxOf(maxValue, binaryPixels[pixelIndex])
+                        }
+                    }
+                }
+                
+                result[y * width + x] = (255 shl 24) or (maxValue shl 16) or (maxValue shl 8) or maxValue
+            }
+        }
+        
+        // Copy edge pixels
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                if (y == 0 || y == height - 1 || x == 0 || x == width - 1) {
+                    val originalValue = binaryPixels[y * width + x]
+                    result[y * width + x] = (255 shl 24) or (originalValue shl 16) or (originalValue shl 8) or originalValue
+                }
+            }
+        }
+        
+        mutableBitmap.setPixels(result, 0, width, 0, 0, width, height)
+        return mutableBitmap
+    }
+    
+    private fun applyErosion(bitmap: Bitmap): Bitmap {
+        // Morphological erosion - makes text thinner
+        val mutableBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
+        val width = mutableBitmap.width
+        val height = mutableBitmap.height
+        val pixels = IntArray(width * height)
+        mutableBitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+        
+        // Convert to grayscale and binary
+        val binaryPixels = IntArray(pixels.size)
+        for (i in pixels.indices) {
+            val pixel = pixels[i]
+            val r = (pixel shr 16) and 0xff
+            val g = (pixel shr 8) and 0xff
+            val b = pixel and 0xff
+            val gray = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
+            binaryPixels[i] = if (gray < 128) 0 else 255 // Binary threshold
+        }
+        
+        val result = IntArray(pixels.size)
+        val structuringElement = arrayOf(
+            intArrayOf(0, 1, 0),
+            intArrayOf(1, 1, 1),
+            intArrayOf(0, 1, 0)
+        ) // Cross-shaped structuring element
+        
+        for (y in 1 until height - 1) {
+            for (x in 1 until width - 1) {
+                var minValue = 255
+                
+                // Apply structuring element
+                for (ky in -1..1) {
+                    for (kx in -1..1) {
+                        if (structuringElement[ky + 1][kx + 1] == 1) {
+                            val pixelIndex = (y + ky) * width + (x + kx)
+                            minValue = minOf(minValue, binaryPixels[pixelIndex])
+                        }
+                    }
+                }
+                
+                result[y * width + x] = (255 shl 24) or (minValue shl 16) or (minValue shl 8) or minValue
+            }
+        }
+        
+        // Copy edge pixels
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                if (y == 0 || y == height - 1 || x == 0 || x == width - 1) {
+                    val originalValue = binaryPixels[y * width + x]
+                    result[y * width + x] = (255 shl 24) or (originalValue shl 16) or (originalValue shl 8) or originalValue
+                }
+            }
+        }
+        
+        mutableBitmap.setPixels(result, 0, width, 0, 0, width, height)
+        return mutableBitmap
+    }
+
     private suspend fun analyzeImageWithService(bitmap: Bitmap): String {
+        // Extract text first for potential enhancement
+        val extractedText = extractTextFromImage(bitmap)
+        
         return if (shouldUseOnlineService()) {
             try {
                 if (shouldUseOpenAI()) {
-                    analyzeImageWithOpenAI(bitmap)
+                    analyzeImageWithOpenAI(bitmap, extractedText)
                 } else {
                     initializeApiServiceIfNeeded()
                     // Use Gemini's vision capabilities
-                    val prompt = buildPromptForOnlineService()
+                    val prompt = buildPromptForOnlineService(extractedText)
                     geminiApiService.generateContentWithImageAndModel(
                         modelName = GeminiApiService.GEMINI_FLASH_MODEL, // Use vision model
                         prompt = prompt,
@@ -122,15 +444,15 @@ class PlantScannerViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 Timber.w(e, "Online image analysis failed, falling back to offline")
-                analyzeImageOffline(bitmap)
+                analyzeImageOffline(bitmap, extractedText)
             }
         } else {
-            analyzeImageOffline(bitmap)
+            analyzeImageOffline(bitmap, extractedText)
         }
     }
 
-    private suspend fun analyzeImageWithOpenAI(bitmap: Bitmap): String {
-        val prompt = buildPromptForOpenAI()
+    private suspend fun analyzeImageWithOpenAI(bitmap: Bitmap, extractedText: String? = null): String {
+        val prompt = buildPromptForOpenAI(extractedText)
         return openAIService.analyzeImageWithBitmap(
             prompt = prompt,
             bitmap = bitmap.resizeToGemma(512), // Consistent with other services
@@ -139,17 +461,18 @@ class PlantScannerViewModel @Inject constructor(
         )
     }
 
-    private suspend fun analyzeImageOffline(bitmap: Bitmap): String {
+    private suspend fun analyzeImageOffline(bitmap: Bitmap, extractedText: String? = null): String {
         val square = bitmap.resizeToGemma(512)
         val mpImage: MPImage = BitmapImageBuilder(square).build()
         gemma.initialize()
-        val prompt = buildPromptWithImage()
+        val prompt = buildPromptWithImage(extractedText)
         return gemma.generateResponse(prompt, mpImage)
     }
 
-    private fun buildPromptForOnlineService(): String {
+    private fun buildPromptForOnlineService(extractedText: String? = null): String {
+        val textContext = extractedText?.let { "\n\nExtracted text from image: \"$it\"" } ?: ""
         return """
-            Analyze this image and determine if it contains plants or food. Return JSON with this structure:
+            Analyze this image and determine if it contains plants or food. Return JSON with this structure:$textContext
             
             If it's a plant:
             {
@@ -203,9 +526,10 @@ class PlantScannerViewModel @Inject constructor(
         """.trimIndent()
     }
 
-    private fun buildPromptForOpenAI(): String {
+    private fun buildPromptForOpenAI(extractedText: String? = null): String {
+        val textContext = extractedText?.let { "\n\nExtracted text from image: \"$it\"\nUse this text context to enhance your analysis." } ?: ""
         return """
-            You are an expert image analyst specializing in plants, food, and general object recognition. Analyze this image carefully and provide a detailed JSON response.
+            You are an expert image analyst specializing in plants, food, and general object recognition. Analyze this image carefully and provide a detailed JSON response.$textContext
 
             **INSTRUCTIONS:**
             1. Determine if the image contains primarily PLANTS, FOOD, or is a GENERAL object/scene
@@ -287,7 +611,8 @@ class PlantScannerViewModel @Inject constructor(
             val raw = analyzeImageWithService(bitmap)
 
             /* 5 · Parse + enrich --------------------------------------------- */
-            val analysis  = parseGeneralAnalysis(raw)
+            val extractedText = extractTextFromImage(bitmap)
+            val analysis  = parseGeneralAnalysis(raw).copy(extractedText = extractedText)
             val enriched  = analysis.plantSpecies?.let { plantDatabase.getAdditionalInfo(it) }
 
             _scanState.update {
@@ -304,9 +629,248 @@ class PlantScannerViewModel @Inject constructor(
         }
     }
 
+    /** OCR-only analysis for text extraction with enhanced handwriting recognition */
+    fun analyzeImageForOCR(bitmap: Bitmap) = viewModelScope.launch {
+        _scanState.update { it.copy(isAnalyzing = true, error = null, isOcrMode = true, extractedText = null) }
+
+        try {
+            val usingOnlineOCR = shouldUseOnlineService()
+            val extractedText = if (usingOnlineOCR) {
+                // Use Gemini 2.5 Flash for superior online OCR with handwriting recognition
+                performGeminiOCR(bitmap)
+            } else {
+                // Fallback to local ML Kit with multiple processing strategies
+                extractTextWithMultipleStrategies(bitmap)
+            }
+            
+            _scanState.update {
+                it.copy(
+                    isAnalyzing = false,
+                    extractedText = extractedText,
+                    currentAnalysis = null, // Clear previous analysis in OCR mode
+                    isUsingGeminiOCR = usingOnlineOCR
+                )
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "OCR analysis failed")
+            _scanState.update { it.copy(isAnalyzing = false, error = e.localizedMessage) }
+        }
+    }
+
+    private suspend fun performGeminiOCR(bitmap: Bitmap): String? {
+        return try {
+            // Initialize Gemini service if needed
+            if (!geminiApiService.isInitialized()) {
+                initializeApiServiceIfNeeded()
+            }
+            
+            Timber.d("Using Gemini 2.5 Flash for OCR - superior handwriting recognition")
+            val result = geminiApiService.performOCR(bitmap)
+            
+            // Clean up the result
+            val cleanedResult = result.trim()
+            if (cleanedResult.equals("No text detected", ignoreCase = true) || cleanedResult.isBlank()) {
+                null
+            } else {
+                cleanedResult
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Gemini OCR failed, falling back to local processing")
+            // Fallback to local processing if Gemini fails
+            extractTextWithMultipleStrategies(bitmap)
+        }
+    }
+
+    private suspend fun extractTextWithMultipleStrategies(bitmap: Bitmap): String? {
+        val results = mutableListOf<String>()
+        
+        try {
+            // Strategy 1: Original image
+            val originalText = extractTextFromImage(bitmap)
+            if (!originalText.isNullOrBlank()) results.add(originalText)
+            
+            // Strategy 2: High contrast version
+            val contrastBitmap = applyHighContrast(bitmap)
+            val contrastText = extractTextFromImage(contrastBitmap)
+            if (!contrastText.isNullOrBlank()) results.add(contrastText)
+            
+            // Strategy 3: Scaled version for better resolution
+            val scaledBitmap = bitmap.scale(bitmap.width * 2, bitmap.height * 2)
+            val scaledText = extractTextFromImage(scaledBitmap)
+            if (!scaledText.isNullOrBlank()) results.add(scaledText)
+            
+            // Strategy 4: Rotation Detection - try different orientations
+            val rotationAngles = listOf(90f, 180f, 270f)
+            for (angle in rotationAngles) {
+                val rotatedBitmap = rotateBitmap(bitmap, angle)
+                val rotatedText = extractTextFromImage(rotatedBitmap)
+                if (!rotatedText.isNullOrBlank()) results.add(rotatedText)
+            }
+            
+            // Strategy 5: Edge Detection for text boundaries
+            val edgeDetectedBitmap = applyEdgeDetection(bitmap)
+            val edgeText = extractTextFromImage(edgeDetectedBitmap)
+            if (!edgeText.isNullOrBlank()) results.add(edgeText)
+            
+            // Strategy 6: Morphological Operations - Dilation for thicker text
+            val dilatedBitmap = applyDilation(bitmap)
+            val dilatedText = extractTextFromImage(dilatedBitmap)
+            if (!dilatedText.isNullOrBlank()) results.add(dilatedText)
+            
+            // Strategy 7: Morphological Operations - Erosion for thinner text
+            val erodedBitmap = applyErosion(bitmap)
+            val erodedText = extractTextFromImage(erodedBitmap)
+            if (!erodedText.isNullOrBlank()) results.add(erodedText)
+            
+            // Return the longest result (usually most complete)
+            return results.maxByOrNull { it.length }?.trim()
+        } catch (e: Exception) {
+            Timber.w(e, "Multi-strategy OCR failed")
+            return null
+        }
+    }
+    
+    private fun rotateBitmap(bitmap: Bitmap, degrees: Float): Bitmap {
+        return try {
+            val matrix = android.graphics.Matrix()
+            matrix.postRotate(degrees)
+            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        } catch (e: Exception) {
+            Timber.w(e, "Bitmap rotation failed for $degrees degrees")
+            bitmap
+        }
+    }
+
+    private fun applyHighContrast(bitmap: Bitmap): Bitmap {
+        val mutableBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
+        val width = mutableBitmap.width
+        val height = mutableBitmap.height
+        val pixels = IntArray(width * height)
+        mutableBitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+        
+        for (i in pixels.indices) {
+            val pixel = pixels[i]
+            val r = (pixel shr 16) and 0xff
+            val g = (pixel shr 8) and 0xff
+            val b = pixel and 0xff
+            val gray = (0.299 * r + 0.587 * g + 0.114 * b).toInt()
+            
+            // Extreme contrast for handwriting
+            val enhanced = if (gray < 128) 0 else 255
+            pixels[i] = (255 shl 24) or (enhanced shl 16) or (enhanced shl 8) or enhanced
+        }
+        
+        mutableBitmap.setPixels(pixels, 0, width, 0, 0, width, height)
+        return mutableBitmap
+    }
+
+    /** Toggle between OCR mode and regular analysis mode */
+    fun toggleOcrMode() {
+        _scanState.update { 
+            it.copy(
+                isOcrMode = !it.isOcrMode,
+                extractedText = null,
+                currentAnalysis = null,
+                error = null,
+                isUsingGeminiOCR = false
+            )
+        }
+    }
+
+    /** Save extracted text to clipboard or file */
+    fun saveExtractedText(): String? {
+        return _scanState.value.extractedText
+    }
+
+    /** Download extracted text as TXT file */
+    fun downloadAsTXT(text: String): File? {
+        return try {
+            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val filename = "OCR_Text_$timestamp.txt"
+            val downloadsDir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "OCR")
+            if (!downloadsDir.exists()) {
+                downloadsDir.mkdirs()
+            }
+            
+            val file = File(downloadsDir, filename)
+            file.writeText(text, Charsets.UTF_8)
+            Timber.d("TXT file saved: ${file.absolutePath}")
+            file
+        } catch (e: IOException) {
+            Timber.e(e, "Failed to save TXT file")
+            null
+        }
+    }
+
+    /** Download extracted text as DOCX file */
+    fun downloadAsDOCX(text: String): File? {
+        return try {
+            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val filename = "OCR_Text_$timestamp.docx"
+            val downloadsDir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "OCR")
+            if (!downloadsDir.exists()) {
+                downloadsDir.mkdirs()
+            }
+            
+            val file = File(downloadsDir, filename)
+            val document = XWPFDocument()
+            val paragraph = document.createParagraph()
+            val run = paragraph.createRun()
+            run.setText(text)
+            run.fontSize = 12
+            run.fontFamily = "Arial"
+            
+            FileOutputStream(file).use { outputStream ->
+                document.write(outputStream)
+            }
+            document.close()
+            
+            Timber.d("DOCX file saved: ${file.absolutePath}")
+            file
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to save DOCX file")
+            null
+        }
+    }
+
+    /** Download extracted text as PDF file - Note: For basic text PDF, we'll create a simple text file and rename it for now */
+    fun downloadAsPDF(text: String): File? {
+        return try {
+            // Note: Creating a true PDF would require additional PDF libraries
+            // For now, we'll create a text file that can be easily converted to PDF
+            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val filename = "OCR_Text_$timestamp.pdf.txt"
+            val downloadsDir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "OCR")
+            if (!downloadsDir.exists()) {
+                downloadsDir.mkdirs()
+            }
+            
+            val file = File(downloadsDir, filename)
+            val pdfReadyText = """
+                |OCR Extracted Text
+                |=================
+                |Date: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())}
+                |
+                |$text
+                |
+                |---
+                |Generated by G3N OCR Scanner
+            """.trimMargin()
+            
+            file.writeText(pdfReadyText, Charsets.UTF_8)
+            Timber.d("PDF-ready text file saved: ${file.absolutePath}")
+            file
+        } catch (e: IOException) {
+            Timber.e(e, "Failed to save PDF-ready text file")
+            null
+        }
+    }
+
     /** Insert the image token before the text – Gemma 3n best practice. */
-    private fun buildPromptWithImage(): String =
-        "```img```<|image|>$BASE_PROMPT\nJSON Response:"
+    private fun buildPromptWithImage(extractedText: String? = null): String {
+        val textContext = extractedText?.let { " Extracted text: \"$it\"." } ?: ""
+        return "```img```<|image|>$BASE_PROMPT$textContext\nJSON Response:"
+    }
 
     /** Resize to a model‑friendly square side. */
     private fun Bitmap.resizeToGemma(target: Int): Bitmap =
@@ -354,7 +918,8 @@ class PlantScannerViewModel @Inject constructor(
             foodItems      = foodItems,
             totalCalories  = obj.optInt("totalCalories", 0),
             nutritionalInfo = nutritionalInfo,
-            analysisType   = analysisType
+            analysisType   = analysisType,
+            extractedText  = null // Will be set separately during analysis
         )
     }
     
@@ -412,7 +977,10 @@ data class ImageScanState(
     val currentAnalysis: GeneralAnalysis? = null,
     val scanHistory: List<GeneralAnalysis> = emptyList(),
     val error: String?                  = null,
-    val isUsingOnlineService: Boolean   = false
+    val isUsingOnlineService: Boolean   = false,
+    val isOcrMode: Boolean              = false,
+    val extractedText: String?          = null,
+    val isUsingGeminiOCR: Boolean       = false
 )
 
 data class GeneralAnalysis(
@@ -429,7 +997,9 @@ data class GeneralAnalysis(
     val foodItems: List<FoodItem>      = emptyList(),
     val totalCalories: Int             = 0,
     val nutritionalInfo: NutritionalInfo? = null,
-    val analysisType: AnalysisType     = AnalysisType.GENERAL
+    val analysisType: AnalysisType     = AnalysisType.GENERAL,
+    // Text recognition field
+    val extractedText: String?         = null
 )
 
 enum class AnalysisType {

@@ -215,7 +215,10 @@ class GeminiApiService @Inject constructor(
     ): String = withContext(Dispatchers.IO) {
         val key  = apiKey ?: error("Service not initialised")
         val cfg  = model?.generationConfig
-            ?: generationConfig { maxOutputTokens = 512 }
+            ?: generationConfig { 
+                maxOutputTokens = if (serviceType == "ocr") 2048 else 512
+                temperature = if (serviceType == "ocr") 0.1f else 0.7f
+            }
 
         val visionModel = GenerativeModel(modelName, key, cfg)
         val result = visionModel.generateContent(
@@ -244,7 +247,30 @@ class GeminiApiService @Inject constructor(
         response
     }
 
-
+    /** Dedicated OCR function using Gemini 2.5 Flash for superior handwriting recognition */
+    suspend fun performOCR(image: Bitmap): String = withContext(Dispatchers.IO) {
+        val ocrPrompt = """
+            Extract all text from this image. This includes both printed text and handwritten text.
+            
+            Instructions:
+            - Transcribe exactly what you see, preserving original formatting when possible
+            - Include all text, even if partially visible or unclear
+            - For handwritten text, do your best to interpret unclear letters
+            - Maintain line breaks and paragraph structure
+            - Do not add any explanations or descriptions
+            - Only output the extracted text content
+            - If no text is visible, respond with: "No text detected"
+            
+            Text content:
+        """.trimIndent()
+        
+        return@withContext generateContentWithImageAndModel(
+            modelName = GEMINI_FLASH_MODEL, // Gemini 2.5 Flash for best OCR performance
+            prompt = ocrPrompt,
+            image = image,
+            serviceType = "ocr"
+        )
+    }
 
     // GeminiApiService.kt
     suspend fun generateImageBytes(prompt: String): ByteArray = withContext(Dispatchers.IO) {

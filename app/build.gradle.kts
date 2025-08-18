@@ -273,6 +273,9 @@ dependencies {
 
     // PDF processing uses Android native PdfRenderer + ML Kit text recognition
     implementation(libs.text.recognition)
+    
+    // ML Kit Text Recognition for handwriting and printed text
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
 
     //Lifecycle
     implementation("androidx.lifecycle:lifecycle-process:2.9.2")
