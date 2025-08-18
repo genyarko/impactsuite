@@ -63,13 +63,15 @@ fun UnifiedChatScreen(
         listOf(
             FeatureShortcut("AI Tutor", "tutor", Icons.Default.School, "tutor", "Get personalized lessons"),
             FeatureShortcut("Quiz", "quiz", Icons.Default.Quiz, "quiz_generator", "Generate practice quizzes"),
-            FeatureShortcut("Live Caption", "caption", Icons.Default.ClosedCaption, "live_caption", "Real-time transcription"),
+            FeatureShortcut("Story Mode", "story", Icons.AutoMirrored.Filled.MenuBook, "story_mode", "Interactive stories"),
             FeatureShortcut("CBT Coach", "cbt", Icons.Default.Psychology, "cbt_coach", "Mental wellness support"),
+            FeatureShortcut("Live Caption", "caption", Icons.Default.ClosedCaption, "live_caption", "Real-time transcription"),
+
             FeatureShortcut("Summarizer", "summarizer", Icons.Default.Summarize, "summarizer", "Document summarization"),
             FeatureShortcut("Image Scan", "scan", Icons.Default.PhotoCamera, "plant_scanner", "Identify images"),
             FeatureShortcut("Crisis Help", "crisis", Icons.Default.LocalHospital, "crisis_handbook", "Emergency resources"),
             FeatureShortcut("Analytics", "analytics", Icons.Default.Analytics, "analytics", "Learning insights"),
-            FeatureShortcut("Story Mode", "story", Icons.AutoMirrored.Filled.MenuBook, "story_mode", "Interactive stories"),
+
             FeatureShortcut("Home Page", "home", Icons.Default.Home, "home", "Navigate to home page")
         )
     }
