@@ -25,6 +25,33 @@ flutter run
 4. **UI parity**: port one feature at a time from Compose screens into Flutter widgets.
 5. **Validation**: keep Kotlin and Flutter outputs side-by-side until each feature reaches parity.
 
+## Completeness check (Kotlin ➜ Flutter)
+
+Status for the three priority items requested in this migration phase:
+
+1. **Domain first**: ✅ **Completed for current parity target**.
+   - Flutter includes quiz + AI domain primitives (`quiz_models.dart`, `answer_checker.dart`,
+     `quiz_prompt_generator.dart`, `ai_models.dart`, `ai_repository.dart`).
+   - Added pure-Dart domain services for previously-missing Kotlin-heavy modules:
+     analytics (`knowledge_gap_analyzer.dart`), CBT (`cbt_session_manager.dart`), story
+     (`story_recommendation_service.dart`), crisis (`crisis_severity_classifier.dart`), and plant
+     (`plant_diagnosis_interpreter.dart`).
+2. **Data layer**: ✅ **Completed for current parity target**.
+   - Existing migrations remain: Room chat/session schema ➜ Drift, quiz DataStore preferences ➜
+     SharedPreferences.
+   - Added Drift stores for analytics, CBT sessions, story memory, and plant scans plus
+     SharedPreferences-backed app settings (`learning_analytics_drift_store.dart`,
+     `cbt_drift_store.dart`, `story_drift_store.dart`, `plant_drift_store.dart`,
+     `app_settings_store.dart`) to cover the outstanding Kotlin Room/DataStore categories in this
+     phase.
+3. **AI services**: ✅ **Mostly complete for current Flutter scope**.
+   - Dart repositories + abstraction (`GeminiRepository`, `GemmaRepository`,
+     `UnifiedAiRepository`) are in place.
+   - Platform channels are wired for Gemini/Gemma text generation and streaming via Android
+     `MainActivity`.
+   - Note: channel methods currently only cover the migrated chat/tutor generation path; broader
+     Kotlin AI feature parity remains pending as additional features are ported.
+
 ## Data layer migration status
 
 - ✅ Room `chat_sessions` + `chat_messages` schema now has a Flutter-side Drift store in
@@ -42,6 +69,17 @@ flutter run
 - ✅ Added `GeminiRepository`, `GemmaRepository`, and `UnifiedAiRepository` with fallback behavior.
 - ✅ Implemented matching `MethodChannel` / `EventChannel` handlers in Android `MainActivity` and routed Tutor/Chat pages through `UnifiedAiRepository`.
 
+
+## UI parity migration status
+
+- ✅ Began Compose ➜ Flutter UI parity with the **Settings** feature.
+- ✅ Replaced Flutter `SettingsPage` placeholder with a functional settings screen wired to
+  SharedPreferences-backed stores (`QuizPreferencesStore` and `AppSettingsStore`).
+- ✅ Ported core settings groups from Kotlin into Flutter widgets:
+  - AI configuration (Gemini API key + on-device preference),
+  - Display & accessibility controls,
+  - Quiz behavior controls (hints, auto-advance, explanations, time limit).
+- ✅ Added widget test coverage for the new Flutter settings screen.
 
 ## Merge verification
 
