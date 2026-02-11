@@ -7,8 +7,7 @@ Kotlin/Compose feature areas into Flutter routes.
 
 - App shell with Material 3 theme and bottom navigation.
 - Route placeholders for: Home, Tutor, Chat, Quiz, Summarizer, Story, Crisis, Settings.
-- Domain-first quiz migration in Dart (`QuizPromptGenerator`, `AnswerChecker`, and quiz models).
-- Basic widget + domain tests to validate app boot and migrated logic behavior.
+- Basic widget test to validate app boot and route rendering.
 
 ## How to run
 
