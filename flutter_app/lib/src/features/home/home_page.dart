@@ -253,7 +253,7 @@ const _featureItems = <HomeFeatureItem>[
     title: 'Image Classification',
     route: '/plant_scanner',
     icon: Icons.photo_camera,
-    enabled: false,
+    enabled: true,
   ),
   HomeFeatureItem(title: 'Crisis Handbook', route: '/crisis', icon: Icons.local_hospital, enabled: true),
   HomeFeatureItem(title: 'Learning Analytics', route: '/analytics', icon: Icons.analytics, enabled: false),
