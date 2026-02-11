@@ -59,20 +59,34 @@ import com.mygemma3n.aiapp.shared_ui.CameraPreview
 import com.google.accompanist.permissions.*
 import java.io.File
 import kotlin.math.roundToInt
+import com.mygemma3n.aiapp.feature.voice.VoiceCommandViewModel
+import timber.log.Timber
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun PlantScannerScreen(
     viewModel: PlantScannerViewModel = hiltViewModel(),
-    onNavigateToQuiz: (() -> Unit)? = null
+    onNavigateToQuiz: (() -> Unit)? = null,
+    voiceCommandViewModel: VoiceCommandViewModel = hiltViewModel()
 ) {
     val scanState by viewModel.scanState.collectAsStateWithLifecycle()
+    
+    // Update voice command context when OCR text changes
+    LaunchedEffect(scanState.extractedText) {
+        voiceCommandViewModel.setCurrentContent(scanState.extractedText)
+    }
 
     val context = LocalContext.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     val camPerm = rememberPermissionState(android.Manifest.permission.CAMERA)
-
-    val controller = remember {
+    
+    // Voice command integration for camera initialization
+    val voiceUiState by voiceCommandViewModel.uiState.collectAsStateWithLifecycle()
+    
+    // Simple camera controller that refreshes when needed
+    var refreshCamera by remember { mutableStateOf(0) }
+    
+    val controller = remember(refreshCamera) {
         LifecycleCameraController(context).apply {
             setEnabledUseCases(CameraController.IMAGE_CAPTURE)
             setImageCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
@@ -84,9 +98,20 @@ fun PlantScannerScreen(
             }
         }
     }
-
-    LaunchedEffect(camPerm.status.isGranted) {
-        if (camPerm.status.isGranted) controller.bindToLifecycle(lifecycleOwner)
+    
+    // Bind camera to lifecycle when permission is granted
+    LaunchedEffect(camPerm.status.isGranted, controller) {
+        if (camPerm.status.isGranted) {
+            Timber.d("Binding camera to lifecycle")
+            // Small delay to ensure proper initialization
+            kotlinx.coroutines.delay(100L)
+            try {
+                controller.bindToLifecycle(lifecycleOwner)
+                Timber.d("Camera bound successfully")
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to bind camera to lifecycle")
+            }
+        }
     }
 
     Box(
@@ -214,35 +239,59 @@ fun PlantScannerScreen(
                 // Capture button with improved design
                 FloatingActionButton(
                     onClick = {
-                        val photo = File(context.cacheDir, "${System.currentTimeMillis()}.jpg")
-                        val opts = ImageCapture.OutputFileOptions.Builder(photo).apply {
-                            // OCR-optimized capture settings
-                            if (scanState.isOcrMode) {
-                                // Higher quality for text recognition
-                                setMetadata(ImageCapture.Metadata().apply {
-                                    isReversedHorizontal = false
-                                })
-                            }
-                        }.build()
-                        val exec = ContextCompat.getMainExecutor(context)
-
-                        controller.takePicture(opts, exec,
-                            object : ImageCapture.OnImageSavedCallback {
-                                override fun onImageSaved(r: ImageCapture.OutputFileResults) {
-                                    val bitmap = BitmapFactory.decodeFile(photo.absolutePath)
-                                    if (scanState.isOcrMode) {
-                                        viewModel.analyzeImageForOCR(bitmap)
-                                    } else {
-                                        viewModel.analyzeImage(bitmap)
-                                    }
+                        Timber.d("Capture button clicked - Analyzing: ${scanState.isAnalyzing}")
+                        
+                        if (scanState.isAnalyzing) {
+                            Timber.w("Cannot take picture - already analyzing")
+                            return@FloatingActionButton
+                        }
+                        
+                        try {
+                            val photo = File(context.cacheDir, "${System.currentTimeMillis()}.jpg")
+                            val opts = ImageCapture.OutputFileOptions.Builder(photo).apply {
+                                // OCR-optimized capture settings
+                                if (scanState.isOcrMode) {
+                                    // Higher quality for text recognition
+                                    setMetadata(ImageCapture.Metadata().apply {
+                                        isReversedHorizontal = false
+                                    })
                                 }
-                                override fun onError(e: ImageCaptureException) = e.printStackTrace()
-                            })
+                            }.build()
+                            val exec = ContextCompat.getMainExecutor(context)
+
+                            controller.takePicture(opts, exec,
+                                object : ImageCapture.OnImageSavedCallback {
+                                    override fun onImageSaved(r: ImageCapture.OutputFileResults) {
+                                        Timber.d("Photo saved successfully")
+                                        val bitmap = BitmapFactory.decodeFile(photo.absolutePath)
+                                        if (scanState.isOcrMode) {
+                                            viewModel.analyzeImageForOCR(bitmap)
+                                        } else {
+                                            viewModel.analyzeImage(bitmap)
+                                        }
+                                    }
+                                    override fun onError(e: ImageCaptureException) {
+                                        Timber.e(e, "Error taking picture")
+                                        if (e.message?.contains("Not bound to a valid Camera") == true) {
+                                            Timber.w("Camera binding issue detected, will rebind on next attempt")
+                                            // Trigger camera refresh by incrementing counter
+                                            refreshCamera++
+                                        }
+                                        e.printStackTrace()
+                                    }
+                                })
+                        } catch (e: Exception) {
+                            Timber.e(e, "Exception in capture button onClick")
+                        }
                     },
                     modifier = Modifier
                         .size(72.dp)
                         .padding(bottom = 16.dp),
-                    containerColor = MaterialTheme.colorScheme.primary,
+                    containerColor = if (scanState.isAnalyzing) {
+                        MaterialTheme.colorScheme.secondary
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
                     contentColor = MaterialTheme.colorScheme.onPrimary
                 ) {
                     if (scanState.isAnalyzing) {
@@ -660,7 +709,7 @@ private fun OCRResultCard(
                     // Debug: Log button conditions
                     val hasCallback = onGenerateQuiz != null
                     val hasEnoughText = extractedText.length >= 10
-                    timber.log.Timber.d("Quiz button conditions: hasCallback=$hasCallback, textLength=${extractedText.length}, hasEnoughText=$hasEnoughText")
+                    Timber.d("Quiz button conditions: hasCallback=$hasCallback, textLength=${extractedText.length}, hasEnoughText=$hasEnoughText")
                     
                     if (hasEnoughText && hasCallback) {
                         Spacer(modifier = Modifier.height(8.dp))

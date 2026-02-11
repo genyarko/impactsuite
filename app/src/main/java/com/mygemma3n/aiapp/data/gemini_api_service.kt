@@ -24,6 +24,8 @@ import java.util.Base64
 import com.mygemma3n.aiapp.data.local.entities.TokenUsage
 import com.mygemma3n.aiapp.data.repository.TokenUsageRepository
 import com.mygemma3n.aiapp.config.ApiConfiguration
+import com.mygemma3n.aiapp.security.SecureNetworkManager
+import com.mygemma3n.aiapp.security.SecureApiKeyManager
 import javax.inject.Provider
 
 /* ────────────────────────────────────────────────────────────────────
@@ -32,7 +34,9 @@ import javax.inject.Provider
 @Singleton
 class GeminiApiService @Inject constructor(
     private val context: Context,
-    private val tokenUsageRepositoryProvider: Provider<TokenUsageRepository>
+    private val tokenUsageRepositoryProvider: Provider<TokenUsageRepository>,
+    private val secureNetworkManager: SecureNetworkManager,
+    private val secureApiKeyManager: SecureApiKeyManager
 ) {
 
     /* Model IDs - using centralized configuration */
@@ -50,7 +54,7 @@ class GeminiApiService @Inject constructor(
     /* state */
     private var model:  GenerativeModel? = null
     private var apiKey: String?          = null
-    private val http                     = OkHttpClient()
+    private val http by lazy { secureNetworkManager.createClientForDomain("generativelanguage.googleapis.com") }
 
     /* init */
     suspend fun initialize(cfg: GeminiApiConfig) = withContext(Dispatchers.IO) {

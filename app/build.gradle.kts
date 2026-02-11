@@ -41,8 +41,18 @@ android {
         buildConfigField("Integer", "KV_CACHE_SIZE", "4096")
         buildConfigField("Integer", "MAX_BATCH_SIZE", "1")
 
-        // Maps API Key - will be replaced at build time
+        // API Keys - will be replaced at build time from local.properties
         manifestPlaceholders["MAPS_API_KEY"] = project.findProperty("MAPS_API_KEY") ?: "PLACEHOLDER_MAPS_API_KEY"
+        
+        // Secure API key configuration
+        buildConfigField("String", "GEMINI_API_KEY", "\"${project.findProperty("GEMINI_API_KEY") ?: ""}\"")
+        buildConfigField("String", "OPENAI_API_KEY", "\"${project.findProperty("OPENAI_API_KEY") ?: ""}\"")
+        buildConfigField("String", "SPEECH_API_KEY", "\"${project.findProperty("SPEECH_API_KEY") ?: ""}\"")
+        
+        // Security configuration
+        buildConfigField("Boolean", "ENABLE_API_KEY_VALIDATION", "true")
+        buildConfigField("Boolean", "ENABLE_CERTIFICATE_PINNING", "true")
+        buildConfigField("Boolean", "ENABLE_MODEL_CHECKSUM_VALIDATION", "false")
     }
 
     buildTypes {
@@ -228,6 +238,12 @@ dependencies {
 
 // DataStore
     implementation(libs.androidx.datastore.preferences)
+
+// Database Encryption
+    implementation(libs.sqlcipher.android)
+
+// Security
+    implementation(libs.androidx.security.crypto)
 
 // Splash Screen
     implementation(libs.androidx.core.splashscreen)

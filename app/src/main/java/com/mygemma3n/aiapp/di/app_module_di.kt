@@ -48,6 +48,7 @@ import com.mygemma3n.aiapp.feature.quiz.QuizDatabase
 import com.mygemma3n.aiapp.feature.quiz.QuizRepository
 import com.mygemma3n.aiapp.feature.story.StoryRepository
 import com.mygemma3n.aiapp.feature.story.OnlineStoryGenerator
+import com.mygemma3n.aiapp.feature.voice.VoiceCommandManager
 import com.mygemma3n.aiapp.feature.story.StoryImageGenerator
 import com.mygemma3n.aiapp.feature.story.StoryDao
 import com.mygemma3n.aiapp.feature.story.StoryReadingSessionDao
@@ -69,6 +70,13 @@ import com.mygemma3n.aiapp.feature.tutor.TutorPromptManager
 import com.mygemma3n.aiapp.remote.EmergencyDatabase
 import com.mygemma3n.aiapp.remote.TutorDatabase
 import com.mygemma3n.aiapp.shared_utilities.*
+import com.mygemma3n.aiapp.security.SecureApiKeyManager
+import com.mygemma3n.aiapp.security.SecureNetworkManager
+import com.mygemma3n.aiapp.security.SecureDatabaseHelper
+import com.mygemma3n.aiapp.security.SecureDataStoreManager
+import com.mygemma3n.aiapp.security.InputValidationUtils
+import com.mygemma3n.aiapp.security.ModelIntegrityVerifier
+import com.mygemma3n.aiapp.security.SettingsMigrationHelper
 import com.google.firebase.Firebase
 import com.google.firebase.analytics.FirebaseAnalytics
 import com.google.firebase.analytics.analytics
@@ -101,15 +109,55 @@ object AppModule {
     @Provides
     @Singleton
     fun provideFirebaseAnalytics(): FirebaseAnalytics = Firebase.analytics
+    
+    @Provides
+    @Singleton
+    fun provideSecureApiKeyManager(
+        @ApplicationContext context: Context
+    ): SecureApiKeyManager = SecureApiKeyManager(context)
+    
+    @Provides
+    @Singleton
+    fun provideSecureNetworkManager(): SecureNetworkManager = SecureNetworkManager()
+    
+    @Provides
+    @Singleton
+    fun provideSecureDatabaseHelper(
+        @ApplicationContext context: Context
+    ): SecureDatabaseHelper = SecureDatabaseHelper(context)
+    
+    @Provides
+    @Singleton
+    fun provideSecureDataStoreManager(
+        @ApplicationContext context: Context
+    ): SecureDataStoreManager = SecureDataStoreManager(context)
+    
+    @Provides
+    @Singleton
+    fun provideInputValidationUtils(): InputValidationUtils = InputValidationUtils()
+    
+    @Provides
+    @Singleton
+    fun provideModelIntegrityVerifier(
+        @ApplicationContext context: Context
+    ): ModelIntegrityVerifier = ModelIntegrityVerifier(context)
+    
+    @Provides
+    @Singleton
+    fun provideSettingsMigrationHelper(
+        @ApplicationContext context: Context,
+        secureDataStoreManager: SecureDataStoreManager,
+        inputValidator: InputValidationUtils
+    ): SettingsMigrationHelper = SettingsMigrationHelper(context, secureDataStoreManager, inputValidator)
 
     // Databases
     @Provides
     @Singleton
     fun provideAppDatabase(
-        @ApplicationContext context: Context
+        @ApplicationContext context: Context,
+        secureDatabaseHelper: SecureDatabaseHelper
     ): AppDatabase {
-        return Room.databaseBuilder(
-            context,
+        return secureDatabaseHelper.createEncryptedDatabase(
             AppDatabase::class.java,
             "vector_database"
         ).fallbackToDestructiveMigration() // Allow migration for token tracking feature
@@ -129,6 +177,10 @@ object AppModule {
         masteryDao,
         interactionDao
     )
+
+    @Provides
+    @Singleton
+    fun provideVoiceCommandManager(): VoiceCommandManager = VoiceCommandManager()
 
 
     @Provides
@@ -339,8 +391,10 @@ object AppModule {
     @Singleton
     fun provideGeminiApiService(
         @ApplicationContext context: Context,
-        tokenUsageRepositoryProvider: javax.inject.Provider<TokenUsageRepository>
-    ): GeminiApiService = GeminiApiService(context, tokenUsageRepositoryProvider)
+        tokenUsageRepositoryProvider: javax.inject.Provider<TokenUsageRepository>,
+        secureNetworkManager: SecureNetworkManager,
+        secureApiKeyManager: SecureApiKeyManager
+    ): GeminiApiService = GeminiApiService(context, tokenUsageRepositoryProvider, secureNetworkManager, secureApiKeyManager)
 
     @Provides
     @Singleton

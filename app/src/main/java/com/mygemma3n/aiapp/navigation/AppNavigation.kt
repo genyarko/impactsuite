@@ -18,6 +18,17 @@ import com.mygemma3n.aiapp.TokenUsageRepositoryEntryPoint
 import dagger.hilt.android.EntryPointAccessors
 import com.mygemma3n.aiapp.ui.screens.HomeScreen
 import com.mygemma3n.aiapp.ui.screens.UnifiedChatScreen
+import com.mygemma3n.aiapp.feature.voice.VoiceCommandFloatingButton
+import com.mygemma3n.aiapp.feature.voice.VoiceCommandStatusOverlay
+import com.mygemma3n.aiapp.feature.voice.VoiceCommandHelpDialog
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.mygemma3n.aiapp.feature.voice.VoiceCommandViewModel
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Scaffold
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.Alignment
 
 // Safe imports - these will be conditionally used
 // Import your screens here but wrap their usage in safe composable wrappers
@@ -34,224 +45,6 @@ private fun SafeScreen(
     // In a real implementation, you might check build variants or feature flags here
     // For now, we'll assume all screens exist but this provides the structure for fallbacks
     screenContent()
-}
-
-/**
- * Main navigation component for the Gemma3n app.
- * Contains all navigation routes and screen destinations with fallbacks for offline versions.
- */
-@Composable
-fun AppNavigation(
-    navController: NavHostController,
-    geminiApiService: GeminiApiService,
-    unifiedGemmaService: UnifiedGemmaService,
-    modifier: Modifier = Modifier
-) {
-    NavHost(
-        navController = navController,
-        startDestination = "unified_chat",
-        modifier = modifier
-    ) {
-        // ───── Unified Chat (Default) ─────────────────────────────────────────
-        composable("unified_chat") {
-            UnifiedChatScreen(navController)
-        }
-
-        // ───── Home & tools ─────────────────────────────────────────────────
-        composable("home") {
-            HomeScreen(navController, unifiedGemmaService)
-        }
-
-        composable("live_caption") {
-            SafeScreen(navController, unifiedGemmaService) {
-                // Check if LiveCaptionScreen is available
-                if (isFeatureAvailable("live_caption")) {
-                    com.mygemma3n.aiapp.feature.caption.LiveCaptionScreen()
-                } else {
-                    UnifiedChatScreen(navController)
-                }
-            }
-        }
-
-        composable("quiz_generator") {
-            SafeScreen(navController, unifiedGemmaService) {
-                if (isFeatureAvailable("quiz_generator")) {
-                    com.mygemma3n.aiapp.feature.quiz.QuizScreen(
-                        onNavigateBack = { navController.popBackStack() }
-                    )
-                } else {
-                    UnifiedChatScreen(navController)
-                }
-            }
-        }
-
-        composable("cbt_coach") {
-            SafeScreen(navController, unifiedGemmaService) {
-                if (isFeatureAvailable("cbt_coach")) {
-                    com.mygemma3n.aiapp.feature.cbt.CBTCoachScreen()
-                } else {
-                    UnifiedChatScreen(navController)
-                }
-            }
-        }
-
-        composable("summarizer") {
-            SafeScreen(navController, unifiedGemmaService) {
-                if (isFeatureAvailable("summarizer")) {
-                    com.mygemma3n.aiapp.feature.summarizer.SummarizerScreen(
-                        onNavigateToQuiz = { navController.navigate("quiz_generator") }
-                    )
-                } else {
-                    UnifiedChatScreen(navController)
-                }
-            }
-        }
-
-        // ───── Chat system ──────────────────────────────────────────────────
-        composable("chat_list") {
-            SafeScreen(navController, unifiedGemmaService) {
-                if (isFeatureAvailable("chat_list")) {
-                    com.mygemma3n.aiapp.feature.chat.ChatListScreen(
-                        onNavigateToChat = { id ->
-                            navController.navigate("chat/$id")
-                        }
-                    )
-                } else {
-                    UnifiedChatScreen(navController)
-                }
-            }
-        }
-
-        composable(
-            route = "chat/{sessionId}",
-            arguments = listOf(navArgument("sessionId") { type = NavType.StringType })
-        ) {
-            SafeScreen(navController, unifiedGemmaService) {
-                if (isFeatureAvailable("chat_session")) {
-                    com.mygemma3n.aiapp.feature.chat.ChatScreen(
-                        onNavigateToQuiz = { navController.navigate("quiz_generator") }
-                    )
-                } else {
-                    UnifiedChatScreen(navController)
-                }
-            }
-        }
-
-        // ───── Other screens ─────────────────────────────────────────────────
-        composable("plant_scanner") {
-            SafeScreen(navController, unifiedGemmaService) {
-                if (isFeatureAvailable("plant_scanner")) {
-                    com.mygemma3n.aiapp.feature.plant.PlantScannerScreen(
-                        onNavigateToQuiz = {
-                            navController.navigate("quiz_generator")
-                        }
-                    )
-                } else {
-                    UnifiedChatScreen(navController)
-                }
-            }
-        }
-
-        composable("crisis_handbook") {
-            SafeScreen(navController, unifiedGemmaService) {
-                if (isFeatureAvailable("crisis_handbook")) {
-                    com.mygemma3n.aiapp.feature.crisis.CrisisHandbookScreen(
-                        onNavigateBack = { navController.popBackStack() }
-                    )
-                } else {
-                    UnifiedChatScreen(navController)
-                }
-            }
-        }
-
-        composable("settings") {
-            SafeScreen(navController, unifiedGemmaService) {
-                if (isFeatureAvailable("settings")) {
-                    com.mygemma3n.aiapp.ui.settings.QuizSettingsScreen(
-                        onNavigateBack = { navController.popBackStack() }
-                    )
-                } else {
-                    HomeScreen(navController, unifiedGemmaService)
-                }
-            }
-        }
-
-        composable("tutor") {
-            SafeScreen(navController, unifiedGemmaService) {
-                if (isFeatureAvailable("tutor")) {
-                    com.mygemma3n.aiapp.feature.tutor.TutorScreen(
-                        onNavigateBack = { navController.popBackStack() },
-                        onNavigateToChatList = { navController.navigate("chat_list") },
-                        onNavigateToQuiz = { navController.navigate("quiz_generator") }
-                    )
-                } else {
-                    UnifiedChatScreen(navController)
-                }
-            }
-        }
-
-        composable("analytics") {
-            SafeScreen(navController, unifiedGemmaService) {
-                if (isFeatureAvailable("analytics")) {
-                    com.mygemma3n.aiapp.feature.analytics.AnalyticsDashboardScreen(
-                        onNavigateBack = { navController.popBackStack() }
-                    )
-                } else {
-                    HomeScreen(navController, unifiedGemmaService)
-                }
-            }
-        }
-
-        composable("story_mode") {
-            com.mygemma3n.aiapp.feature.story.StoryScreen()
-        }
-
-        composable("api_settings") {
-            SafeScreen(navController, unifiedGemmaService) {
-                if (isFeatureAvailable("api_settings")) {
-                    val context = LocalContext.current
-
-                    // Safe dependency injection - only proceed if we can get required services
-                    val speechService = remember {
-                        try {
-                            EntryPointAccessors.fromApplication(
-                                context.applicationContext,
-                                SpeechRecognitionServiceEntryPoint::class.java
-                            ).speechRecognitionService()
-                        } catch (e: Exception) {
-                            null
-                        }
-                    }
-
-                    val tokenUsageRepository = remember {
-                        try {
-                            EntryPointAccessors.fromApplication(
-                                context.applicationContext,
-                                TokenUsageRepositoryEntryPoint::class.java
-                            ).tokenUsageRepository()
-                        } catch (e: Exception) {
-                            null
-                        }
-                    }
-
-                    // Only show ApiSettingsScreen if we have all required dependencies
-                    if (speechService != null && tokenUsageRepository != null) {
-                        com.mygemma3n.aiapp.ui.settings.ApiSettingsScreen(
-                            geminiApiService = geminiApiService,
-                            speechService = speechService,
-                            tokenUsageRepository = tokenUsageRepository,
-                            onNavigateBack = { navController.popBackStack() }
-                        )
-                    } else {
-                        // Fallback to HomeScreen if dependencies are missing
-                        HomeScreen(navController, unifiedGemmaService)
-                    }
-                } else {
-                    HomeScreen(navController, unifiedGemmaService)
-                }
-            }
-        }
-    }
 }
 
 /**
@@ -300,6 +93,262 @@ private fun isFeatureAvailable(featureName: String): Boolean {
 }
 
 /**
+ * Main navigation component for the Gemma3n app.
+ * Contains all navigation routes and screen destinations with fallbacks for offline versions.
+ */
+@Composable
+fun AppNavigation(
+    navController: NavHostController,
+    geminiApiService: GeminiApiService,
+    unifiedGemmaService: UnifiedGemmaService,
+    modifier: Modifier = Modifier
+) {
+    // Voice command integration
+    val voiceCommandViewModel: VoiceCommandViewModel = hiltViewModel()
+
+    // Set up navigation controller for voice commands
+    LaunchedEffect(navController) {
+        voiceCommandViewModel.setNavController(navController)
+    }
+
+    // Wrap everything in a Scaffold with voice command overlay
+    Scaffold(
+        modifier = modifier.fillMaxSize()
+        // Removed floating action button - voice commands now work automatically in background
+    ) { paddingValues ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+        ) {
+            // Main navigation content
+            NavHost(
+                navController = navController,
+                startDestination = "unified_chat",
+                modifier = Modifier.fillMaxSize()
+            ) {
+                // ───── Unified Chat (Default) ─────────────────────────────────────────
+                composable("unified_chat") {
+                    UnifiedChatScreen(navController)
+                }
+
+                // ───── Home & tools ─────────────────────────────────────────────────
+                composable("home") {
+                    HomeScreen(navController, unifiedGemmaService)
+                }
+
+                composable("live_caption") {
+                    SafeScreen(navController, unifiedGemmaService) {
+                        // Check if LiveCaptionScreen is available
+                        if (isFeatureAvailable("live_caption")) {
+                            com.mygemma3n.aiapp.feature.caption.LiveCaptionScreen()
+                        } else {
+                            UnifiedChatScreen(navController)
+                        }
+                    }
+                }
+
+                composable("quiz_generator") {
+                    // Update voice command manager with current route
+                    LaunchedEffect(Unit) {
+                        voiceCommandViewModel.setCurrentRoute("quiz_generator")
+                    }
+                    
+                    SafeScreen(navController, unifiedGemmaService) {
+                        if (isFeatureAvailable("quiz_generator")) {
+                            com.mygemma3n.aiapp.feature.quiz.QuizScreen(
+                                onNavigateBack = { navController.popBackStack() }
+                            )
+                        } else {
+                            UnifiedChatScreen(navController)
+                        }
+                    }
+                }
+
+                composable("cbt_coach") {
+                    SafeScreen(navController, unifiedGemmaService) {
+                        if (isFeatureAvailable("cbt_coach")) {
+                            com.mygemma3n.aiapp.feature.cbt.CBTCoachScreen()
+                        } else {
+                            UnifiedChatScreen(navController)
+                        }
+                    }
+                }
+
+                composable("summarizer") {
+                    SafeScreen(navController, unifiedGemmaService) {
+                        if (isFeatureAvailable("summarizer")) {
+                            com.mygemma3n.aiapp.feature.summarizer.SummarizerScreen(
+                                onNavigateToQuiz = { navController.navigate("quiz_generator") }
+                            )
+                        } else {
+                            UnifiedChatScreen(navController)
+                        }
+                    }
+                }
+
+                // ───── Chat system ──────────────────────────────────────────────────
+                composable("chat_list") {
+                    SafeScreen(navController, unifiedGemmaService) {
+                        if (isFeatureAvailable("chat_list")) {
+                            com.mygemma3n.aiapp.feature.chat.ChatListScreen(
+                                onNavigateToChat = { id ->
+                                    navController.navigate("chat/$id")
+                                }
+                            )
+                        } else {
+                            UnifiedChatScreen(navController)
+                        }
+                    }
+                }
+
+                composable(
+                    route = "chat/{sessionId}",
+                    arguments = listOf(navArgument("sessionId") { type = NavType.StringType })
+                ) {
+                    SafeScreen(navController, unifiedGemmaService) {
+                        if (isFeatureAvailable("chat_session")) {
+                            com.mygemma3n.aiapp.feature.chat.ChatScreen(
+                                onNavigateToQuiz = { navController.navigate("quiz_generator") }
+                            )
+                        } else {
+                            UnifiedChatScreen(navController)
+                        }
+                    }
+                }
+
+                // ───── Other screens ─────────────────────────────────────────────────
+                composable("plant_scanner") {
+                    // Update voice command manager with current route
+                    LaunchedEffect(Unit) {
+                        voiceCommandViewModel.setCurrentRoute("plant_scanner")
+                    }
+                    
+                    SafeScreen(navController, unifiedGemmaService) {
+                        if (isFeatureAvailable("plant_scanner")) {
+                            com.mygemma3n.aiapp.feature.plant.PlantScannerScreen(
+                                onNavigateToQuiz = {
+                                    navController.navigate("quiz_generator")
+                                }
+                            )
+                        } else {
+                            UnifiedChatScreen(navController)
+                        }
+                    }
+                }
+
+                composable("crisis_handbook") {
+                    SafeScreen(navController, unifiedGemmaService) {
+                        if (isFeatureAvailable("crisis_handbook")) {
+                            com.mygemma3n.aiapp.feature.crisis.CrisisHandbookScreen(
+                                onNavigateBack = { navController.popBackStack() }
+                            )
+                        } else {
+                            UnifiedChatScreen(navController)
+                        }
+                    }
+                }
+
+                composable("settings") {
+                    SafeScreen(navController, unifiedGemmaService) {
+                        if (isFeatureAvailable("settings")) {
+                            com.mygemma3n.aiapp.ui.settings.QuizSettingsScreen(
+                                onNavigateBack = { navController.popBackStack() }
+                            )
+                        } else {
+                            HomeScreen(navController, unifiedGemmaService)
+                        }
+                    }
+                }
+
+                composable("tutor") {
+                    SafeScreen(navController, unifiedGemmaService) {
+                        if (isFeatureAvailable("tutor")) {
+                            com.mygemma3n.aiapp.feature.tutor.TutorScreen(
+                                onNavigateBack = { navController.popBackStack() },
+                                onNavigateToChatList = { navController.navigate("chat_list") },
+                                onNavigateToQuiz = { navController.navigate("quiz_generator") }
+                            )
+                        } else {
+                            UnifiedChatScreen(navController)
+                        }
+                    }
+                }
+
+                composable("analytics") {
+                    SafeScreen(navController, unifiedGemmaService) {
+                        if (isFeatureAvailable("analytics")) {
+                            com.mygemma3n.aiapp.feature.analytics.AnalyticsDashboardScreen(
+                                onNavigateBack = { navController.popBackStack() }
+                            )
+                        } else {
+                            HomeScreen(navController, unifiedGemmaService)
+                        }
+                    }
+                }
+
+                composable("story_mode") {
+                    com.mygemma3n.aiapp.feature.story.StoryScreen()
+                }
+
+                composable("api_settings") {
+                    SafeScreen(navController, unifiedGemmaService) {
+                        if (isFeatureAvailable("api_settings")) {
+                            val context = LocalContext.current
+
+                            // Safe dependency injection - only proceed if we can get required services
+                            val speechService = remember {
+                                try {
+                                    EntryPointAccessors.fromApplication(
+                                        context.applicationContext,
+                                        SpeechRecognitionServiceEntryPoint::class.java
+                                    ).speechRecognitionService()
+                                } catch (e: Exception) {
+                                    null
+                                }
+                            }
+
+                            val tokenUsageRepository = remember {
+                                try {
+                                    EntryPointAccessors.fromApplication(
+                                        context.applicationContext,
+                                        TokenUsageRepositoryEntryPoint::class.java
+                                    ).tokenUsageRepository()
+                                } catch (e: Exception) {
+                                    null
+                                }
+                            }
+
+                            // Only show ApiSettingsScreen if we have all required dependencies
+                            if (speechService != null && tokenUsageRepository != null) {
+                                com.mygemma3n.aiapp.ui.settings.ApiSettingsScreen(
+                                    geminiApiService = geminiApiService,
+                                    speechService = speechService,
+                                    tokenUsageRepository = tokenUsageRepository,
+                                    onNavigateBack = { navController.popBackStack() }
+                                )
+                            } else {
+                                // Fallback to HomeScreen if dependencies are missing
+                                HomeScreen(navController, unifiedGemmaService)
+                            }
+                        } else {
+                            HomeScreen(navController, unifiedGemmaService)
+                        }
+                    }
+                }
+            } // End NavHost
+            
+            // Voice command overlays positioned at bottom
+            VoiceCommandStatusOverlay(
+                viewModel = voiceCommandViewModel,
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
+            VoiceCommandHelpDialog(viewModel = voiceCommandViewModel)
+        }
+    }
+}
+
+/**
  * Navigation routes as constants for type safety
  */
 object AppRoutes {
@@ -318,7 +367,7 @@ object AppRoutes {
     const val ANALYTICS = "analytics"
     const val STORY_MODE = "story_mode"
     const val API_SETTINGS = "api_settings"
-
+    
     /**
      * Helper function to create chat session route with ID
      */
