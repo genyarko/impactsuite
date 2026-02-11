@@ -144,7 +144,7 @@ class SummarizerController extends StateNotifier<SummarizerState> {
       final archive = ZipDecoder().decodeBytes(bytes);
       final docFile = archive.findFile('word/document.xml');
       if (docFile == null) {
-        throw const UnsupportedError('Invalid DOCX file: document.xml was not found.');
+        throw UnsupportedError('Invalid DOCX file: document.xml was not found.');
       }
       final xmlContent = utf8.decode(docFile.content as List<int>, allowMalformed: true);
       final plainText = xmlContent
@@ -152,18 +152,18 @@ class SummarizerController extends StateNotifier<SummarizerState> {
           .replaceAll(RegExp(r'\s+'), ' ')
           .trim();
       if (plainText.isEmpty) {
-        throw const UnsupportedError('This DOCX file does not contain extractable text.');
+        throw UnsupportedError('This DOCX file does not contain extractable text.');
       }
       return plainText;
     }
 
     if (name.endsWith('.pdf')) {
-      throw const UnsupportedError(
+      throw UnsupportedError(
         'PDF extraction is limited in Flutter right now. Please paste text instead.',
       );
     }
 
-    throw const UnsupportedError('Unsupported file type. Please use TXT or DOCX.');
+    throw UnsupportedError('Unsupported file type. Please use TXT or DOCX.');
   }
 
   String _buildSummaryPrompt(String text) {
