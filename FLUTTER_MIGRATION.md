@@ -33,3 +33,10 @@ flutter run
   `flutter_app/lib/src/data/local/preferences/quiz_preferences_store.dart`.
 - ⏭️ Isar is reserved for object-heavy / offline index use-cases (for example local vector payloads)
   and will be added as those features are ported.
+
+## AI services migration status
+
+- ✅ Added Dart AI repository abstractions (`AiRepository`) and request/result models.
+- ✅ Added platform-channel bridge (`impactsuite/ai/methods` and `impactsuite/ai/stream`) for Gemini/Gemma text generation.
+- ✅ Added `GeminiRepository`, `GemmaRepository`, and `UnifiedAiRepository` with fallback behavior.
+- ⏭️ Next: implement matching `MethodChannel` / `EventChannel` handlers in Android `MainActivity` and route Tutor/Chat pages through `UnifiedAiRepository`.
