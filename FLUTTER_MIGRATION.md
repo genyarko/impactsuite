@@ -70,6 +70,17 @@ Status for the three priority items requested in this migration phase:
 - ✅ Implemented matching `MethodChannel` / `EventChannel` handlers in Android `MainActivity` and routed Tutor/Chat pages through `UnifiedAiRepository`.
 
 
+## UI parity migration status
+
+- ✅ Began Compose ➜ Flutter UI parity with the **Settings** feature.
+- ✅ Replaced Flutter `SettingsPage` placeholder with a functional settings screen wired to
+  SharedPreferences-backed stores (`QuizPreferencesStore` and `AppSettingsStore`).
+- ✅ Ported core settings groups from Kotlin into Flutter widgets:
+  - AI configuration (Gemini API key + on-device preference),
+  - Display & accessibility controls,
+  - Quiz behavior controls (hints, auto-advance, explanations, time limit).
+- ✅ Added widget test coverage for the new Flutter settings screen.
+
 ## Merge verification
 
 - ✅ Verified prior data-layer and AI-layer migration files are present in `HEAD` (`git log --oneline -n 5` + file checks).
