@@ -40,6 +40,7 @@ import com.mygemma3n.aiapp.service.CostCalculationService
 import java.text.NumberFormat
 import java.util.*
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -56,6 +57,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+import kotlinx.coroutines.Job
 
 // ───── Preference keys ──────────────────────────────────────────────────────
 val MAPS_API_KEY   = stringPreferencesKey("google_maps_api_key")
@@ -76,6 +82,11 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var costCalculationService: CostCalculationService
     @Inject lateinit var spendingLimitService: com.mygemma3n.aiapp.service.SpendingLimitService
     @Inject lateinit var databaseCleanupService: com.mygemma3n.aiapp.service.DatabaseCleanupService
+
+
+    private lateinit var flutterBridgeEngine: FlutterEngine
+    private var aiStreamSink: EventChannel.EventSink? = null
+    private var aiStreamingJob: Job? = null
 
     // Function to manually re-initialize speech service if needed
     fun reinitializeSpeechService() {
@@ -107,6 +118,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+
+        setupFlutterAiChannels()
 
         // Start initialization process
         lifecycleScope.launch {
@@ -318,6 +331,140 @@ class MainActivity : ComponentActivity() {
             Timber.e(e, "Failed to initialize Gemma model")
             throw e
         }
+    }
+
+
+
+    private fun setupFlutterAiChannels() {
+        flutterBridgeEngine = FlutterEngine(this)
+
+        MethodChannel(
+            flutterBridgeEngine.dartExecutor.binaryMessenger,
+            "impactsuite/ai/methods"
+        ).setMethodCallHandler { call, result ->
+            handleAiMethodCall(call, result)
+        }
+
+        EventChannel(
+            flutterBridgeEngine.dartExecutor.binaryMessenger,
+            "impactsuite/ai/stream"
+        ).setStreamHandler(
+            object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    aiStreamSink = events
+                    startAiStream(arguments)
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    aiStreamingJob?.cancel()
+                    aiStreamingJob = null
+                    aiStreamSink = null
+                }
+            }
+        )
+    }
+
+    private fun handleAiMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        when (call.method) {
+            "initializeGemini" -> {
+                val apiKey = call.argument<String>("apiKey").orEmpty()
+                val model = call.argument<String>("model") ?: GeminiApiService.GEMINI_FLASH_MODEL
+                val temperature = (call.argument<Double>("temperature") ?: 0.7).toFloat()
+                val topK = call.argument<Int>("topK") ?: 40
+                val topP = (call.argument<Double>("topP") ?: 0.95).toFloat()
+                val maxTokens = call.argument<Int>("maxOutputTokens") ?: 1024
+
+                lifecycleScope.launch {
+                    try {
+                        geminiApiService.initialize(
+                            GeminiApiConfig(
+                                apiKey = apiKey,
+                                modelName = model,
+                                temperature = temperature,
+                                topK = topK,
+                                topP = topP,
+                                maxOutputTokens = maxTokens
+                            )
+                        )
+                        result.success(null)
+                    } catch (e: Exception) {
+                        result.error("GEMINI_INIT_FAILED", e.message, null)
+                    }
+                }
+            }
+
+            "generateGeminiText" -> {
+                val prompt = call.argument<String>("prompt").orEmpty()
+                lifecycleScope.launch {
+                    try {
+                        val text = geminiApiService.generateTextComplete(prompt, serviceType = "flutter_chat")
+                        result.success(text)
+                    } catch (e: Exception) {
+                        result.error("GEMINI_GENERATE_FAILED", e.message, null)
+                    }
+                }
+            }
+
+            "generateGemmaText" -> {
+                val prompt = call.argument<String>("prompt").orEmpty()
+                val model = call.argument<String>("model")
+                lifecycleScope.launch {
+                    try {
+                        if (!unifiedGemmaService.isInitialized()) {
+                            val variant = if (model?.contains("4b", ignoreCase = true) == true) {
+                                UnifiedGemmaService.ModelVariant.QUALITY_4B
+                            } else {
+                                UnifiedGemmaService.ModelVariant.FAST_2B
+                            }
+                            unifiedGemmaService.initialize(variant)
+                        }
+
+                        val text = unifiedGemmaService.generateTextAsync(prompt)
+                        result.success(text)
+                    } catch (e: Exception) {
+                        result.error("GEMMA_GENERATE_FAILED", e.message, null)
+                    }
+                }
+            }
+
+            else -> result.notImplemented()
+        }
+    }
+
+    private fun startAiStream(arguments: Any?) {
+        aiStreamingJob?.cancel()
+
+        val payload = arguments as? Map<*, *> ?: return
+        val provider = payload["provider"]?.toString().orEmpty()
+        val prompt = payload["prompt"]?.toString().orEmpty()
+
+        aiStreamingJob = lifecycleScope.launch {
+            try {
+                if (provider == "gemini") {
+                    geminiApiService.streamText(prompt).collect { chunk ->
+                        aiStreamSink?.success(chunk)
+                    }
+                } else {
+                    if (!unifiedGemmaService.isInitialized()) {
+                        unifiedGemmaService.initializeBestAvailable()
+                    }
+                    unifiedGemmaService.generateText(prompt).collect { chunk ->
+                        aiStreamSink?.success(chunk)
+                    }
+                }
+                aiStreamSink?.endOfStream()
+            } catch (e: Exception) {
+                aiStreamSink?.error("AI_STREAM_FAILED", e.message, null)
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        aiStreamingJob?.cancel()
+        if (this::flutterBridgeEngine.isInitialized) {
+            flutterBridgeEngine.destroy()
+        }
+        super.onDestroy()
     }
 
     private fun updateInitState(status: String, progress: Float? = null) {

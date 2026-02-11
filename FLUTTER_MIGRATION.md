@@ -24,3 +24,25 @@ flutter run
 3. **AI services**: encapsulate Gemma/Gemini calls in Dart repositories with platform channels for on-device inference.
 4. **UI parity**: port one feature at a time from Compose screens into Flutter widgets.
 5. **Validation**: keep Kotlin and Flutter outputs side-by-side until each feature reaches parity.
+
+## Data layer migration status
+
+- ✅ Room `chat_sessions` + `chat_messages` schema now has a Flutter-side Drift store in
+  `flutter_app/lib/src/data/local/drift/chat_drift_store.dart`.
+- ✅ DataStore-backed quiz settings now has a SharedPreferences-backed Flutter store in
+  `flutter_app/lib/src/data/local/preferences/quiz_preferences_store.dart`.
+- ⏭️ Isar is reserved for object-heavy / offline index use-cases (for example local vector payloads)
+  and will be added as those features are ported.
+
+
+## AI services migration status
+
+- ✅ Added Dart AI repository abstractions (`AiRepository`) and request/result models.
+- ✅ Added platform-channel bridge (`impactsuite/ai/methods` and `impactsuite/ai/stream`) for Gemini/Gemma text generation.
+- ✅ Added `GeminiRepository`, `GemmaRepository`, and `UnifiedAiRepository` with fallback behavior.
+- ✅ Implemented matching `MethodChannel` / `EventChannel` handlers in Android `MainActivity` and routed Tutor/Chat pages through `UnifiedAiRepository`.
+
+
+## Merge verification
+
+- ✅ Verified prior data-layer and AI-layer migration files are present in `HEAD` (`git log --oneline -n 5` + file checks).
