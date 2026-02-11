@@ -220,8 +220,8 @@ class ImageClassificationController extends ChangeNotifier {
       final dynamic decoded = jsonDecode(extractedJson);
       if (decoded is Map<String, dynamic>) {
         final confidenceRaw = decoded['confidence'];
-        final confidence = confidenceRaw is num
-            ? confidenceRaw.toDouble().clamp(0, 1)
+        final double confidence = confidenceRaw is num
+            ? confidenceRaw.toDouble().clamp(0.0, 1.0).toDouble()
             : _confidenceFromText(text);
         final actions = (decoded['recommendedActions'] as List<dynamic>?)
                 ?.map((item) => item.toString().trim())
