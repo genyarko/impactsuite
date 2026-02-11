@@ -29,6 +29,13 @@ The AI Tutor feature includes advanced educational capabilities:
 - **Grade-Adaptive Content** – curriculum topics and response complexity adjust to student grade level (K-12)
 - **Smart Navigation** – seamless navigation between subject selection and chat sessions
 
+
+## Flutter Rewrite
+
+A Flutter rewrite scaffold is now available in `flutter_app/` with route-level coverage of the
+major Kotlin features (Tutor, Chat, Quiz, Summarizer, Story, Crisis, Settings). See
+`FLUTTER_MIGRATION.md` for migration guidance and rollout order.
+
 ## Building
 
 ### Prerequisites
