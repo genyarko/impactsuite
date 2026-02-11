@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'features/chat/chat_page.dart';
 import 'features/crisis/crisis_page.dart';
 import 'features/home/home_page.dart';
+import 'features/plant/image_classification_page.dart';
 import 'features/quiz/quiz_page.dart';
 import 'features/settings/settings_page.dart';
 import 'features/story/story_page.dart';
@@ -35,6 +36,7 @@ final _router = GoRouter(
         GoRoute(path: '/tutor', builder: (_, __) => const TutorPage()),
         GoRoute(path: '/chat', builder: (_, __) => const ChatPage()),
         GoRoute(path: '/quiz', builder: (_, __) => const QuizPage()),
+        GoRoute(path: '/plant_scanner', builder: (_, __) => const ImageClassificationPage()),
         GoRoute(path: '/summarizer', builder: (_, __) => const SummarizerPage()),
         GoRoute(path: '/story', builder: (_, __) => const StoryPage()),
         GoRoute(path: '/crisis', builder: (_, __) => const CrisisPage()),
