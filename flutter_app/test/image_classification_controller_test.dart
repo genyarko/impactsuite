@@ -9,7 +9,8 @@ void main() {
   test('parses json classification response', () async {
     final controller = ImageClassificationController(
       repository: _FakeAiRepository(
-        response: '{"label":"Tomato leaf blight","confidence":0.91,"description":"Fungal spots on leaf.","recommendedActions":["Remove affected leaves","Avoid overhead watering"]}',
+        response:
+            '{"label":"Tomato leaf blight","confidence":0.91,"description":"Fungal spots on leaf.","recommendedActions":["Remove affected leaves","Avoid overhead watering"]}',
       ),
     );
 
@@ -21,6 +22,25 @@ void main() {
     expect(state.result!.diagnosis.label, 'Tomato leaf blight');
     expect(state.result!.diagnosis.confidence, 0.91);
     expect(state.result!.recommendedActions, hasLength(2));
+    expect(state.extractedText, isNull);
+  });
+
+  test('extracts OCR text response', () async {
+    final controller = ImageClassificationController(
+      repository: _FakeAiRepository(
+        response: '{"text":"Handwritten title\nline two"}',
+      ),
+    );
+
+    controller.toggleOcrMode();
+    await controller.analyzeImageForOcr(
+      Uint8List.fromList([3, 2, 1]),
+      imageName: 'notes.jpg',
+    );
+
+    expect(controller.state.isOcrMode, isTrue);
+    expect(controller.state.result, isNull);
+    expect(controller.state.extractedText, 'Handwritten title\nline two');
   });
 
   test('falls back when repository throws', () async {

@@ -4,12 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../ai/ai_providers.dart';
 import 'image_classification_controller.dart';
 
-final _imageClassificationControllerProvider = ChangeNotifierProvider.autoDispose<
-    ImageClassificationController>((ref) {
-  return ImageClassificationController(
-    repository: ref.watch(unifiedAiRepositoryProvider),
-  );
-});
+final _imageClassificationControllerProvider =
+    ChangeNotifierProvider.autoDispose<ImageClassificationController>((ref) {
+      return ImageClassificationController(
+        repository: ref.watch(unifiedAiRepositoryProvider),
+      );
+    });
 
 class ImageClassificationPage extends ConsumerWidget {
   const ImageClassificationPage({super.key});
@@ -23,13 +23,28 @@ class ImageClassificationPage extends ConsumerWidget {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Text(
-            'Plant & Image Classification',
-            style: Theme.of(context).textTheme.headlineMedium,
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  state.isOcrMode ? 'OCR Text Scanner' : 'Plant & Image Classification',
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
+              ),
+              IconButton(
+                tooltip: state.isOcrMode ? 'Switch to classification' : 'Switch to OCR',
+                onPressed: () {
+                  ref.read(_imageClassificationControllerProvider).toggleOcrMode();
+                },
+                icon: Icon(state.isOcrMode ? Icons.grass : Icons.text_fields),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
           Text(
-            'Pick an image to classify plants, food, or household objects. Results include confidence and actionable guidance.',
+            state.isOcrMode
+                ? 'Pick an image to extract printed or handwritten text.'
+                : 'Pick an image to classify plants, food, or household objects. Results include confidence and actionable guidance.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 16),
@@ -41,11 +56,16 @@ class ImageClassificationPage extends ConsumerWidget {
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.photo_camera, color: Theme.of(context).colorScheme.primary),
+                      Icon(
+                        state.isOcrMode ? Icons.text_fields : Icons.photo_camera,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
                       const SizedBox(width: 8),
-                      Text(
-                        state.selectedImageName ?? 'No image selected',
-                        style: Theme.of(context).textTheme.titleMedium,
+                      Expanded(
+                        child: Text(
+                          state.selectedImageName ?? 'No image selected',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
                       ),
                     ],
                   ),
@@ -54,9 +74,7 @@ class ImageClassificationPage extends ConsumerWidget {
                     onPressed: state.isLoading
                         ? null
                         : () {
-                            ref
-                                .read(_imageClassificationControllerProvider)
-                                .pickAndAnalyzeImage();
+                            ref.read(_imageClassificationControllerProvider).pickAndAnalyzeImage();
                           },
                     icon: state.isLoading
                         ? const SizedBox(
@@ -65,7 +83,13 @@ class ImageClassificationPage extends ConsumerWidget {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.search),
-                    label: Text(state.isLoading ? 'Analyzing...' : 'Select image and classify'),
+                    label: Text(
+                      state.isLoading
+                          ? 'Analyzing...'
+                          : state.isOcrMode
+                              ? 'Select image and extract text'
+                              : 'Select image and classify',
+                    ),
                   ),
                 ],
               ),
@@ -87,7 +111,11 @@ class ImageClassificationPage extends ConsumerWidget {
               ),
             ),
           ],
-          if (state.result != null) ...[
+          if (state.isOcrMode && state.extractedText != null) ...[
+            const SizedBox(height: 12),
+            _OcrResultCard(text: state.extractedText!),
+          ],
+          if (!state.isOcrMode && state.result != null) ...[
             const SizedBox(height: 12),
             _ResultCard(result: state.result!),
           ],
@@ -151,6 +179,35 @@ class _ResultCard extends StatelessWidget {
                   ],
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OcrResultCard extends StatelessWidget {
+  const _OcrResultCard({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.text_fields, color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 8),
+                Text('Extracted Text', style: Theme.of(context).textTheme.titleMedium),
+              ],
+            ),
+            const SizedBox(height: 10),
+            SelectableText(text),
           ],
         ),
       ),
