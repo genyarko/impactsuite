@@ -256,6 +256,6 @@ const _featureItems = <HomeFeatureItem>[
     enabled: true,
   ),
   HomeFeatureItem(title: 'Crisis Handbook', route: '/crisis', icon: Icons.local_hospital, enabled: true),
-  HomeFeatureItem(title: 'Learning Analytics', route: '/analytics', icon: Icons.analytics, enabled: false),
+  HomeFeatureItem(title: 'Learning Analytics', route: '/analytics', icon: Icons.analytics, enabled: true),
   HomeFeatureItem(title: 'Story Mode', route: '/story', icon: Icons.menu_book, enabled: true),
 ];
