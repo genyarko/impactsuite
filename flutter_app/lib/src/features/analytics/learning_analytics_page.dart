@@ -627,7 +627,7 @@ QuizAnalytics _demoAnalytics() {
     questionsToday: 14,
     currentStreak: 9,
     longestStreak: 21,
-    subjectPerformance: const {
+    subjectPerformance: {
       Subject.mathematics: SubjectAnalytics(
         accuracy: 0.84,
         questionsAnswered: 124,
@@ -650,7 +650,7 @@ QuizAnalytics _demoAnalytics() {
         topicBreakdown: {'ancient': 0.62, 'modern': 0.67},
       ),
     },
-    frequentlyMissedQuestions: const [
+    frequentlyMissedQuestions: [
       MissedQuestionInfo(
         questionText: 'Which force law best describes how pressure and volume relate in a closed gas system?',
         timesAttempted: 5,
@@ -670,7 +670,7 @@ QuizAnalytics _demoAnalytics() {
         subject: Subject.mathematics,
       ),
     ],
-    topicCoverage: const {
+    topicCoverage: {
       'Thermodynamics': TopicCoverageInfo(
         topicName: 'Thermodynamics',
         totalQuestions: 20,
@@ -712,7 +712,7 @@ QuizAnalytics _demoAnalytics() {
         subjects: const {Subject.mathematics, Subject.science},
       );
     }),
-    conceptMastery: const {
+    conceptMastery: {
       'Linear Equations': ConceptMasteryInfo(
         concept: 'Linear Equations',
         masteryLevel: 0.87,
