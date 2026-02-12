@@ -244,7 +244,7 @@ class HomeFeatureItem {
 
 const _featureItems = <HomeFeatureItem>[
   HomeFeatureItem(title: 'AI Tutor', route: '/tutor', icon: Icons.school, enabled: true),
-  HomeFeatureItem(title: 'Live Caption', route: '/live_caption', icon: Icons.closed_caption, enabled: false),
+  HomeFeatureItem(title: 'Live Caption', route: '/live_caption', icon: Icons.closed_caption, enabled: true),
   HomeFeatureItem(title: 'Quiz Generator', route: '/quiz', icon: Icons.quiz, enabled: true),
   HomeFeatureItem(title: 'CBT Coach', route: '/cbt_coach', icon: Icons.psychology, enabled: false),
   HomeFeatureItem(title: 'Chat', route: '/chat', icon: Icons.chat, enabled: true),
