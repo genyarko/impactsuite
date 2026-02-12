@@ -73,6 +73,7 @@ Status for the three priority items requested in this migration phase:
 ## UI parity migration status
 
 - ✅ Began Compose ➜ Flutter UI parity with the **Settings** feature.
+- ✅ Completed Compose ➜ Flutter UI parity for the **Unified Screen** with command shortcuts, feature menu overlay, and unified chat experience routed as the app entry screen.
 - ✅ Replaced Flutter `SettingsPage` placeholder with a functional settings screen wired to
   SharedPreferences-backed stores (`QuizPreferencesStore` and `AppSettingsStore`).
 - ✅ Ported core settings groups from Kotlin into Flutter widgets:
