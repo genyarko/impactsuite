@@ -23,6 +23,9 @@ class _SettingsPageState extends State<SettingsPage> {
   late final AppSettingsStore _appSettingsStore;
 
   final _geminiApiKeyController = TextEditingController();
+  final _openAiApiKeyController = TextEditingController();
+  final _speechApiKeyController = TextEditingController();
+  final _mapsApiKeyController = TextEditingController();
 
   QuizPreferences _quizPreferences = const QuizPreferences();
   AppSettings _appSettings = const AppSettings();
@@ -42,6 +45,9 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void dispose() {
     _geminiApiKeyController.dispose();
+    _openAiApiKeyController.dispose();
+    _speechApiKeyController.dispose();
+    _mapsApiKeyController.dispose();
     super.dispose();
   }
 
@@ -57,6 +63,9 @@ class _SettingsPageState extends State<SettingsPage> {
       _quizPreferences = loadedQuiz;
       _appSettings = loadedApp;
       _geminiApiKeyController.text = loadedApp.geminiApiKey;
+      _openAiApiKeyController.text = loadedApp.openAiApiKey;
+      _speechApiKeyController.text = loadedApp.googleCloudSpeechApiKey;
+      _mapsApiKeyController.text = loadedApp.googleMapsApiKey;
       _loading = false;
     });
   }
@@ -66,6 +75,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
     final appSettings = _appSettings.copyWith(
       geminiApiKey: _geminiApiKeyController.text.trim(),
+      openAiApiKey: _openAiApiKeyController.text.trim(),
+      googleCloudSpeechApiKey: _speechApiKeyController.text.trim(),
+      googleMapsApiKey: _mapsApiKeyController.text.trim(),
       lastModelSyncEpochMs: DateTime.now().millisecondsSinceEpoch,
     );
 
@@ -116,16 +128,82 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
                 const SizedBox(height: 12),
+                TextField(
+                  controller: _openAiApiKeyController,
+                  decoration: const InputDecoration(
+                    labelText: 'OpenAI API Key',
+                    border: OutlineInputBorder(),
+                    hintText: 'sk-... key for OpenAI online provider',
+                  ),
+                ),
+                const SizedBox(height: 12),
                 SwitchListTile.adaptive(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Prefer on-device model'),
-                  subtitle: const Text('Use Gemma first, fallback to Gemini when needed'),
+                  subtitle: const Text('Use Gemma first, fallback to selected online provider when needed'),
                   value: _appSettings.enableOfflineModel,
                   onChanged: (value) {
                     setState(() {
                       _appSettings = _appSettings.copyWith(enableOfflineModel: value);
                     });
                   },
+                ),
+                if (!_appSettings.enableOfflineModel) ...[
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<OnlineModelProvider>(
+                    value: _appSettings.onlineModelProvider,
+                    decoration: const InputDecoration(
+                      labelText: 'Online AI Provider',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: OnlineModelProvider.values
+                        .map(
+                          (provider) => DropdownMenuItem(
+                            value: provider,
+                            child: Text(_onlineProviderLabel(provider)),
+                          ),
+                        )
+                        .toList(growable: false),
+                    onChanged: (value) {
+                      if (value == null) {
+                        return;
+                      }
+                      setState(() {
+                        _appSettings = _appSettings.copyWith(onlineModelProvider: value);
+                      });
+                    },
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          _SettingsCard(
+            title: 'Google Cloud Integrations',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: _speechApiKeyController,
+                  decoration: const InputDecoration(
+                    labelText: 'Google Cloud Speech API Key',
+                    border: OutlineInputBorder(),
+                    hintText: 'Used by Live Caption, AI Tutor voice, and CBT Coach',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _mapsApiKeyController,
+                  decoration: const InputDecoration(
+                    labelText: 'Google Maps API Key (Optional)',
+                    border: OutlineInputBorder(),
+                    hintText: 'Required for crisis map / nearby services lookup',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Speech integration powers voice-first features and Maps integration powers location-based crisis support.',
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
             ),
@@ -262,6 +340,11 @@ class _SettingsPageState extends State<SettingsPage> {
         TextSize.medium => 'Medium',
         TextSize.large => 'Large',
         TextSize.extraLarge => 'Extra Large',
+      };
+
+  String _onlineProviderLabel(OnlineModelProvider provider) => switch (provider) {
+        OnlineModelProvider.gemini => 'Gemini',
+        OnlineModelProvider.openai => 'OpenAI',
       };
 
   String _timeLimitLabel(QuestionTimeLimit limit) => switch (limit) {

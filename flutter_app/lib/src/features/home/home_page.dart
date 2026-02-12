@@ -40,7 +40,9 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final modelName = _appSettings.enableOfflineModel ? 'Gemma (on-device preferred)' : 'Online AI provider';
+    final modelName = _appSettings.enableOfflineModel
+        ? 'Gemma (on-device preferred)'
+        : 'Online AI (${_appSettings.onlineModelProvider.name})';
 
     return SafeArea(
       child: ListView(

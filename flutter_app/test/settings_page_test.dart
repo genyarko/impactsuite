@@ -25,7 +25,9 @@ void main() {
     expect(find.text('Display & Accessibility'), findsOneWidget);
     expect(find.text('Quiz Behavior'), findsOneWidget);
 
-    await tester.enterText(find.byType(TextField), 'abc123');
+    await tester.enterText(find.byType(TextField).at(0), 'abc123');
+    await tester.enterText(find.byType(TextField).at(2), 'speech123');
+    await tester.enterText(find.byType(TextField).at(3), 'maps123');
     await tester.tap(find.text('Save settings'));
     await tester.pumpAndSettle();
 
@@ -33,6 +35,9 @@ void main() {
 
     final loaded = await appStore.read();
     expect(loaded.geminiApiKey, 'abc123');
+    expect(loaded.googleCloudSpeechApiKey, 'speech123');
+    expect(loaded.googleMapsApiKey, 'maps123');
+    expect(loaded.onlineModelProvider, OnlineModelProvider.gemini);
   });
 }
 
