@@ -14,6 +14,7 @@ import 'features/settings/settings_page.dart';
 import 'features/story/story_page.dart';
 import 'features/summarizer/summarizer_page.dart';
 import 'features/tutor/tutor_page.dart';
+import 'features/unified/unified_screen_page.dart';
 
 class ImpactSuiteApp extends StatelessWidget {
   const ImpactSuiteApp({super.key});
@@ -36,7 +37,8 @@ final _router = GoRouter(
     ShellRoute(
       builder: (context, state, child) => AppScaffold(child: child),
       routes: [
-        GoRoute(path: '/', builder: (_, __) => const HomePage()),
+        GoRoute(path: '/', builder: (_, __) => const UnifiedScreenPage()),
+        GoRoute(path: '/home', builder: (_, __) => const HomePage()),
         GoRoute(path: '/tutor', builder: (_, __) => const TutorPage()),
         GoRoute(path: '/chat', builder: (_, __) => const ChatListPage()),
         GoRoute(path: '/chat/:sessionId', builder: (_, state) => ChatPage(sessionId: state.pathParameters['sessionId']!)),
@@ -60,7 +62,8 @@ class AppScaffold extends StatelessWidget {
   final Widget child;
 
   static const _destinations = [
-    (label: 'Home', icon: Icons.home, route: '/'),
+    (label: 'Unified', icon: Icons.auto_awesome, route: '/'),
+    (label: 'Home', icon: Icons.home, route: '/home'),
     (label: 'Tutor', icon: Icons.school, route: '/tutor'),
     (label: 'Chat', icon: Icons.chat, route: '/chat'),
     (label: 'Quiz', icon: Icons.quiz, route: '/quiz'),
