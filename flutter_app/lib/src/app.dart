@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import 'features/analytics/learning_analytics_page.dart';
 import 'features/caption/live_caption_page.dart';
 import 'features/cbt/cbt_coach_page.dart';
 import 'features/chat/chat_list_page.dart';
@@ -47,6 +48,7 @@ final _router = GoRouter(
         GoRoute(path: '/story', builder: (_, __) => const StoryPage()),
         GoRoute(path: '/crisis', builder: (_, __) => const CrisisPage()),
         GoRoute(path: '/settings', builder: (_, __) => const SettingsPage()),
+        GoRoute(path: '/analytics', builder: (_, __) => const LearningAnalyticsPage()),
       ],
     ),
   ],
