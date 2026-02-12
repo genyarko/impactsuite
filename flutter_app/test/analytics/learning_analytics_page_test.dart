@@ -20,5 +20,6 @@ void main() {
     expect(find.text('Topic Coverage'), findsOneWidget);
     expect(find.text('Concept Mastery'), findsOneWidget);
     expect(find.text('Performance by Difficulty'), findsOneWidget);
+    expect(find.text('Knowledge Gaps & Recommendations'), findsOneWidget);
   });
 }

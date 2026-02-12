@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../domain/features/analytics/knowledge_gap_analyzer.dart';
 import '../../domain/quiz_models.dart';
 
 enum MasteryTrend { improving, stable, declining }
@@ -158,6 +159,8 @@ class LearningAnalyticsPage extends StatelessWidget {
           _ConceptMasteryCard(conceptMastery: model.conceptMastery),
           const SizedBox(height: 16),
           _DifficultyBreakdownCard(difficultyBreakdown: model.difficultyBreakdown),
+          const SizedBox(height: 16),
+          _KnowledgeGapsCard(subjectPerformance: model.subjectPerformance),
           const SizedBox(height: 32),
         ],
       ),
@@ -417,23 +420,27 @@ class _FrequentlyMissedCard extends StatelessWidget {
               ...missedQuestions.take(5).map(
                 (question) => Card(
                   margin: const EdgeInsets.only(bottom: 8),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(question.questionText, maxLines: 2, overflow: TextOverflow.ellipsis),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            Chip(label: Text('${question.timesCorrect}/${question.timesAttempted} correct')),
-                            Chip(label: Text(question.difficulty.name.toUpperCase())),
-                            Chip(label: Text(_titleCase(question.subject.name))),
-                          ],
-                        ),
-                      ],
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => _showMissedQuestionDetails(context, question),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(question.questionText, maxLines: 2, overflow: TextOverflow.ellipsis),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              Chip(label: Text('${question.timesCorrect}/${question.timesAttempted} correct')),
+                              Chip(label: Text(question.difficulty.name.toUpperCase())),
+                              Chip(label: Text(_titleCase(question.subject.name))),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -463,6 +470,7 @@ class _TopicCoverageCard extends StatelessWidget {
             const SizedBox(height: 12),
             ...sortedTopics.take(10).map(
               (topic) => ListTile(
+                onTap: () => _showTopicDetails(context, topic),
                 contentPadding: EdgeInsets.zero,
                 title: Text(topic.topicName),
                 subtitle: Text('${topic.questionsAttempted}/${topic.totalQuestions} questions'),
@@ -570,6 +578,107 @@ class _DifficultyBreakdownCard extends StatelessWidget {
       ),
     );
   }
+}
+
+
+
+class _KnowledgeGapsCard extends StatelessWidget {
+  const _KnowledgeGapsCard({required this.subjectPerformance});
+
+  final Map<Subject, SubjectAnalytics> subjectPerformance;
+
+  @override
+  Widget build(BuildContext context) {
+    final analyzer = const KnowledgeGapAnalyzer();
+    final subjectEntries = subjectPerformance.entries
+        .map(
+          (entry) => SubjectPerformance(
+            subject: _titleCase(entry.key.name),
+            accuracy: entry.value.accuracy,
+            totalAttempts: entry.value.questionsAnswered,
+          ),
+        )
+        .toList(growable: false);
+    final gaps = analyzer.analyze(subjectEntries);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Knowledge Gaps & Recommendations',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            if (gaps.isEmpty)
+              const Text('No critical knowledge gaps detected yet. Keep practicing!')
+            else
+              ...gaps.map(
+                (gap) => ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.lightbulb_outline),
+                  title: Text(gap.subject),
+                  subtitle: Text(gap.recommendation),
+                  trailing: Text('${(gap.severity * 100).round()}%'),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+void _showMissedQuestionDetails(BuildContext context, MissedQuestionInfo question) {
+  showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (context) => Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Missed Question Review', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          Text(question.questionText),
+          const SizedBox(height: 8),
+          Text('Subject: ${_titleCase(question.subject.name)}'),
+          Text('Difficulty: ${question.difficulty.name.toUpperCase()}'),
+          Text('Correct rate: ${question.timesCorrect}/${question.timesAttempted}'),
+          if (question.concepts.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: question.concepts.map((concept) => Chip(label: Text(concept))).toList(growable: false),
+            ),
+          ],
+        ],
+      ),
+    ),
+  );
+}
+
+void _showTopicDetails(BuildContext context, TopicCoverageInfo topic) {
+  showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(topic.topicName),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Coverage: ${(topic.coveragePercentage * 100).round()}%'),
+          Text('Attempts: ${topic.questionsAttempted}/${topic.totalQuestions}'),
+          Text('Accuracy: ${(topic.accuracy * 100).round()}%'),
+          if (topic.lastCovered != null) Text('Last covered: ${topic.lastCovered!.toLocal()}'),
+        ],
+      ),
+      actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close'))],
+    ),
+  );
 }
 
 Color _difficultyColor(Difficulty difficulty) {
