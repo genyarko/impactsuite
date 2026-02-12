@@ -15,6 +15,8 @@ class QuizPage extends StatefulWidget {
 }
 
 class _QuizPageState extends State<QuizPage> {
+  final TextEditingController _studentNameController = TextEditingController();
+  final TextEditingController _regionController = TextEditingController();
   final TextEditingController _topicController = TextEditingController();
   final List<String> _curriculumTopics = const [
     'Linear Equations',
@@ -39,8 +41,25 @@ class _QuizPageState extends State<QuizPage> {
   bool _showTriviaAnswer = false;
   Timer? _triviaRotationTimer;
 
-  static const String _studentName = 'Student';
-  static const int _studentGrade = 8;
+  int? _studentGrade;
+  bool _profileStepComplete = false;
+  bool _profileSkipped = false;
+
+  static const List<int> _gradeLevels = [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+  ];
 
   @override
   void initState() {
@@ -53,6 +72,8 @@ class _QuizPageState extends State<QuizPage> {
   void dispose() {
     _generationTimer?.cancel();
     _triviaRotationTimer?.cancel();
+    _studentNameController.dispose();
+    _regionController.dispose();
     _topicController.dispose();
     super.dispose();
   }
@@ -62,8 +83,81 @@ class _QuizPageState extends State<QuizPage> {
     return SafeArea(
       child: AnimatedSwitcher(
         duration: const Duration(milliseconds: 250),
-        child: _isGenerating ? _buildGenerationState(context) : _buildSetupState(context),
+        child: _isGenerating
+            ? _buildGenerationState(context)
+            : (_profileStepComplete ? _buildSetupState(context) : _buildProfileStep(context)),
       ),
+    );
+  }
+
+  Widget _buildProfileStep(BuildContext context) {
+    return ListView(
+      key: const ValueKey('profile-step'),
+      padding: const EdgeInsets.all(16),
+      children: [
+        Text('Learner profile', style: Theme.of(context).textTheme.headlineSmall),
+        const SizedBox(height: 8),
+        Text(
+          'Tell us the student\'s name, country/region, and grade level for better quiz tuning.',
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 16),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              children: [
+                TextField(
+                  controller: _studentNameController,
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(
+                    labelText: 'Student name',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _regionController,
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(
+                    labelText: 'Country / Region',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<int>(
+                  value: _studentGrade,
+                  decoration: const InputDecoration(
+                    labelText: 'Grade level',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: _gradeLevels
+                      .map(
+                        (grade) => DropdownMenuItem<int>(
+                          value: grade,
+                          child: Text(grade == 0 ? 'Kindergarten' : 'Grade $grade'),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) => setState(() => _studentGrade = value),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        FilledButton.icon(
+          onPressed: _canContinueProfile ? _continueWithProfile : null,
+          icon: const Icon(Icons.arrow_forward),
+          label: const Text('Continue'),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: _skipProfile,
+          icon: const Icon(Icons.skip_next),
+          label: const Text('Skip for now'),
+        ),
+      ],
     );
   }
 
@@ -130,7 +224,7 @@ class _QuizPageState extends State<QuizPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Suggested Topics for Grade $_studentGrade:',
+                  'Suggested Topics for Grade ${_studentGradeLabel()}:',
                   style: theme.textTheme.labelLarge,
                 ),
                 const SizedBox(height: 8),
@@ -171,7 +265,7 @@ class _QuizPageState extends State<QuizPage> {
         ),
         const SizedBox(height: 16),
         FilledButton.icon(
-          onPressed: (_selectedSubject == null || _studentName.isEmpty) ? null : _startGeneration,
+          onPressed: _selectedSubject == null ? null : _startGeneration,
           icon: Icon(
             switch (_selectedMode) {
               QuizMode.normal => Icons.play_arrow,
@@ -181,7 +275,7 @@ class _QuizPageState extends State<QuizPage> {
           ),
           label: Text(
             switch (_selectedMode) {
-              QuizMode.normal => 'Generate Grade $_studentGrade Quiz',
+              QuizMode.normal => 'Generate ${_studentGradeLabel()} Quiz',
               QuizMode.review => 'Start Review Session',
               QuizMode.adaptive => 'Start Adaptive Quiz',
             },
@@ -271,7 +365,8 @@ class _QuizPageState extends State<QuizPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Quiz ready: ${_titleCase(_selectedSubject!.name)} • ${_titleCase(_selectedDifficulty.name)}',
+              'Quiz ready: ${_titleCase(_selectedSubject!.name)} • ${_titleCase(_selectedDifficulty.name)}'
+              '${_profileSkipped ? '' : ' • ${_studentNameController.text.trim()}'}',
             ),
           ),
         );
@@ -323,6 +418,36 @@ class _QuizPageState extends State<QuizPage> {
       .split('_')
       .map((part) => part.isEmpty ? part : '${part[0].toUpperCase()}${part.substring(1)}')
       .join(' ');
+
+  bool get _canContinueProfile {
+    return _studentNameController.text.trim().isNotEmpty &&
+        _regionController.text.trim().isNotEmpty &&
+        _studentGrade != null;
+  }
+
+  void _continueWithProfile() {
+    setState(() {
+      _profileStepComplete = true;
+      _profileSkipped = false;
+    });
+  }
+
+  void _skipProfile() {
+    setState(() {
+      _studentNameController.clear();
+      _regionController.clear();
+      _studentGrade = null;
+      _profileStepComplete = true;
+      _profileSkipped = true;
+    });
+  }
+
+  String _studentGradeLabel() {
+    if (_studentGrade == null) {
+      return _profileSkipped ? 'Any Grade' : 'Not Set';
+    }
+    return _studentGrade == 0 ? 'Kindergarten' : 'Grade $_studentGrade';
+  }
 }
 
 class _ModeCard extends StatelessWidget {
