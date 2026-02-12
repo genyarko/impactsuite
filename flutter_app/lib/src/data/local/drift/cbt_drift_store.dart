@@ -1,4 +1,9 @@
+import 'dart:io';
+
 import 'package:drift/drift.dart';
+import 'package:drift/native.dart';
+import 'package:path/path.dart' as path;
+import 'package:path_provider/path_provider.dart';
 
 class CbtSessionRecord {
   const CbtSessionRecord({
@@ -15,7 +20,13 @@ class CbtSessionRecord {
 }
 
 class CbtDriftStore extends DatabaseConnectionUser {
-  CbtDriftStore(super.connection);
+  CbtDriftStore._(super.connection);
+
+  static Future<CbtDriftStore> open() async {
+    final documentsDirectory = await getApplicationDocumentsDirectory();
+    final dbFile = File(path.join(documentsDirectory.path, 'impactsuite.sqlite'));
+    return CbtDriftStore._(DatabaseConnection(NativeDatabase(dbFile)));
+  }
 
   Future<void> migrate() async {
     await customStatement('''
@@ -57,4 +68,6 @@ class CbtDriftStore extends DatabaseConnectionUser {
         )
         .toList(growable: false);
   }
+
+  Future<void> close() => connection.executor.close();
 }
