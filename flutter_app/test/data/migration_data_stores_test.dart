@@ -49,11 +49,23 @@ void main() {
     final store = AppSettingsStore(backing);
 
     await store.write(
-      const AppSettings(geminiApiKey: 'k-test', enableOfflineModel: false, lastModelSyncEpochMs: 123),
+      const AppSettings(
+        geminiApiKey: 'k-test',
+        openAiApiKey: 'sk-test',
+        googleCloudSpeechApiKey: 'speech-test',
+        googleMapsApiKey: 'maps-test',
+        onlineModelProvider: OnlineModelProvider.openai,
+        enableOfflineModel: false,
+        lastModelSyncEpochMs: 123,
+      ),
     );
 
     final settings = await store.read();
     expect(settings.geminiApiKey, 'k-test');
+    expect(settings.openAiApiKey, 'sk-test');
+    expect(settings.googleCloudSpeechApiKey, 'speech-test');
+    expect(settings.googleMapsApiKey, 'maps-test');
+    expect(settings.onlineModelProvider, OnlineModelProvider.openai);
     expect(settings.enableOfflineModel, isFalse);
     expect(settings.lastModelSyncEpochMs, 123);
   });
