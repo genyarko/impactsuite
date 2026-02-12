@@ -1,26 +1,25 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/local/preferences/app_settings_store.dart';
 import '../../data/local/preferences/quiz_preferences_store.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'settings_providers.dart';
 
-class SettingsPage extends StatefulWidget {
+class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({
     this.quizStore,
-    this.appSettingsStore,
     super.key,
   });
 
   final QuizPreferencesStore? quizStore;
-  final AppSettingsStore? appSettingsStore;
 
   @override
-  State<SettingsPage> createState() => _SettingsPageState();
+  ConsumerState<SettingsPage> createState() => _SettingsPageState();
 }
 
-class _SettingsPageState extends State<SettingsPage> {
+class _SettingsPageState extends ConsumerState<SettingsPage> {
   late final QuizPreferencesStore _quizStore;
-  late final AppSettingsStore _appSettingsStore;
 
   final _geminiApiKeyController = TextEditingController();
   final _openAiApiKeyController = TextEditingController();
@@ -28,18 +27,16 @@ class _SettingsPageState extends State<SettingsPage> {
   final _mapsApiKeyController = TextEditingController();
 
   QuizPreferences _quizPreferences = const QuizPreferences();
-  AppSettings _appSettings = const AppSettings();
 
   bool _loading = true;
-  bool _saving = false;
+  bool _apiKeysInitialized = false;
 
   @override
   void initState() {
     super.initState();
-    final prefs = SharedPreferencesStore(SharedPreferencesAsync());
-    _quizStore = widget.quizStore ?? QuizPreferencesStore(prefs);
-    _appSettingsStore = widget.appSettingsStore ?? AppSettingsStore(prefs);
-    _load();
+    _quizStore = widget.quizStore ??
+        QuizPreferencesStore(SharedPreferencesStore(SharedPreferencesAsync()));
+    _loadQuizPreferences();
   }
 
   @override
@@ -51,55 +48,50 @@ class _SettingsPageState extends State<SettingsPage> {
     super.dispose();
   }
 
-  Future<void> _load() async {
+  Future<void> _loadQuizPreferences() async {
     final loadedQuiz = await _quizStore.read();
-    final loadedApp = await _appSettingsStore.read();
 
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) return;
 
     setState(() {
       _quizPreferences = loadedQuiz;
-      _appSettings = loadedApp;
-      _geminiApiKeyController.text = loadedApp.geminiApiKey;
-      _openAiApiKeyController.text = loadedApp.openAiApiKey;
-      _speechApiKeyController.text = loadedApp.googleCloudSpeechApiKey;
-      _mapsApiKeyController.text = loadedApp.googleMapsApiKey;
       _loading = false;
     });
   }
 
-  Future<void> _saveAll() async {
-    setState(() => _saving = true);
-
-    final appSettings = _appSettings.copyWith(
-      geminiApiKey: _geminiApiKeyController.text.trim(),
-      openAiApiKey: _openAiApiKeyController.text.trim(),
-      googleCloudSpeechApiKey: _speechApiKeyController.text.trim(),
-      googleMapsApiKey: _mapsApiKeyController.text.trim(),
-      lastModelSyncEpochMs: DateTime.now().millisecondsSinceEpoch,
-    );
-
-    await _quizStore.write(_quizPreferences);
-    await _appSettingsStore.write(appSettings);
-
-    if (!mounted) {
-      return;
+  void _syncApiKeyControllers(AppSettings settings) {
+    if (!_apiKeysInitialized) {
+      _geminiApiKeyController.text = settings.geminiApiKey;
+      _openAiApiKeyController.text = settings.openAiApiKey;
+      _speechApiKeyController.text = settings.googleCloudSpeechApiKey;
+      _mapsApiKeyController.text = settings.googleMapsApiKey;
+      _apiKeysInitialized = true;
     }
+  }
 
-    setState(() {
-      _appSettings = appSettings;
-      _saving = false;
-    });
+  void _updateAppSettings(AppSettings Function(AppSettings) updater) {
+    ref.read(appSettingsProvider.notifier).update(updater);
+  }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Settings saved')),
-    );
+  Future<void> _saveQuizPreferences(QuizPreferences prefs) async {
+    setState(() => _quizPreferences = prefs);
+    await _quizStore.write(prefs);
+  }
+
+  void _saveApiKey({String? gemini, String? openAi, String? speech, String? maps}) {
+    _updateAppSettings((s) => s.copyWith(
+          geminiApiKey: gemini,
+          openAiApiKey: openAi,
+          googleCloudSpeechApiKey: speech,
+          googleMapsApiKey: maps,
+        ));
   }
 
   @override
   Widget build(BuildContext context) {
+    final appSettings = ref.watch(appSettingsProvider);
+    _syncApiKeyControllers(appSettings);
+
     if (_loading) {
       return const SafeArea(child: Center(child: CircularProgressIndicator()));
     }
@@ -111,69 +103,78 @@ class _SettingsPageState extends State<SettingsPage> {
           Text('Settings', style: Theme.of(context).textTheme.headlineMedium),
           const SizedBox(height: 8),
           Text(
-            'Ported from the Kotlin settings flow: quiz behavior, accessibility, and AI configuration.',
+            'Configure AI providers, quiz behavior, and accessibility.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 20),
           _SettingsCard(
             title: 'AI Configuration',
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                TextField(
-                  controller: _geminiApiKeyController,
-                  decoration: const InputDecoration(
-                    labelText: 'Gemini API Key',
-                    border: OutlineInputBorder(),
-                    hintText: 'Enter key used by Gemini online provider',
+                Text(
+                  'Online AI Provider',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: SegmentedButton<OnlineModelProvider>(
+                    segments: const [
+                      ButtonSegment(
+                        value: OnlineModelProvider.gemini,
+                        label: Text('Gemini'),
+                        icon: Icon(Icons.auto_awesome),
+                      ),
+                      ButtonSegment(
+                        value: OnlineModelProvider.openai,
+                        label: Text('OpenAI'),
+                        icon: Icon(Icons.psychology),
+                      ),
+                    ],
+                    selected: {appSettings.onlineModelProvider},
+                    onSelectionChanged: (selected) {
+                      _updateAppSettings(
+                        (s) => s.copyWith(onlineModelProvider: selected.first),
+                      );
+                    },
                   ),
                 ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _openAiApiKeyController,
-                  decoration: const InputDecoration(
-                    labelText: 'OpenAI API Key',
-                    border: OutlineInputBorder(),
-                    hintText: 'sk-... key for OpenAI online provider',
+                const SizedBox(height: 16),
+                if (appSettings.onlineModelProvider == OnlineModelProvider.gemini)
+                  TextField(
+                    controller: _geminiApiKeyController,
+                    decoration: const InputDecoration(
+                      labelText: 'Gemini API Key',
+                      border: OutlineInputBorder(),
+                      hintText: 'Enter key used by Gemini online provider',
+                    ),
+                    onChanged: (value) => _saveApiKey(gemini: value.trim()),
+                  )
+                else
+                  TextField(
+                    controller: _openAiApiKeyController,
+                    decoration: const InputDecoration(
+                      labelText: 'OpenAI API Key',
+                      border: OutlineInputBorder(),
+                      hintText: 'sk-... key for OpenAI online provider',
+                    ),
+                    onChanged: (value) => _saveApiKey(openAi: value.trim()),
                   ),
-                ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 16),
                 SwitchListTile.adaptive(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Prefer on-device model'),
-                  subtitle: const Text('Use Gemma first, fallback to selected online provider when needed'),
-                  value: _appSettings.enableOfflineModel,
+                  subtitle: const Text(
+                    'Use Gemma first, fallback to selected online provider when needed',
+                  ),
+                  value: appSettings.enableOfflineModel,
                   onChanged: (value) {
-                    setState(() {
-                      _appSettings = _appSettings.copyWith(enableOfflineModel: value);
-                    });
+                    _updateAppSettings(
+                      (s) => s.copyWith(enableOfflineModel: value),
+                    );
                   },
                 ),
-                if (!_appSettings.enableOfflineModel) ...[
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<OnlineModelProvider>(
-                    value: _appSettings.onlineModelProvider,
-                    decoration: const InputDecoration(
-                      labelText: 'Online AI Provider',
-                      border: OutlineInputBorder(),
-                    ),
-                    items: OnlineModelProvider.values
-                        .map(
-                          (provider) => DropdownMenuItem(
-                            value: provider,
-                            child: Text(_onlineProviderLabel(provider)),
-                          ),
-                        )
-                        .toList(growable: false),
-                    onChanged: (value) {
-                      if (value == null) {
-                        return;
-                      }
-                      setState(() {
-                        _appSettings = _appSettings.copyWith(onlineModelProvider: value);
-                      });
-                    },
-                  ),
-                ],
               ],
             ),
           ),
@@ -190,6 +191,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     border: OutlineInputBorder(),
                     hintText: 'Used by Live Caption, AI Tutor voice, and CBT Coach',
                   ),
+                  onChanged: (value) => _saveApiKey(speech: value.trim()),
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -199,6 +201,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     border: OutlineInputBorder(),
                     hintText: 'Required for crisis map / nearby services lookup',
                   ),
+                  onChanged: (value) => _saveApiKey(maps: value.trim()),
                 ),
                 const SizedBox(height: 12),
                 Text(
@@ -220,15 +223,16 @@ class _SettingsPageState extends State<SettingsPage> {
                     border: OutlineInputBorder(),
                   ),
                   items: TextSize.values
-                      .map((value) => DropdownMenuItem(value: value, child: Text(_textSizeLabel(value))))
+                      .map((value) => DropdownMenuItem(
+                            value: value,
+                            child: Text(_textSizeLabel(value)),
+                          ))
                       .toList(growable: false),
                   onChanged: (value) {
-                    if (value == null) {
-                      return;
-                    }
-                    setState(() {
-                      _quizPreferences = _quizPreferences.copyWith(textSize: value);
-                    });
+                    if (value == null) return;
+                    _saveQuizPreferences(
+                      _quizPreferences.copyWith(textSize: value),
+                    );
                   },
                 ),
                 SwitchListTile.adaptive(
@@ -237,9 +241,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   subtitle: const Text('Increase contrast for readability'),
                   value: _quizPreferences.highContrastMode,
                   onChanged: (value) {
-                    setState(() {
-                      _quizPreferences = _quizPreferences.copyWith(highContrastMode: value);
-                    });
+                    _saveQuizPreferences(
+                      _quizPreferences.copyWith(highContrastMode: value),
+                    );
                   },
                 ),
                 SwitchListTile.adaptive(
@@ -248,9 +252,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   subtitle: const Text('Turn off to reduce motion'),
                   value: _quizPreferences.animationsEnabled,
                   onChanged: (value) {
-                    setState(() {
-                      _quizPreferences = _quizPreferences.copyWith(animationsEnabled: value);
-                    });
+                    _saveQuizPreferences(
+                      _quizPreferences.copyWith(animationsEnabled: value),
+                    );
                   },
                 ),
               ],
@@ -266,9 +270,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   title: const Text('Show hints'),
                   value: _quizPreferences.showHints,
                   onChanged: (value) {
-                    setState(() {
-                      _quizPreferences = _quizPreferences.copyWith(showHints: value);
-                    });
+                    _saveQuizPreferences(
+                      _quizPreferences.copyWith(showHints: value),
+                    );
                   },
                 ),
                 SwitchListTile.adaptive(
@@ -276,9 +280,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   title: const Text('Auto-advance questions'),
                   value: _quizPreferences.autoAdvanceQuestions,
                   onChanged: (value) {
-                    setState(() {
-                      _quizPreferences = _quizPreferences.copyWith(autoAdvanceQuestions: value);
-                    });
+                    _saveQuizPreferences(
+                      _quizPreferences.copyWith(autoAdvanceQuestions: value),
+                    );
                   },
                 ),
                 SwitchListTile.adaptive(
@@ -286,10 +290,11 @@ class _SettingsPageState extends State<SettingsPage> {
                   title: const Text('Show explanations immediately'),
                   value: _quizPreferences.showExplanationsImmediately,
                   onChanged: (value) {
-                    setState(() {
-                      _quizPreferences =
-                          _quizPreferences.copyWith(showExplanationsImmediately: value);
-                    });
+                    _saveQuizPreferences(
+                      _quizPreferences.copyWith(
+                        showExplanationsImmediately: value,
+                      ),
+                    );
                   },
                 ),
                 DropdownButtonFormField<QuestionTimeLimit>(
@@ -307,29 +312,16 @@ class _SettingsPageState extends State<SettingsPage> {
                       )
                       .toList(growable: false),
                   onChanged: (value) {
-                    if (value == null) {
-                      return;
-                    }
-                    setState(() {
-                      _quizPreferences = _quizPreferences.copyWith(questionTimeLimit: value);
-                    });
+                    if (value == null) return;
+                    _saveQuizPreferences(
+                      _quizPreferences.copyWith(questionTimeLimit: value),
+                    );
                   },
                 ),
               ],
             ),
           ),
           const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: _saving ? null : _saveAll,
-            icon: _saving
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.save),
-            label: Text(_saving ? 'Saving...' : 'Save settings'),
-          ),
         ],
       ),
     );
@@ -340,11 +332,6 @@ class _SettingsPageState extends State<SettingsPage> {
         TextSize.medium => 'Medium',
         TextSize.large => 'Large',
         TextSize.extraLarge => 'Extra Large',
-      };
-
-  String _onlineProviderLabel(OnlineModelProvider provider) => switch (provider) {
-        OnlineModelProvider.gemini => 'Gemini',
-        OnlineModelProvider.openai => 'OpenAI',
       };
 
   String _timeLimitLabel(QuestionTimeLimit limit) => switch (limit) {

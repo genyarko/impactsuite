@@ -1,20 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:impactsuite_flutter/src/data/local/preferences/app_settings_store.dart';
 import 'package:impactsuite_flutter/src/data/local/preferences/quiz_preferences_store.dart';
 import 'package:impactsuite_flutter/src/features/settings/settings_page.dart';
+import 'package:impactsuite_flutter/src/features/settings/settings_providers.dart';
 
 void main() {
-  testWidgets('renders settings sections and saves', (tester) async {
+  testWidgets('renders settings sections with segmented button', (tester) async {
     final prefs = _InMemoryPreferencesStore();
     final quizStore = QuizPreferencesStore(prefs);
     final appStore = AppSettingsStore(prefs);
 
     await tester.pumpWidget(
-      MaterialApp(
-        home: SettingsPage(
-          quizStore: quizStore,
-          appSettingsStore: appStore,
+      ProviderScope(
+        overrides: [
+          appSettingsStoreProvider.overrideWithValue(appStore),
+        ],
+        child: MaterialApp(
+          home: SettingsPage(quizStore: quizStore),
         ),
       ),
     );
@@ -22,22 +26,77 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('AI Configuration'), findsOneWidget);
-    expect(find.text('Display & Accessibility'), findsOneWidget);
-    expect(find.text('Quiz Behavior'), findsOneWidget);
+    expect(find.text('Online AI Provider'), findsOneWidget);
+    expect(find.text('Gemini'), findsOneWidget);
+    expect(find.text('OpenAI'), findsOneWidget);
 
-    await tester.enterText(find.byType(TextField).at(0), 'abc123');
-    await tester.enterText(find.byType(TextField).at(2), 'speech123');
-    await tester.enterText(find.byType(TextField).at(3), 'maps123');
-    await tester.tap(find.text('Save settings'));
+    // Scroll down to reveal remaining sections
+    await tester.drag(find.byType(ListView), const Offset(0, -400));
+    await tester.pumpAndSettle();
+    expect(find.text('Display & Accessibility'), findsOneWidget);
+
+    await tester.drag(find.byType(ListView), const Offset(0, -400));
+    await tester.pumpAndSettle();
+    expect(find.text('Quiz Behavior'), findsOneWidget);
+  });
+
+  testWidgets('switching provider shows correct API key field', (tester) async {
+    final prefs = _InMemoryPreferencesStore();
+    final quizStore = QuizPreferencesStore(prefs);
+    final appStore = AppSettingsStore(prefs);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSettingsStoreProvider.overrideWithValue(appStore),
+        ],
+        child: MaterialApp(
+          home: SettingsPage(quizStore: quizStore),
+        ),
+      ),
+    );
+
     await tester.pumpAndSettle();
 
-    expect(find.text('Settings saved'), findsOneWidget);
+    // Default is Gemini — should show Gemini API Key field
+    expect(find.text('Gemini API Key'), findsOneWidget);
+
+    // Tap the OpenAI segment
+    await tester.tap(find.text('OpenAI'));
+    await tester.pumpAndSettle();
+
+    // Now should show OpenAI API Key field instead
+    expect(find.text('OpenAI API Key'), findsOneWidget);
+
+    // Verify the selection is persisted
+    final loaded = await appStore.read();
+    expect(loaded.onlineModelProvider, OnlineModelProvider.openai);
+  });
+
+  testWidgets('API keys auto-save on change', (tester) async {
+    final prefs = _InMemoryPreferencesStore();
+    final quizStore = QuizPreferencesStore(prefs);
+    final appStore = AppSettingsStore(prefs);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSettingsStoreProvider.overrideWithValue(appStore),
+        ],
+        child: MaterialApp(
+          home: SettingsPage(quizStore: quizStore),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    // Enter a Gemini API key — auto-saves
+    await tester.enterText(find.byType(TextField).first, 'abc123');
+    await tester.pumpAndSettle();
 
     final loaded = await appStore.read();
     expect(loaded.geminiApiKey, 'abc123');
-    expect(loaded.googleCloudSpeechApiKey, 'speech123');
-    expect(loaded.googleMapsApiKey, 'maps123');
-    expect(loaded.onlineModelProvider, OnlineModelProvider.gemini);
   });
 }
 

@@ -47,6 +47,32 @@ class PlatformAiChannels {
     return result ?? '';
   }
 
+  Future<void> initializeOpenAi({
+    required String apiKey,
+    required String model,
+    required double temperature,
+    required int maxOutputTokens,
+  }) {
+    return _methodChannel.invokeMethod<void>('initializeOpenAi', {
+      'apiKey': apiKey,
+      'model': model,
+      'temperature': temperature,
+      'maxOutputTokens': maxOutputTokens,
+    });
+  }
+
+  Future<String> generateOpenAiText(AiGenerationRequest request) async {
+    final result = await _methodChannel.invokeMethod<String>('generateOpenAiText', {
+      'prompt': request.prompt,
+      'model': request.model,
+      'temperature': request.temperature,
+      'maxOutputTokens': request.maxOutputTokens,
+      'imageBase64': request.imageBase64,
+    });
+
+    return result ?? '';
+  }
+
   Future<String> generateGemmaText(AiGenerationRequest request) async {
     final result = await _methodChannel.invokeMethod<String>('generateGemmaText', {
       'prompt': request.prompt,

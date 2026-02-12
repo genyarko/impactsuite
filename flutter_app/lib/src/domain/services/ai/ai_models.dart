@@ -1,4 +1,4 @@
-enum AiProvider { gemini, gemma }
+enum AiProvider { gemini, gemma, openai }
 
 class AiGenerationRequest {
   const AiGenerationRequest({

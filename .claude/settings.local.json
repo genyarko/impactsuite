@@ -32,7 +32,10 @@
       "WebFetch(domain:openai.com)",
       "Bash(git bisect:*)",
       "Bash(cp:*)",
-      "Bash(tasklist)"
+      "Bash(tasklist)",
+      "Bash(flutter analyze:*)",
+      "Bash(findstr:*)",
+      "Bash(flutter test:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

@@ -8,9 +8,12 @@ void main() {
     final gemma = _FakeRepository(shouldThrow: true, provider: AiProvider.gemma);
     final gemini = _FakeRepository(responseText: 'online', provider: AiProvider.gemini);
 
+    final openai = _FakeRepository(responseText: 'openai', provider: AiProvider.openai);
+
     final repository = UnifiedAiRepository(
       gemini: gemini,
       gemma: gemma,
+      openai: openai,
       preferOnDevice: true,
     );
 
