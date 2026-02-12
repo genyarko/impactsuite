@@ -8,6 +8,86 @@ enum StoryTarget { kindergarten, elementary, middleSchool, highSchool, adult }
 
 enum StoryLength { short, medium, long }
 
+enum CharacterRole { protagonist, sidekick, mentor, antagonist, guide }
+
+enum CharacterGender { male, female, nonBinary, unspecified }
+
+enum CharacterAgeGroup { child, teen, youngAdult, adult, elderly }
+
+class StoryCharacter {
+  const StoryCharacter({
+    required this.id,
+    required this.name,
+    required this.role,
+    required this.gender,
+    required this.ageGroup,
+    required this.appearance,
+    required this.personalityTraits,
+    required this.specialAbilities,
+    required this.backstory,
+    required this.goals,
+    this.catchphrase = '',
+    this.useCount = 0,
+    this.lastUsed,
+  });
+
+  final String id;
+  final String name;
+  final CharacterRole role;
+  final CharacterGender gender;
+  final CharacterAgeGroup ageGroup;
+  final String appearance;
+  final List<String> personalityTraits;
+  final List<String> specialAbilities;
+  final String backstory;
+  final String goals;
+  final String catchphrase;
+  final int useCount;
+  final DateTime? lastUsed;
+
+  StoryCharacter copyWith({
+    String? id,
+    String? name,
+    CharacterRole? role,
+    CharacterGender? gender,
+    CharacterAgeGroup? ageGroup,
+    String? appearance,
+    List<String>? personalityTraits,
+    List<String>? specialAbilities,
+    String? backstory,
+    String? goals,
+    String? catchphrase,
+    int? useCount,
+    DateTime? lastUsed,
+  }) {
+    return StoryCharacter(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      role: role ?? this.role,
+      gender: gender ?? this.gender,
+      ageGroup: ageGroup ?? this.ageGroup,
+      appearance: appearance ?? this.appearance,
+      personalityTraits: personalityTraits ?? this.personalityTraits,
+      specialAbilities: specialAbilities ?? this.specialAbilities,
+      backstory: backstory ?? this.backstory,
+      goals: goals ?? this.goals,
+      catchphrase: catchphrase ?? this.catchphrase,
+      useCount: useCount ?? this.useCount,
+      lastUsed: lastUsed ?? this.lastUsed,
+    );
+  }
+
+  String get physicalDescription =>
+      '${ageGroup.name} ${gender.name} with ${appearance.isEmpty ? 'distinctive appearance' : appearance}';
+
+  String get personalityDescription {
+    if (personalityTraits.isEmpty) {
+      return 'Personality still evolving';
+    }
+    return 'Known for being ${personalityTraits.take(3).join(', ')}';
+  }
+}
+
 class StoryRequest {
   const StoryRequest({
     required this.prompt,
@@ -129,6 +209,34 @@ class ReadingStats {
 
 class StoryController extends ChangeNotifier {
   final List<StoryData> _stories = [];
+  final List<StoryCharacter> _characters = [
+    const StoryCharacter(
+      id: 'preset-1',
+      name: 'Luna Brightspark',
+      role: CharacterRole.protagonist,
+      gender: CharacterGender.female,
+      ageGroup: CharacterAgeGroup.teen,
+      appearance: 'silver braid and curious green eyes',
+      personalityTraits: ['brave', 'curious', 'kind'],
+      specialAbilities: ['starlight magic'],
+      backstory: 'An apprentice mapmaker who found a glowing compass.',
+      goals: 'Uncover forgotten constellations and help her village.',
+      catchphrase: 'Let the stars guide us!',
+    ),
+    const StoryCharacter(
+      id: 'preset-2',
+      name: 'Tomo Gearleaf',
+      role: CharacterRole.sidekick,
+      gender: CharacterGender.male,
+      ageGroup: CharacterAgeGroup.youngAdult,
+      appearance: 'freckles, copper goggles, and patched overalls',
+      personalityTraits: ['funny', 'loyal', 'inventive'],
+      specialAbilities: ['gadget engineering'],
+      backstory: 'A tinkerer who turns scrap into brilliant inventions.',
+      goals: 'Build tools that keep friends safe on every quest.',
+      catchphrase: 'I can fix that in five minutes.',
+    ),
+  ];
 
   bool showStoryList = true;
   bool showStreakScreen = false;
@@ -145,6 +253,7 @@ class StoryController extends ChangeNotifier {
   ReadingBadge? badgeNotification;
 
   List<StoryData> get allStories => List.unmodifiable(_stories);
+  List<StoryCharacter> get characters => List.unmodifiable(_characters);
 
   Future<void> generateStory(StoryRequest request) async {
     if (request.prompt.trim().isEmpty || isGenerating) {
@@ -162,6 +271,10 @@ class StoryController extends ChangeNotifier {
       await Future<void>.delayed(const Duration(milliseconds: 350));
       generationPhase = 'Building chapter outline...';
       notifyListeners();
+
+      for (final characterName in request.characters) {
+        trackCharacterUsageByName(characterName);
+      }
 
       final pages = <StoryPageData>[];
       for (var index = 0; index < request.exactPageCount; index++) {
@@ -202,6 +315,42 @@ class StoryController extends ChangeNotifier {
       isGenerating = false;
       notifyListeners();
     }
+  }
+
+  void saveCharacter(StoryCharacter character) {
+    if (character.name.trim().isEmpty) {
+      error = 'Character name is required.';
+      notifyListeners();
+      return;
+    }
+
+    final index = _characters.indexWhere((existing) => existing.id == character.id);
+    if (index >= 0) {
+      _characters[index] = character;
+    } else {
+      _characters.insert(0, character);
+    }
+    notifyListeners();
+  }
+
+  void deleteCharacter(String characterId) {
+    _characters.removeWhere((character) => character.id == characterId);
+    notifyListeners();
+  }
+
+  void trackCharacterUsageByName(String characterName) {
+    final index = _characters.indexWhere(
+      (character) => character.name.toLowerCase() == characterName.toLowerCase(),
+    );
+    if (index < 0) {
+      return;
+    }
+
+    final character = _characters[index];
+    _characters[index] = character.copyWith(
+      useCount: character.useCount + 1,
+      lastUsed: DateTime.now(),
+    );
   }
 
   void loadStory(String storyId) {

@@ -144,7 +144,7 @@ class _StoryListScreen extends StatelessWidget {
             onPressed: () async {
               final request = await showDialog<StoryRequest>(
                 context: context,
-                builder: (_) => const _CreateStoryDialog(),
+                builder: (_) => _CreateStoryDialog(controller: controller),
               );
               if (request != null) {
                 await controller.generateStory(request);
@@ -156,14 +156,9 @@ class _StoryListScreen extends StatelessWidget {
           const SizedBox(height: 8),
           OutlinedButton.icon(
             onPressed: () {
-              showDialog<void>(
-                context: context,
-                builder: (_) => const AlertDialog(
-                  title: Text('Character Management'),
-                  content: Text(
-                    'Character creator is next in migration queue. '
-                    'Story creation already supports character prompts.',
-                  ),
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => _CharacterManagementPage(controller: controller),
                 ),
               );
             },
@@ -379,7 +374,9 @@ class _StoryReadingScreen extends StatelessWidget {
 }
 
 class _CreateStoryDialog extends StatefulWidget {
-  const _CreateStoryDialog();
+  const _CreateStoryDialog({required this.controller});
+
+  final StoryController controller;
 
   @override
   State<_CreateStoryDialog> createState() => _CreateStoryDialogState();
@@ -394,6 +391,7 @@ class _CreateStoryDialogState extends State<_CreateStoryDialog> {
   StoryGenre _genre = StoryGenre.fantasy;
   StoryTarget _target = StoryTarget.elementary;
   double _pageCount = 7;
+  final Set<String> _selectedCharacterIds = <String>{};
 
   @override
   void initState() {
@@ -412,6 +410,8 @@ class _CreateStoryDialogState extends State<_CreateStoryDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final savedCharacters = widget.controller.characters;
+
     return AlertDialog(
       title: const Text('Create Story'),
       content: SingleChildScrollView(
@@ -453,8 +453,34 @@ class _CreateStoryDialogState extends State<_CreateStoryDialog> {
             ),
             TextField(
               controller: _charactersController,
-              decoration: const InputDecoration(labelText: 'Characters (optional)'),
+              decoration: const InputDecoration(
+                labelText: 'Additional characters (comma separated, optional)',
+              ),
             ),
+            if (savedCharacters.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text('Select from character library', style: Theme.of(context).textTheme.labelLarge),
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 6,
+                children: [
+                  for (final character in savedCharacters)
+                    FilterChip(
+                      selected: _selectedCharacterIds.contains(character.id),
+                      label: Text(character.name),
+                      onSelected: (selected) {
+                        setState(() {
+                          if (selected) {
+                            _selectedCharacterIds.add(character.id);
+                          } else {
+                            _selectedCharacterIds.remove(character.id);
+                          }
+                        });
+                      },
+                    ),
+                ],
+              ),
+            ],
             const SizedBox(height: 8),
             TextField(
               controller: _settingController,
@@ -474,6 +500,15 @@ class _CreateStoryDialogState extends State<_CreateStoryDialog> {
           onPressed: _promptController.text.trim().isEmpty
               ? null
               : () {
+                  final selectedCharacterNames = widget.controller.characters
+                      .where((character) => _selectedCharacterIds.contains(character.id))
+                      .map((character) => character.name)
+                      .toList(growable: false);
+                  final extraCharacters = _charactersController.text
+                      .split(',')
+                      .map((character) => character.trim())
+                      .where((character) => character.isNotEmpty)
+                      .toList(growable: false);
                   final request = StoryRequest(
                     prompt: _promptController.text.trim(),
                     genre: _genre,
@@ -484,11 +519,7 @@ class _CreateStoryDialogState extends State<_CreateStoryDialog> {
                         ? StoryLength.medium
                         : StoryLength.long,
                     exactPageCount: _pageCount.round(),
-                    characters: _charactersController.text
-                        .split(',')
-                        .map((character) => character.trim())
-                        .where((character) => character.isNotEmpty)
-                        .toList(),
+                    characters: [...selectedCharacterNames, ...extraCharacters],
                     setting: _settingController.text.trim().isEmpty ? null : _settingController.text.trim(),
                     theme: _themeController.text.trim().isEmpty ? null : _themeController.text.trim(),
                   );
@@ -498,6 +529,265 @@ class _CreateStoryDialogState extends State<_CreateStoryDialog> {
         ),
       ],
     );
+  }
+}
+
+class _CharacterManagementPage extends StatefulWidget {
+  const _CharacterManagementPage({required this.controller});
+
+  final StoryController controller;
+
+  @override
+  State<_CharacterManagementPage> createState() => _CharacterManagementPageState();
+}
+
+class _CharacterManagementPageState extends State<_CharacterManagementPage> {
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onControllerUpdate);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onControllerUpdate);
+    super.dispose();
+  }
+
+  void _onControllerUpdate() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
+  }
+
+  Future<void> _openEditor({StoryCharacter? character}) async {
+    final saved = await Navigator.of(context).push<StoryCharacter>(
+      MaterialPageRoute<StoryCharacter>(
+        builder: (_) => _CharacterEditorPage(character: character),
+      ),
+    );
+    if (saved != null) {
+      widget.controller.saveCharacter(saved);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final characters = widget.controller.characters;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Manage Characters')),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _openEditor(),
+        icon: const Icon(Icons.add),
+        label: const Text('Create Character'),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: characters.isEmpty
+            ? const Center(child: Text('No characters yet. Create your first character.'))
+            : ListView.separated(
+                itemCount: characters.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final character = characters[index];
+                  return Card(
+                    child: ListTile(
+                      title: Text(character.name),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(character.physicalDescription),
+                          Text(character.personalityDescription),
+                          Text('Role: ${character.role.name} • Used ${character.useCount} times'),
+                        ],
+                      ),
+                      trailing: PopupMenuButton<String>(
+                        onSelected: (value) {
+                          if (value == 'edit') {
+                            _openEditor(character: character);
+                          }
+                          if (value == 'delete') {
+                            widget.controller.deleteCharacter(character.id);
+                          }
+                        },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(value: 'edit', child: Text('Edit')),
+                          PopupMenuItem(value: 'delete', child: Text('Delete')),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+      ),
+    );
+  }
+}
+
+class _CharacterEditorPage extends StatefulWidget {
+  const _CharacterEditorPage({this.character});
+
+  final StoryCharacter? character;
+
+  @override
+  State<_CharacterEditorPage> createState() => _CharacterEditorPageState();
+}
+
+class _CharacterEditorPageState extends State<_CharacterEditorPage> {
+  late final TextEditingController _nameController;
+  late final TextEditingController _appearanceController;
+  late final TextEditingController _traitsController;
+  late final TextEditingController _abilitiesController;
+  late final TextEditingController _backstoryController;
+  late final TextEditingController _goalsController;
+  late final TextEditingController _catchphraseController;
+
+  late CharacterRole _role;
+  late CharacterGender _gender;
+  late CharacterAgeGroup _ageGroup;
+
+  @override
+  void initState() {
+    super.initState();
+    final c = widget.character;
+    _nameController = TextEditingController(text: c?.name ?? '');
+    _appearanceController = TextEditingController(text: c?.appearance ?? '');
+    _traitsController = TextEditingController(text: (c?.personalityTraits ?? const <String>[]).join(', '));
+    _abilitiesController = TextEditingController(text: (c?.specialAbilities ?? const <String>[]).join(', '));
+    _backstoryController = TextEditingController(text: c?.backstory ?? '');
+    _goalsController = TextEditingController(text: c?.goals ?? '');
+    _catchphraseController = TextEditingController(text: c?.catchphrase ?? '');
+
+    _role = c?.role ?? CharacterRole.protagonist;
+    _gender = c?.gender ?? CharacterGender.unspecified;
+    _ageGroup = c?.ageGroup ?? CharacterAgeGroup.child;
+
+    _nameController.addListener(_rebuild);
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _appearanceController.dispose();
+    _traitsController.dispose();
+    _abilitiesController.dispose();
+    _backstoryController.dispose();
+    _goalsController.dispose();
+    _catchphraseController.dispose();
+    super.dispose();
+  }
+
+  void _rebuild() => setState(() {});
+
+  @override
+  Widget build(BuildContext context) {
+    final isEditing = widget.character != null;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(isEditing ? 'Edit Character' : 'Create Character'),
+        actions: [
+          TextButton(
+            onPressed: _nameController.text.trim().isEmpty
+                ? null
+                : () {
+                    final updated = StoryCharacter(
+                      id: widget.character?.id ?? DateTime.now().microsecondsSinceEpoch.toString(),
+                      name: _nameController.text.trim(),
+                      role: _role,
+                      gender: _gender,
+                      ageGroup: _ageGroup,
+                      appearance: _appearanceController.text.trim(),
+                      personalityTraits: _splitList(_traitsController.text),
+                      specialAbilities: _splitList(_abilitiesController.text),
+                      backstory: _backstoryController.text.trim(),
+                      goals: _goalsController.text.trim(),
+                      catchphrase: _catchphraseController.text.trim(),
+                      useCount: widget.character?.useCount ?? 0,
+                      lastUsed: widget.character?.lastUsed,
+                    );
+                    Navigator.of(context).pop(updated);
+                  },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          TextField(controller: _nameController, decoration: const InputDecoration(labelText: 'Name *')),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<CharacterRole>(
+            value: _role,
+            decoration: const InputDecoration(labelText: 'Role'),
+            items: CharacterRole.values
+                .map((role) => DropdownMenuItem(value: role, child: Text(role.name)))
+                .toList(),
+            onChanged: (value) => setState(() => _role = value ?? _role),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<CharacterGender>(
+            value: _gender,
+            decoration: const InputDecoration(labelText: 'Gender'),
+            items: CharacterGender.values
+                .map((gender) => DropdownMenuItem(value: gender, child: Text(gender.name)))
+                .toList(),
+            onChanged: (value) => setState(() => _gender = value ?? _gender),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<CharacterAgeGroup>(
+            value: _ageGroup,
+            decoration: const InputDecoration(labelText: 'Age Group'),
+            items: CharacterAgeGroup.values
+                .map((group) => DropdownMenuItem(value: group, child: Text(group.name)))
+                .toList(),
+            onChanged: (value) => setState(() => _ageGroup = value ?? _ageGroup),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _appearanceController,
+            decoration: const InputDecoration(labelText: 'Appearance'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _traitsController,
+            decoration: const InputDecoration(labelText: 'Personality traits (comma separated)'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _abilitiesController,
+            decoration: const InputDecoration(labelText: 'Special abilities (comma separated)'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _backstoryController,
+            maxLines: 3,
+            decoration: const InputDecoration(labelText: 'Backstory'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _goalsController,
+            maxLines: 2,
+            decoration: const InputDecoration(labelText: 'Goals / motivation'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _catchphraseController,
+            decoration: const InputDecoration(labelText: 'Catchphrase (optional)'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<String> _splitList(String raw) {
+    return raw
+        .split(',')
+        .map((entry) => entry.trim())
+        .where((entry) => entry.isNotEmpty)
+        .toList(growable: false);
   }
 }
 
