@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../data/local/drift/cbt_drift_store.dart';
+import 'cbt_session_store.dart';
 import '../../domain/features/cbt/cbt_session_manager.dart';
 
 class CbtCoachPage extends StatefulWidget {
@@ -21,7 +21,7 @@ class _CbtCoachPageState extends State<CbtCoachPage> {
   bool _isSaving = false;
   CbtSessionSummary? _latestSummary;
 
-  CbtDriftStore? _store;
+  final CbtSessionStore _store = CbtSessionStore();
   List<CbtSessionRecord> _sessionHistory = const [];
 
   @override
@@ -34,22 +34,17 @@ class _CbtCoachPageState extends State<CbtCoachPage> {
   void dispose() {
     _thoughtController.dispose();
     _reframeController.dispose();
-    _store?.close();
     super.dispose();
   }
 
   Future<void> _openStore() async {
-    final store = await CbtDriftStore.open();
-    await store.migrate();
-    final history = await store.listAll();
+    final history = await _store.listAll();
 
     if (!mounted) {
-      await store.close();
       return;
     }
 
     setState(() {
-      _store = store;
       _sessionHistory = history;
     });
   }
@@ -76,7 +71,7 @@ class _CbtCoachPageState extends State<CbtCoachPage> {
 
     setState(() => _isSaving = true);
     final now = DateTime.now();
-    await _store?.insert(
+    await _store.insert(
       CbtSessionRecord(
         id: 'cbt_${now.microsecondsSinceEpoch}',
         moodBefore: _moodBefore.index,
@@ -85,7 +80,7 @@ class _CbtCoachPageState extends State<CbtCoachPage> {
       ),
     );
 
-    final history = await _store?.listAll() ?? _sessionHistory;
+    final history = await _store.listAll();
     if (!mounted) {
       return;
     }
@@ -259,9 +254,7 @@ class _CbtCoachPageState extends State<CbtCoachPage> {
           const SizedBox(height: 12),
           Text('Previous sessions', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
-          if (_store == null)
-            const Center(child: CircularProgressIndicator())
-          else if (_sessionHistory.isEmpty)
+          if (_sessionHistory.isEmpty)
             const Text('No saved sessions yet.')
           else
             ..._sessionHistory
