@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../data/local/drift/chat_drift_store.dart';
+import 'chat_store_contract.dart';
 import '../../data/models/chat_models.dart';
 import '../../domain/services/ai/ai_models.dart';
 import '../../domain/services/ai/ai_repository.dart';
@@ -57,7 +57,7 @@ class ChatState {
 
 class ChatController extends StateNotifier<ChatState> {
   ChatController({
-    required ChatDriftStore store,
+    required ChatStore store,
     required AiRepository repository,
   })  : _store = store,
         _repository = repository,
@@ -67,7 +67,7 @@ class ChatController extends StateNotifier<ChatState> {
     });
   }
 
-  final ChatDriftStore _store;
+  final ChatStore _store;
   final AiRepository _repository;
   StreamSubscription<List<ChatSession>>? _sessionsSub;
   StreamSubscription<List<ChatMessage>>? _messagesSub;

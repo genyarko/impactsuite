@@ -1,11 +1,12 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../data/local/drift/chat_drift_store.dart';
+import 'chat_store.dart';
+import 'chat_store_contract.dart';
 import '../ai/ai_providers.dart';
 import 'chat_controller.dart';
 
-final chatStoreProvider = FutureProvider<ChatDriftStore>((ref) async {
-  final store = await ChatDriftStore.open();
+final chatStoreProvider = FutureProvider<ChatStore>((ref) async {
+  final store = await openChatStore();
   await store.migrate();
   ref.onDispose(store.close);
   return store;
