@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import 'features/caption/live_caption_page.dart';
+import 'features/cbt/cbt_coach_page.dart';
 import 'features/chat/chat_list_page.dart';
 import 'features/chat/chat_page.dart';
 import 'features/crisis/crisis_page.dart';
@@ -40,6 +41,7 @@ final _router = GoRouter(
         GoRoute(path: '/chat/:sessionId', builder: (_, state) => ChatPage(sessionId: state.pathParameters['sessionId']!)),
         GoRoute(path: '/live_caption', builder: (_, __) => const LiveCaptionPage()),
         GoRoute(path: '/quiz', builder: (_, __) => const QuizPage()),
+        GoRoute(path: '/cbt_coach', builder: (_, __) => const CbtCoachPage()),
         GoRoute(path: '/plant_scanner', builder: (_, __) => const ImageClassificationPage()),
         GoRoute(path: '/summarizer', builder: (_, __) => const SummarizerPage()),
         GoRoute(path: '/story', builder: (_, __) => const StoryPage()),
@@ -60,6 +62,7 @@ class AppScaffold extends StatelessWidget {
     (label: 'Tutor', icon: Icons.school, route: '/tutor'),
     (label: 'Chat', icon: Icons.chat, route: '/chat'),
     (label: 'Quiz', icon: Icons.quiz, route: '/quiz'),
+    (label: 'CBT', icon: Icons.psychology, route: '/cbt_coach'),
     (label: 'Summary', icon: Icons.description, route: '/summarizer'),
     (label: 'Story', icon: Icons.menu_book, route: '/story'),
     (label: 'Crisis', icon: Icons.health_and_safety, route: '/crisis'),
