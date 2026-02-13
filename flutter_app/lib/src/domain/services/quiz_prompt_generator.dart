@@ -8,6 +8,8 @@ class QuizPromptGenerator {
     required Subject subject,
     required String topic,
     required Difficulty difficulty,
+    String region = '',
+    int? gradeLevel,
     LearnerProfile? learnerProfile,
     List<String> previousQuestions = const [],
   }) {
@@ -24,6 +26,14 @@ LEARNER PROFILE:
 - Strengths by Subject: ${learnerProfile.strengthsBySubject.entries.take(3).map((entry) => '${entry.key.name}: ${(entry.value * 100).toInt()}%').join(', ')}
 ''';
 
+    final regionContext = region.isNotEmpty
+        ? '\nREGIONAL CONTEXT:\n'
+            '- Country/Region: $region\n'
+            '${gradeLevel != null ? '- Grade Level: ${gradeLevel == 0 ? 'Kindergarten' : 'Grade $gradeLevel'}\n' : ''}'
+            '- Tailor questions to the curriculum, history, geography, culture, and examples relevant to $region\n'
+            '- Use place names, historical figures, and events familiar to students in $region\n'
+        : '';
+
     return '''
 You are an expert educational content creator specializing in ${subject.name}.
 
@@ -34,7 +44,7 @@ CONTEXT:
 - Topic: $topic
 - Difficulty: ${difficulty.name}
 
-$learnerContext
+$learnerContext$regionContext
 REQUIREMENTS:
 ${details.instructions}
 $avoidancePattern
@@ -76,9 +86,9 @@ $recent
   _QuestionInstruction _getQuestionTypeInstructions(QuestionType type) => switch (type) {
         QuestionType.multipleChoice => const _QuestionInstruction(
             instructions:
-                '- Create exactly 4 answer options (A, B, C, D)\n- Make one option clearly correct\n- Create plausible but incorrect distractors\n- Ensure options are similar in length and structure',
+                '- Create exactly 4 answer options with the FULL TEXT of each answer\n- Do NOT use letter labels like "A", "B" — write the actual answer text\n- Make one option clearly correct\n- Create plausible but incorrect distractors\n- Ensure options are similar in length and structure\n- The correctAnswer must be the EXACT FULL TEXT of the correct option',
             format:
-                '{"question":"...","type":"MULTIPLE_CHOICE","options":["A","B","C","D"],"correctAnswer":"A","explanation":"..."}',
+                '{"question":"What is the capital of France?","type":"MULTIPLE_CHOICE","options":["Paris","London","Berlin","Madrid"],"correctAnswer":"Paris","explanation":"Paris is the capital city of France."}',
           ),
         QuestionType.trueFalse => const _QuestionInstruction(
             instructions:

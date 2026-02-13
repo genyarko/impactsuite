@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -81,19 +82,25 @@ class _ChatPageState extends ConsumerState<ChatPage> {
 
                               final message = state
                                   .messages[state.messages.length - 1 - (state.isLoading ? index - 1 : index)];
-                              return _MessageBubble(message: message);
+                              return _AnimatedMessage(
+                                key: ValueKey(message.id),
+                                message: message,
+                                onGenerateQuiz: !message.isUser && message.content.length > 100
+                                    ? () => context.go('/quiz')
+                                    : null,
+                              );
                             },
                           ),
                     IgnorePointer(
                       child: Container(
-                        height: 18,
+                        height: 20,
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
                             begin: Alignment.topCenter,
                             end: Alignment.bottomCenter,
                             colors: [
                               Theme.of(context).colorScheme.surface,
-                              Theme.of(context).colorScheme.surface.withOpacity(0),
+                              Theme.of(context).colorScheme.surface.withValues(alpha: 0),
                             ],
                           ),
                         ),
@@ -147,7 +154,12 @@ class _ChatTopBar extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('AI Assistant', style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  'AI Assistant',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
                 Text('Always here to help', style: Theme.of(context).textTheme.bodySmall),
               ],
             ),
@@ -170,17 +182,28 @@ class _EmptyChatState extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              Icons.chat_bubble_outline,
+              Icons.chat,
               size: 64,
-              color: Theme.of(context).colorScheme.primary.withOpacity(0.35),
+              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
             ),
-            const SizedBox(height: 12),
-            Text('Start a conversation', style: Theme.of(context).textTheme.headlineSmall),
+            const SizedBox(height: 16),
+            Text(
+              'Start a conversation',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w500,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
             const SizedBox(height: 8),
             Text(
               'Ask me anything or use voice input to begin',
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurfaceVariant
+                        .withValues(alpha: 0.7),
+                  ),
             ),
           ],
         ),
@@ -189,10 +212,81 @@ class _EmptyChatState extends StatelessWidget {
   }
 }
 
-class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message});
+// Animated message wrapper matching Kotlin's AnimatedMessage
+class _AnimatedMessage extends StatefulWidget {
+  const _AnimatedMessage({
+    super.key,
+    required this.message,
+    this.onGenerateQuiz,
+  });
 
   final ChatMessage message;
+  final VoidCallback? onGenerateQuiz;
+
+  @override
+  State<_AnimatedMessage> createState() => _AnimatedMessageState();
+}
+
+class _AnimatedMessageState extends State<_AnimatedMessage>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _fadeAnimation;
+  late final Animation<Offset> _slideAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+    _fadeAnimation = CurvedAnimation(parent: _controller, curve: Curves.easeIn);
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.25),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: SlideTransition(
+        position: _slideAnimation,
+        child: _MessageBubble(
+          message: widget.message,
+          onGenerateQuiz: widget.onGenerateQuiz,
+        ),
+      ),
+    );
+  }
+}
+
+class _MessageBubble extends StatelessWidget {
+  const _MessageBubble({
+    required this.message,
+    this.onGenerateQuiz,
+  });
+
+  final ChatMessage message;
+  final VoidCallback? onGenerateQuiz;
+
+  void _copyToClipboard(BuildContext context) {
+    Clipboard.setData(ClipboardData(text: message.content));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Message copied to clipboard'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -205,24 +299,35 @@ class _MessageBubble extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primary,
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(20),
-                      topRight: Radius.circular(4),
-                      bottomLeft: Radius.circular(20),
-                      bottomRight: Radius.circular(20),
+                GestureDetector(
+                  onLongPress: () => _copyToClipboard(context),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary,
+                      borderRadius: const BorderRadius.only(
+                        topLeft: Radius.circular(20),
+                        topRight: Radius.circular(4),
+                        bottomLeft: Radius.circular(20),
+                        bottomRight: Radius.circular(20),
+                      ),
                     ),
-                  ),
-                  child: Text(
-                    message.content,
-                    style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
+                    child: Text(
+                      message.content,
+                      style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 4),
-                Text(_formatMessageTime(message.timestamp), style: Theme.of(context).textTheme.labelSmall),
+                Text(
+                  _formatMessageTime(message.timestamp),
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurfaceVariant
+                            .withValues(alpha: 0.6),
+                      ),
+                ),
               ],
             ),
           ),
@@ -248,30 +353,41 @@ class _MessageBubble extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(4),
-                    topRight: Radius.circular(20),
-                    bottomLeft: Radius.circular(20),
-                    bottomRight: Radius.circular(20),
+              GestureDetector(
+                onLongPress: () => _copyToClipboard(context),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(4),
+                      topRight: Radius.circular(20),
+                      bottomLeft: Radius.circular(20),
+                      bottomRight: Radius.circular(20),
+                    ),
                   ),
+                  child: Text(message.content),
                 ),
-                child: Text(message.content),
               ),
-              if (message.content.length > 100)
+              if (onGenerateQuiz != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: ActionChip(
-                    onPressed: null,
+                    onPressed: onGenerateQuiz,
                     avatar: const Icon(Icons.quiz, size: 16),
                     label: const Text('Generate Quiz'),
                   ),
                 ),
               const SizedBox(height: 4),
-              Text(_formatMessageTime(message.timestamp), style: Theme.of(context).textTheme.labelSmall),
+              Text(
+                _formatMessageTime(message.timestamp),
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurfaceVariant
+                          .withValues(alpha: 0.6),
+                    ),
+              ),
             ],
           ),
         ),
@@ -280,8 +396,52 @@ class _MessageBubble extends StatelessWidget {
   }
 }
 
-class _TypingIndicator extends StatelessWidget {
+// Animated typing indicator with bouncing dots matching Kotlin
+class _TypingIndicator extends StatefulWidget {
   const _TypingIndicator();
+
+  @override
+  State<_TypingIndicator> createState() => _TypingIndicatorState();
+}
+
+class _TypingIndicatorState extends State<_TypingIndicator>
+    with TickerProviderStateMixin {
+  late final List<AnimationController> _controllers;
+  late final List<Animation<double>> _animations;
+
+  @override
+  void initState() {
+    super.initState();
+    _controllers = List.generate(3, (i) {
+      return AnimationController(
+        duration: const Duration(milliseconds: 600),
+        vsync: this,
+      );
+    });
+
+    _animations = _controllers.map((c) {
+      return Tween<double>(begin: 0.3, end: 1.0).animate(
+        CurvedAnimation(parent: c, curve: Curves.easeInOut),
+      );
+    }).toList();
+
+    // Stagger the animations by 200ms each
+    for (var i = 0; i < _controllers.length; i++) {
+      Future.delayed(Duration(milliseconds: i * 200), () {
+        if (mounted) {
+          _controllers[i].repeat(reverse: true);
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final c in _controllers) {
+      c.dispose();
+    }
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -294,10 +454,27 @@ class _TypingIndicator extends StatelessWidget {
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(20),
           ),
-          child: const SizedBox(
-            width: 18,
-            height: 18,
-            child: CircularProgressIndicator(strokeWidth: 2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: List.generate(3, (i) {
+              return AnimatedBuilder(
+                animation: _animations[i],
+                builder: (context, _) {
+                  return Container(
+                    width: 8,
+                    height: 8,
+                    margin: EdgeInsets.only(left: i > 0 ? 4 : 0),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurfaceVariant
+                          .withValues(alpha: _animations[i].value),
+                    ),
+                  );
+                },
+              );
+            }),
           ),
         ),
       ],

@@ -158,29 +158,11 @@ class ChatController extends StateNotifier<ChatState> {
     state = state.copyWith(isLoading: true, clearError: true);
 
     try {
-      final chunks = _repository.stream(
+      final generated = await _repository.generate(
         AiGenerationRequest(prompt: '[chat] $trimmed'),
       );
 
-      var hasChunk = false;
-      final responseBuffer = StringBuffer();
-
-      await for (final chunk in chunks) {
-        if (chunk.trim().isEmpty) {
-          continue;
-        }
-        hasChunk = true;
-        responseBuffer.write(chunk);
-      }
-
-      if (!hasChunk) {
-        final generated = await _repository.generate(
-          AiGenerationRequest(prompt: '[chat] $trimmed'),
-        );
-        responseBuffer.write(generated.text);
-      }
-
-      final aiText = responseBuffer.toString().trim();
+      final aiText = generated.text.trim();
       if (aiText.isNotEmpty) {
         final aiTimestamp = DateTime.now();
         final aiMessage = ChatMessage(
@@ -209,10 +191,10 @@ class ChatController extends StateNotifier<ChatState> {
       }
 
       state = state.copyWith(isLoading: false, clearError: true);
-    } catch (_) {
+    } catch (e) {
       state = state.copyWith(
         isLoading: false,
-        error: 'Unable to generate a response right now.',
+        error: e.toString().replaceFirst('Exception: ', ''),
       );
     }
   }

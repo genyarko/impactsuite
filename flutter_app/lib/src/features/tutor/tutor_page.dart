@@ -1,16 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../ai/ai_conversation_controller.dart';
-import '../ai/ai_providers.dart';
-
-final _tutorControllerProvider =
-    StateNotifierProvider.autoDispose<AiConversationController, AiConversationState>((ref) {
-      return AiConversationController(
-        repository: ref.watch(unifiedAiRepositoryProvider),
-        serviceType: 'tutor',
-      );
-    });
+import '../../domain/features/tutor/tutor_models.dart';
+import 'tutor_controller.dart';
+import 'tutor_providers.dart';
 
 class TutorPage extends ConsumerStatefulWidget {
   const TutorPage({super.key});
@@ -20,186 +14,90 @@ class TutorPage extends ConsumerStatefulWidget {
 }
 
 class _TutorPageState extends ConsumerState<TutorPage> {
-  final TextEditingController _controller = TextEditingController();
-
-  _TutorSubject? _selectedSubject;
-  bool _showTopics = true;
+  final _messageController = TextEditingController();
+  final _scrollController = ScrollController();
 
   @override
   void dispose() {
-    _controller.dispose();
+    _messageController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
-  Future<void> _sendPrompt(String text) async {
-    final trimmed = text.trim();
-    if (trimmed.isEmpty) {
-      return;
-    }
-
-    _controller.clear();
-    await ref.read(_tutorControllerProvider.notifier).sendPrompt(trimmed);
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(_tutorControllerProvider);
+    final state = ref.watch(tutorControllerProvider);
+
+    // Auto-scroll when messages change
+    ref.listen(tutorControllerProvider.select((s) => s.messages.length), (_, __) {
+      _scrollToBottom();
+    });
 
     return SafeArea(
-      child: _selectedSubject == null
-          ? _TutorWelcomeScreen(
-              onStartSubject: (subject) {
-                setState(() {
-                  _selectedSubject = subject;
-                });
-                _sendPrompt(subject.starterPrompt);
-              },
-            )
-          : Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _TutorHeader(
-                    subject: _selectedSubject!,
-                    showTopics: _showTopics,
-                    onToggleTopics: () => setState(() => _showTopics = !_showTopics),
-                    onChangeSubject: () => setState(() => _selectedSubject = null),
-                  ),
-                  if (_showTopics) ...[
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      height: 40,
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        itemBuilder: (context, index) {
-                          final topic = _selectedSubject!.sampleTopics[index];
-                          return ActionChip(
-                            avatar: const Icon(Icons.lightbulb_outline, size: 16),
-                            label: Text(topic),
-                            onPressed: state.isLoading ? null : () => _sendPrompt('Explain $topic'),
-                          );
-                        },
-                        separatorBuilder: (_, __) => const SizedBox(width: 8),
-                        itemCount: _selectedSubject!.sampleTopics.length,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  Expanded(
-                    child: state.messages.isEmpty
-                        ? Center(
-                            child: Text(
-                              'Ask about ${_selectedSubject!.name} to get guided help.',
-                              style: Theme.of(context).textTheme.bodyLarge,
-                              textAlign: TextAlign.center,
-                            ),
-                          )
-                        : ListView.separated(
-                            itemCount: state.messages.length,
-                            separatorBuilder: (_, __) => const SizedBox(height: 10),
-                            itemBuilder: (context, index) {
-                              final message = state.messages[index];
-                              return _TutorMessageBubble(message: message);
-                            },
-                          ),
-                  ),
-                  if (state.error != null) ...[
-                    const SizedBox(height: 8),
-                    Text(state.error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                  ],
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _controller,
-                          enabled: !state.isLoading,
-                          textInputAction: TextInputAction.send,
-                          onSubmitted: state.isLoading ? null : _sendPrompt,
-                          decoration: InputDecoration(
-                            hintText: 'Ask your tutor about ${_selectedSubject!.name}...',
-                            border: const OutlineInputBorder(),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton(
-                        onPressed: state.isLoading ? null : () => _sendPrompt(_controller.text),
-                        child: state.isLoading
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.send),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
+      child: switch (state.phase) {
+        TutorPhase.profile => const _ProfilePhase(key: ValueKey('profile')),
+        TutorPhase.subjectSelect => const _SubjectSelectPhase(key: ValueKey('subjects')),
+        TutorPhase.sessionSetup => const _SessionSetupPhase(key: ValueKey('setup')),
+        TutorPhase.conversation => _ConversationPhase(
+            messageController: _messageController,
+            scrollController: _scrollController,
+            key: const ValueKey('conversation'),
+          ),
+        TutorPhase.sessionSummary => const _SessionSummaryPhase(key: ValueKey('summary')),
+      },
     );
   }
 }
 
-class _TutorHeader extends StatelessWidget {
-  const _TutorHeader({
-    required this.subject,
-    required this.showTopics,
-    required this.onToggleTopics,
-    required this.onChangeSubject,
-  });
+// =============================================================================
+// Phase 1: Student Profile
+// =============================================================================
 
-  final _TutorSubject subject;
-  final bool showTopics;
-  final VoidCallback onToggleTopics;
-  final VoidCallback onChangeSubject;
+class _ProfilePhase extends ConsumerStatefulWidget {
+  const _ProfilePhase({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return Card(
-      color: colorScheme.primaryContainer,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            CircleAvatar(
-              backgroundColor: subject.color.withValues(alpha: 0.2),
-              child: Icon(subject.icon, color: subject.color),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('AI Tutor', style: Theme.of(context).textTheme.titleMedium),
-                  Text('${subject.name} • ${subject.sessionLabel}'),
-                ],
-              ),
-            ),
-            IconButton(
-              tooltip: showTopics ? 'Hide suggested topics' : 'Show suggested topics',
-              onPressed: onToggleTopics,
-              icon: Icon(showTopics ? Icons.topic : Icons.topic_outlined),
-            ),
-            TextButton(onPressed: onChangeSubject, child: const Text('Change')),
-          ],
-        ),
-      ),
-    );
-  }
+  ConsumerState<_ProfilePhase> createState() => _ProfilePhaseState();
 }
 
-class _TutorWelcomeScreen extends StatelessWidget {
-  const _TutorWelcomeScreen({required this.onStartSubject});
+class _ProfilePhaseState extends ConsumerState<_ProfilePhase> {
+  final _nameController = TextEditingController();
+  int _gradeLevel = 8;
+  LearningStyle _learningStyle = LearningStyle.verbal;
 
-  final ValueChanged<_TutorSubject> onStartSubject;
+  @override
+  void initState() {
+    super.initState();
+    final profile = ref.read(tutorControllerProvider).studentProfile;
+    if (profile != null) {
+      _nameController.text = profile.name;
+      _gradeLevel = profile.gradeLevel;
+      _learningStyle = profile.learningStyle;
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -208,113 +106,690 @@ class _TutorWelcomeScreen extends StatelessWidget {
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
-                const Icon(Icons.school, size: 42),
+                const Icon(Icons.school, size: 48),
                 const SizedBox(height: 8),
-                Text('Welcome to AI Tutor', style: Theme.of(context).textTheme.headlineSmall),
+                Text('Welcome to AI Tutor', style: theme.textTheme.headlineSmall),
                 const SizedBox(height: 6),
                 Text(
-                  'Pick a subject to start a focused tutoring session.',
-                  style: Theme.of(context).textTheme.bodyMedium,
+                  'Tell us a bit about yourself so we can personalize your learning experience.',
+                  style: theme.textTheme.bodyMedium,
                   textAlign: TextAlign.center,
                 ),
               ],
             ),
           ),
         ),
-        const SizedBox(height: 12),
-        Text('What would you like to work on today?', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 16),
+
+        // Name
+        Text('Your Name', style: theme.textTheme.titleMedium),
         const SizedBox(height: 8),
-        ..._subjects.map((subject) => _SubjectSelectionCard(subject: subject, onStart: onStartSubject)),
+        TextField(
+          controller: _nameController,
+          decoration: const InputDecoration(
+            hintText: 'Enter your name',
+            border: OutlineInputBorder(),
+            prefixIcon: Icon(Icons.person),
+          ),
+          textCapitalization: TextCapitalization.words,
+        ),
+        const SizedBox(height: 16),
+
+        // Grade level
+        Text('Grade Level: $_gradeLevel', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 8),
+        Slider(
+          value: _gradeLevel.toDouble(),
+          min: 1,
+          max: 12,
+          divisions: 11,
+          label: 'Grade $_gradeLevel',
+          onChanged: (v) => setState(() => _gradeLevel = v.round()),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('1st', style: theme.textTheme.bodySmall),
+              Text('6th', style: theme.textTheme.bodySmall),
+              Text('12th', style: theme.textTheme.bodySmall),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // Learning style
+        Text('Learning Style', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 8),
+        ...LearningStyle.values.map((style) => RadioListTile<LearningStyle>(
+              title: Text(style.label),
+              subtitle: Text(style.description),
+              value: style,
+              groupValue: _learningStyle,
+              onChanged: (v) => setState(() => _learningStyle = v!),
+            )),
+        const SizedBox(height: 24),
+
+        FilledButton.icon(
+          onPressed: _nameController.text.trim().isEmpty
+              ? null
+              : () {
+                  ref.read(tutorControllerProvider.notifier).setStudentProfile(
+                        _nameController.text,
+                        _gradeLevel,
+                        _learningStyle,
+                      );
+                },
+          icon: const Icon(Icons.arrow_forward),
+          label: const Text('Continue'),
+        ),
       ],
     );
   }
 }
 
-class _SubjectSelectionCard extends StatefulWidget {
-  const _SubjectSelectionCard({required this.subject, required this.onStart});
+// =============================================================================
+// Phase 2: Subject Selection
+// =============================================================================
 
-  final _TutorSubject subject;
-  final ValueChanged<_TutorSubject> onStart;
+class _SubjectSelectPhase extends ConsumerWidget {
+  const _SubjectSelectPhase({super.key});
 
   @override
-  State<_SubjectSelectionCard> createState() => _SubjectSelectionCardState();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(tutorControllerProvider);
+    final theme = Theme.of(context);
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                const Icon(Icons.school, size: 32),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Hello, ${state.studentProfile?.name ?? "Student"}!',
+                        style: theme.textTheme.titleMedium,
+                      ),
+                      Text(
+                        '${state.studentProfile?.gradeLevelLabel ?? ""} '
+                        '${state.studentProfile?.learningStyle.label ?? ""} learner',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => ref.read(tutorControllerProvider.notifier).editProfile(),
+                  child: const Text('Edit'),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text('What would you like to study?', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 8),
+        ..._subjects.map((subject) => _SubjectCard(
+              subject: subject,
+              onTap: () => ref.read(tutorControllerProvider.notifier).selectSubject(subject.name),
+            )),
+      ],
+    );
+  }
 }
 
-class _SubjectSelectionCardState extends State<_SubjectSelectionCard> {
-  bool _expanded = false;
+class _SubjectCard extends StatelessWidget {
+  const _SubjectCard({required this.subject, required this.onTap});
+
+  final _TutorSubject subject;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final subject = widget.subject;
-
     return Card(
-      child: InkWell(
-        onTap: () => setState(() => _expanded = !_expanded),
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  CircleAvatar(
-                    backgroundColor: subject.color.withValues(alpha: 0.15),
-                    child: Icon(subject.icon, color: subject.color),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(subject.name, style: Theme.of(context).textTheme.titleMedium),
-                        Text(subject.description),
-                      ],
-                    ),
-                  ),
-                  Icon(_expanded ? Icons.keyboard_arrow_up : Icons.arrow_forward_ios, size: 18),
-                ],
-              ),
-              if (_expanded) ...[
-                const SizedBox(height: 12),
-                Text('Sample Topics', style: Theme.of(context).textTheme.labelLarge),
-                const SizedBox(height: 6),
-                ...subject.sampleTopics.take(3).map(
-                  (topic) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: Row(
-                      children: [
-                        Icon(Icons.circle, size: 7, color: subject.color),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text(topic)),
-                      ],
-                    ),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: subject.color.withValues(alpha: 0.15),
+          child: Icon(subject.icon, color: subject.color),
+        ),
+        title: Text(subject.name),
+        subtitle: Text(subject.description),
+        trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+        onTap: onTap,
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// Phase 3: Session Setup
+// =============================================================================
+
+class _SessionSetupPhase extends ConsumerWidget {
+  const _SessionSetupPhase({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(tutorControllerProvider);
+    final theme = Theme.of(context);
+    final controller = ref.read(tutorControllerProvider.notifier);
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Card(
+          color: theme.colorScheme.primaryContainer,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Icon(Icons.school, color: theme.colorScheme.primary),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    '${state.selectedSubject} session for ${state.studentProfile?.name ?? ""}',
+                    style: theme.textTheme.titleMedium,
                   ),
                 ),
-                const SizedBox(height: 10),
-                FilledButton.icon(
-                  onPressed: () => widget.onStart(subject),
-                  icon: const Icon(Icons.play_arrow),
-                  label: Text('Start Learning ${subject.name}'),
+                TextButton(
+                  onPressed: () => controller.changeSubject(),
+                  child: const Text('Change'),
                 ),
               ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text('Choose a session type:', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 8),
+        ...TutorSessionType.values.map((type) => Card(
+              child: ListTile(
+                leading: CircleAvatar(
+                  child: Icon(_sessionTypeIcon(type)),
+                ),
+                title: Text(type.label),
+                subtitle: Text(type.description),
+                trailing: const Icon(Icons.play_arrow),
+                onTap: () => controller.startSession(type),
+              ),
+            )),
+      ],
+    );
+  }
+
+  IconData _sessionTypeIcon(TutorSessionType type) {
+    switch (type) {
+      case TutorSessionType.homeworkHelp:
+        return Icons.assignment;
+      case TutorSessionType.conceptExplanation:
+        return Icons.lightbulb;
+      case TutorSessionType.examPrep:
+        return Icons.quiz;
+      case TutorSessionType.practiceProblems:
+        return Icons.calculate;
+    }
+  }
+}
+
+// =============================================================================
+// Phase 4: Conversation
+// =============================================================================
+
+class _ConversationPhase extends ConsumerWidget {
+  const _ConversationPhase({
+    required this.messageController,
+    required this.scrollController,
+    super.key,
+  });
+
+  final TextEditingController messageController;
+  final ScrollController scrollController;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(tutorControllerProvider);
+    final controller = ref.read(tutorControllerProvider.notifier);
+    final theme = Theme.of(context);
+    final subject = _subjects.where((s) => s.name == state.selectedSubject).firstOrNull;
+
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        children: [
+          // Header
+          _ConversationHeader(
+            subject: state.selectedSubject ?? '',
+            sessionType: state.sessionType?.label ?? '',
+            gradeLevel: state.studentProfile?.gradeLevel ?? 0,
+            subjectColor: subject?.color ?? Colors.teal,
+            subjectIcon: subject?.icon ?? Icons.school,
+            onChangeSubject: () => controller.changeSubject(),
+            onEndSession: () => controller.endSession(),
+          ),
+
+          // Topic suggestions
+          if (subject != null && state.messages.length <= 1) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 40,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: subject.sampleTopics.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final topic = subject.sampleTopics[index];
+                  return ActionChip(
+                    avatar: const Icon(Icons.lightbulb_outline, size: 16),
+                    label: Text(topic),
+                    onPressed: state.isLoading ? null : () => controller.sendMessage(topic),
+                  );
+                },
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 8),
+
+          // Messages
+          Expanded(
+            child: state.messages.isEmpty
+                ? Center(
+                    child: Text(
+                      'Start by asking a question about ${state.selectedSubject}.',
+                      style: theme.textTheme.bodyLarge,
+                      textAlign: TextAlign.center,
+                    ),
+                  )
+                : ListView.separated(
+                    controller: scrollController,
+                    itemCount: state.messages.length + (state.isLoading ? 1 : 0),
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      if (index == state.messages.length) {
+                        return const _TypingIndicator();
+                      }
+                      final message = state.messages[index];
+                      return _MessageBubble(
+                        message: message,
+                        onBookmark: () => controller.bookmarkMessage(message.id),
+                      );
+                    },
+                  ),
+          ),
+
+          // Error banner
+          if (state.error != null) ...[
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    state.error!,
+                    style: TextStyle(color: theme.colorScheme.error, fontSize: 12),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => controller.retryLastMessage(),
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          ],
+
+          const SizedBox(height: 4),
+
+          // Quick action buttons
+          if (!state.isLoading && state.messages.length > 1)
+            SizedBox(
+              height: 36,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  _QuickActionChip(
+                    label: 'Get Hint',
+                    icon: Icons.tips_and_updates,
+                    onPressed: state.currentTopic != null ? () => controller.getHint() : null,
+                  ),
+                  const SizedBox(width: 6),
+                  _QuickActionChip(
+                    label: 'Explain Simpler',
+                    icon: Icons.auto_fix_high,
+                    onPressed: () => controller.requestSimpler(),
+                  ),
+                  const SizedBox(width: 6),
+                  _QuickActionChip(
+                    label: 'Give Example',
+                    icon: Icons.lightbulb,
+                    onPressed: () => controller.requestExample(),
+                  ),
+                  const SizedBox(width: 6),
+                  _QuickActionChip(
+                    label: 'Quiz Me',
+                    icon: Icons.quiz,
+                    onPressed: () => controller.requestQuiz(),
+                  ),
+                ],
+              ),
+            ),
+
+          const SizedBox(height: 8),
+
+          // Input bar
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: messageController,
+                  enabled: !state.isLoading,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: state.isLoading
+                      ? null
+                      : (text) {
+                          controller.sendMessage(text);
+                          messageController.clear();
+                        },
+                  decoration: const InputDecoration(
+                    hintText: 'Ask your tutor...',
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: state.isLoading
+                    ? null
+                    : () {
+                        controller.sendMessage(messageController.text);
+                        messageController.clear();
+                      },
+                child: state.isLoading
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.send),
+              ),
             ],
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ConversationHeader extends StatelessWidget {
+  const _ConversationHeader({
+    required this.subject,
+    required this.sessionType,
+    required this.gradeLevel,
+    required this.subjectColor,
+    required this.subjectIcon,
+    required this.onChangeSubject,
+    required this.onEndSession,
+  });
+
+  final String subject;
+  final String sessionType;
+  final int gradeLevel;
+  final Color subjectColor;
+  final IconData subjectIcon;
+  final VoidCallback onChangeSubject;
+  final VoidCallback onEndSession;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Card(
+      color: colorScheme.primaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 16,
+              backgroundColor: subjectColor.withValues(alpha: 0.2),
+              child: Icon(subjectIcon, size: 18, color: subjectColor),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(subject, style: Theme.of(context).textTheme.titleSmall),
+                  Text('$sessionType  Grade $gradeLevel',
+                      style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ),
+            ),
+            TextButton(onPressed: onChangeSubject, child: const Text('Change')),
+            IconButton(
+              tooltip: 'End session',
+              icon: const Icon(Icons.stop_circle_outlined, size: 20),
+              onPressed: onEndSession,
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _TutorMessageBubble extends StatelessWidget {
-  const _TutorMessageBubble({required this.message});
+class _QuickActionChip extends StatelessWidget {
+  const _QuickActionChip({required this.label, required this.icon, this.onPressed});
 
-  final AiConversationMessage message;
+  final String label;
+  final IconData icon;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
-    final isUser = message.isUser;
+    return ActionChip(
+      avatar: Icon(icon, size: 16),
+      label: Text(label, style: const TextStyle(fontSize: 12)),
+      onPressed: onPressed,
+      visualDensity: VisualDensity.compact,
+    );
+  }
+}
+
+// =============================================================================
+// Phase 5: Session Summary
+// =============================================================================
+
+class _SessionSummaryPhase extends ConsumerWidget {
+  const _SessionSummaryPhase({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(tutorControllerProvider);
+    final insights = state.sessionInsights;
+    final theme = Theme.of(context);
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Card(
+          color: theme.colorScheme.primaryContainer,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                const Icon(Icons.check_circle, size: 48),
+                const SizedBox(height: 8),
+                Text('Session Complete!', style: theme.textTheme.headlineSmall),
+                const SizedBox(height: 4),
+                Text(state.selectedSubject ?? '', style: theme.textTheme.titleMedium),
+              ],
+            ),
+          ),
+        ),
+
+        if (insights != null) ...[
+          const SizedBox(height: 12),
+
+          // Summary
+          if (insights.summary.isNotEmpty)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Summary', style: theme.textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    Text(insights.summary),
+                  ],
+                ),
+              ),
+            ),
+
+          // Understanding gauge
+          if (insights.overallUnderstanding > 0)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Understanding', style: theme.textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    LinearProgressIndicator(
+                      value: insights.overallUnderstanding,
+                      minHeight: 8,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    const SizedBox(height: 4),
+                    Text('${(insights.overallUnderstanding * 100).round()}%'),
+                  ],
+                ),
+              ),
+            ),
+
+          // Concepts covered
+          if (insights.conceptsCovered.isNotEmpty)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Concepts Covered', style: theme.textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: insights.conceptsCovered
+                          .map((c) => Chip(label: Text(c, style: const TextStyle(fontSize: 12))))
+                          .toList(),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          // Strengths
+          if (insights.strengths.isNotEmpty)
+            _InsightsList(title: 'Strengths', items: insights.strengths, icon: Icons.star),
+
+          // Areas for improvement
+          if (insights.areasForImprovement.isNotEmpty)
+            _InsightsList(
+              title: 'Areas for Improvement',
+              items: insights.areasForImprovement,
+              icon: Icons.trending_up,
+            ),
+
+          // Next steps
+          if (insights.nextSteps.isNotEmpty)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Next Steps', style: theme.textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    Text(insights.nextSteps),
+                  ],
+                ),
+              ),
+            ),
+        ],
+
+        const SizedBox(height: 24),
+        FilledButton.icon(
+          onPressed: () => ref.read(tutorControllerProvider.notifier).startNewSession(),
+          icon: const Icon(Icons.refresh),
+          label: const Text('Start New Session'),
+        ),
+      ],
+    );
+  }
+}
+
+class _InsightsList extends StatelessWidget {
+  const _InsightsList({required this.title, required this.items, required this.icon});
+
+  final String title;
+  final List<String> items;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: theme.textTheme.titleMedium),
+            const SizedBox(height: 8),
+            ...items.map((item) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(icon, size: 16, color: theme.colorScheme.primary),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(item)),
+                    ],
+                  ),
+                )),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// Shared Widgets
+// =============================================================================
+
+class _MessageBubble extends StatelessWidget {
+  const _MessageBubble({required this.message, required this.onBookmark});
+
+  final TutorMessage message;
+  final VoidCallback onBookmark;
+
+  @override
+  Widget build(BuildContext context) {
+    final isUser = message is TutorUserMessage;
     final colorScheme = Theme.of(context).colorScheme;
+    final aiMessage = message is TutorAiMessage ? message as TutorAiMessage : null;
 
     return Row(
       mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
@@ -329,13 +804,119 @@ class _TutorMessageBubble extends StatelessWidget {
           const SizedBox(width: 8),
         ],
         Flexible(
-          child: Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: isUser ? colorScheme.secondaryContainer : colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(message.text),
+          child: Column(
+            crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isUser ? colorScheme.secondaryContainer : colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (aiMessage != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(_approachIcon(aiMessage.approach), size: 12, color: colorScheme.outline),
+                            const SizedBox(width: 4),
+                            Text(
+                              aiMessage.approach.label,
+                              style: TextStyle(fontSize: 10, color: colorScheme.outline),
+                            ),
+                          ],
+                        ),
+                      ),
+                    SelectableText(message.content),
+                  ],
+                ),
+              ),
+              // Actions row
+              if (!isUser)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: Icon(
+                        message.isBookmarked ? Icons.bookmark : Icons.bookmark_border,
+                        size: 16,
+                      ),
+                      onPressed: onBookmark,
+                      visualDensity: VisualDensity.compact,
+                      tooltip: 'Bookmark',
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.copy, size: 16),
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: message.content));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Copied to clipboard'), duration: Duration(seconds: 1)),
+                        );
+                      },
+                      visualDensity: VisualDensity.compact,
+                      tooltip: 'Copy',
+                    ),
+                  ],
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  IconData _approachIcon(TeachingApproach approach) {
+    switch (approach) {
+      case TeachingApproach.socratic:
+        return Icons.help_outline;
+      case TeachingApproach.explanation:
+        return Icons.menu_book;
+      case TeachingApproach.problemSolving:
+        return Icons.build;
+      case TeachingApproach.encouragement:
+        return Icons.favorite;
+      case TeachingApproach.correction:
+        return Icons.edit;
+    }
+  }
+}
+
+class _TypingIndicator extends StatelessWidget {
+  const _TypingIndicator();
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Row(
+      children: [
+        CircleAvatar(
+          radius: 14,
+          backgroundColor: colorScheme.primaryContainer,
+          child: Icon(Icons.smart_toy, size: 16, color: colorScheme.primary),
+        ),
+        const SizedBox(width: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2, color: colorScheme.primary),
+              ),
+              const SizedBox(width: 8),
+              Text('Thinking...', style: TextStyle(color: colorScheme.outline, fontSize: 13)),
+            ],
           ),
         ),
       ],
@@ -343,88 +924,74 @@ class _TutorMessageBubble extends StatelessWidget {
   }
 }
 
+// =============================================================================
+// Subject Data (kept from original)
+// =============================================================================
+
 class _TutorSubject {
   const _TutorSubject({
     required this.name,
     required this.description,
-    required this.sessionLabel,
     required this.icon,
     required this.color,
     required this.sampleTopics,
-    required this.starterPrompt,
   });
 
   final String name;
   final String description;
-  final String sessionLabel;
   final IconData icon;
   final Color color;
   final List<String> sampleTopics;
-  final String starterPrompt;
 }
 
 const _subjects = <_TutorSubject>[
   _TutorSubject(
     name: 'Mathematics',
     description: 'Algebra, Geometry, Calculus, and more',
-    sessionLabel: 'Practice Problems',
     icon: Icons.calculate,
     color: Color(0xFF2196F3),
     sampleTopics: ['Linear equations and functions', 'Geometric shapes and angles', 'Probability and statistics'],
-    starterPrompt: 'Let\'s start a mathematics practice session. Give me one warm-up question.',
   ),
   _TutorSubject(
     name: 'Science',
     description: 'Physics, Chemistry, Biology',
-    sessionLabel: 'Concept Explanation',
     icon: Icons.science,
     color: Color(0xFF4CAF50),
     sampleTopics: ['Forces and motion', 'Chemical reactions', 'Cell biology and genetics'],
-    starterPrompt: 'Let\'s start science concept explanation with a short intro and a question for me.',
   ),
   _TutorSubject(
     name: 'English',
     description: 'Grammar, Writing, Literature',
-    sessionLabel: 'Homework Help',
     icon: Icons.menu_book,
     color: Color(0xFFFF9800),
     sampleTopics: ['Grammar and sentence structure', 'Poetry analysis and writing', 'Essay writing techniques'],
-    starterPrompt: 'Let\'s do English homework help. Ask me what assignment I am working on.',
   ),
   _TutorSubject(
     name: 'History',
     description: 'World History, Ancient civilizations, Modern history',
-    sessionLabel: 'Concept Explanation',
     icon: Icons.history_edu,
     color: Color(0xFF9C27B0),
     sampleTopics: ['Ancient civilizations', 'World wars and conflicts', 'Modern democracy'],
-    starterPrompt: 'Let\'s start history tutoring. Give me a brief timeline and quiz me.',
   ),
   _TutorSubject(
     name: 'Geography',
     description: 'Physical geography, Human geography, Maps',
-    sessionLabel: 'Concept Explanation',
     icon: Icons.public,
     color: Color(0xFF00BCD4),
     sampleTopics: ['Climate and weather patterns', 'Physical landscapes', 'Population and urbanization'],
-    starterPrompt: 'Let\'s start geography tutoring with one key concept and one check question.',
   ),
   _TutorSubject(
     name: 'Economics',
     description: 'Microeconomics, Macroeconomics, Markets',
-    sessionLabel: 'Concept Explanation',
     icon: Icons.trending_up,
     color: Color(0xFF795548),
     sampleTopics: ['Supply and demand', 'Market structures', 'International trade'],
-    starterPrompt: 'Let\'s start economics tutoring. Explain supply and demand with a simple example.',
   ),
   _TutorSubject(
     name: 'Computer Science',
-    description: 'Programming, Algorithms, Data Structures, Web Development',
-    sessionLabel: 'Practice Problems',
+    description: 'Programming, Algorithms, Data Structures',
     icon: Icons.computer,
     color: Color(0xFF607D8B),
     sampleTopics: ['Programming fundamentals', 'Data structures and algorithms', 'Web development basics'],
-    starterPrompt: 'Let\'s start computer science practice. Give me one beginner coding challenge.',
   ),
 ];

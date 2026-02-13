@@ -9,6 +9,7 @@ import 'features/chat/chat_page.dart';
 import 'features/crisis/crisis_page.dart';
 import 'features/home/home_page.dart';
 import 'features/plant/image_classification_page.dart';
+import 'features/quiz/quiz_analytics_page.dart';
 import 'features/quiz/quiz_page.dart';
 import 'features/settings/settings_page.dart';
 import 'features/story/story_page.dart';
@@ -44,6 +45,7 @@ final _router = GoRouter(
         GoRoute(path: '/chat/:sessionId', builder: (_, state) => ChatPage(sessionId: state.pathParameters['sessionId']!)),
         GoRoute(path: '/live_caption', builder: (_, __) => const LiveCaptionPage()),
         GoRoute(path: '/quiz', builder: (_, __) => const QuizPage()),
+        GoRoute(path: '/quiz/analytics', builder: (_, __) => const QuizAnalyticsPage()),
         GoRoute(path: '/cbt_coach', builder: (_, __) => const CbtCoachPage()),
         GoRoute(path: '/plant_scanner', builder: (_, __) => const ImageClassificationPage()),
         GoRoute(path: '/summarizer', builder: (_, __) => const SummarizerPage()),

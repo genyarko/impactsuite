@@ -19,19 +19,17 @@ void main() {
     expect(gaps.first.subject, 'science');
   });
 
-  test('cbt session manager detects meaningful reframe and mood improvement', () {
-    const manager = CbtSessionManager();
-    final summary = manager.evaluate(
-      const CbtThoughtRecord(
-        automaticThought: 'I always fail',
-        reframe: 'I can improve with practice and feedback',
-        moodBefore: CbtMood.low,
-        moodAfter: CbtMood.good,
-      ),
-    );
+  test('cbt emotion detection returns correct emotion for keyword match', () {
+    // Verify the Emotion enum and CBTTechnique models are functional
+    expect(Emotion.fromString('anxious'), Emotion.anxious);
+    expect(Emotion.fromString('unknown'), Emotion.neutral);
+    expect(Emotion.anxious.label, 'Anxious');
 
-    expect(summary.improvement, 2);
-    expect(summary.hasMeaningfulReframe, isTrue);
+    // Verify technique lookup
+    expect(CBTTechnique.fromId('thought_challenging')?.name, 'Thought Challenging');
+    expect(CBTTechnique.fromId('54321_grounding')?.name, '5-4-3-2-1 Grounding');
+    expect(CBTTechnique.fromId('pmr')?.name, 'Progressive Muscle Relaxation');
+    expect(CBTTechnique.builtIn.length, 3);
   });
 
   test('crisis severity classifier catches critical phrase', () {

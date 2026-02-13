@@ -176,12 +176,8 @@ class _UploadCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Supports TXT, DOCX, and PDF* files',
+              'Supports TXT, DOCX, and PDF files',
               style: Theme.of(context).textTheme.bodySmall,
-            ),
-            Text(
-              '*PDF extraction is limited',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(fontStyle: FontStyle.italic),
             ),
           ],
         ),

@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:syncfusion_flutter_pdf/pdf.dart';
 
 import '../../domain/services/ai/ai_models.dart';
 import '../../domain/services/ai/ai_repository.dart';
@@ -158,9 +159,23 @@ class SummarizerController extends StateNotifier<SummarizerState> {
     }
 
     if (name.endsWith('.pdf')) {
-      throw UnsupportedError(
-        'PDF extraction is limited in Flutter right now. Please paste text instead.',
-      );
+      try {
+        final document = PdfDocument(inputBytes: bytes);
+        final extractor = PdfTextExtractor(document);
+        final plainText = extractor.extractText().trim();
+        document.dispose();
+        if (plainText.isEmpty) {
+          throw UnsupportedError(
+            'No extractable text found in this PDF. It may be scanned/image-based. Please paste text instead.',
+          );
+        }
+        return plainText;
+      } catch (e) {
+        if (e is UnsupportedError) rethrow;
+        throw UnsupportedError(
+          'Could not read this PDF (${e.runtimeType}). Please paste text instead.',
+        );
+      }
     }
 
     throw UnsupportedError('Unsupported file type. Please use TXT or DOCX.');

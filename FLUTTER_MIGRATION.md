@@ -1,5 +1,11 @@
 # Flutter Rewrite Plan
 
+*** Next steps in CBT not working too properly.
+*** the storymode did not generate images. also the pages all had the same storyline.
+*** full implement crisis mode
+*** pdf extraction not working for summary. 
+*** implement tutor mode.
+*** repeat questions student fail in next quiz. 
 This repository now includes a Flutter application shell in `flutter_app/` that maps the main
 Kotlin/Compose feature areas into Flutter routes.
 
