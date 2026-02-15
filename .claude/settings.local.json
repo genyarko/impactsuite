@@ -44,7 +44,8 @@
       "Bash(powershell -Command:*)",
       "Bash(vercel:*)",
       "Bash(flutter build:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(dart analyze:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

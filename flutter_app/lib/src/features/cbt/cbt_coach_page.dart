@@ -587,7 +587,9 @@ class _TechniqueChip extends StatelessWidget {
           const SizedBox(width: 4),
           Flexible(
             child: Text(
-              '${technique.name} (${currentStep + 1}/${technique.steps.length})',
+              currentStep >= technique.steps.length
+                  ? '${technique.name} (Done)'
+                  : '${technique.name} (${currentStep + 1}/${technique.steps.length})',
               style: TextStyle(
                 color: colorScheme.onSecondaryContainer,
                 fontWeight: FontWeight.w500,

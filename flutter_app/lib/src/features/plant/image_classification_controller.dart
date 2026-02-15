@@ -47,18 +47,62 @@ class ImageClassificationState {
   }
 }
 
+class FoodItemInfo {
+  const FoodItemInfo({
+    required this.name,
+    this.estimatedServing = '',
+    this.calories = 0,
+    this.proteinGrams = 0,
+    this.carbsGrams = 0,
+    this.fatGrams = 0,
+  });
+
+  final String name;
+  final String estimatedServing;
+  final int calories;
+  final double proteinGrams;
+  final double carbsGrams;
+  final double fatGrams;
+}
+
+class NutritionSummary {
+  const NutritionSummary({
+    this.calories = 0,
+    this.proteinGrams = 0,
+    this.carbsGrams = 0,
+    this.fatGrams = 0,
+    this.fiberGrams = 0,
+    this.sugarGrams = 0,
+  });
+
+  final int calories;
+  final double proteinGrams;
+  final double carbsGrams;
+  final double fatGrams;
+  final double fiberGrams;
+  final double sugarGrams;
+}
+
 class ImageClassificationResult {
   const ImageClassificationResult({
     required this.diagnosis,
     required this.explanation,
     required this.description,
     required this.recommendedActions,
+    this.category = 'object',
+    this.foodItems = const [],
+    this.totalNutrition,
   });
 
   final PlantDiagnosis diagnosis;
   final String explanation;
   final String description;
   final List<String> recommendedActions;
+  final String category;
+  final List<FoodItemInfo> foodItems;
+  final NutritionSummary? totalNutrition;
+
+  bool get isFood => category == 'food';
 }
 
 class ImageClassificationController extends ChangeNotifier {
@@ -158,7 +202,7 @@ class ImageClassificationController extends ChangeNotifier {
         AiGenerationRequest(
           prompt: _classificationPrompt,
           temperature: 0.2,
-          maxOutputTokens: 800,
+          maxOutputTokens: 2048,
           imageBase64: imageBase64,
         ),
       );
@@ -176,6 +220,9 @@ class ImageClassificationController extends ChangeNotifier {
           explanation: _interpreter.explain(diagnosis),
           description: parsed.description,
           recommendedActions: parsed.recommendedActions,
+          category: parsed.category,
+          foodItems: parsed.foodItems,
+          totalNutrition: parsed.totalNutrition,
         ),
       );
       notifyListeners();
@@ -239,6 +286,40 @@ class ImageClassificationController extends ChangeNotifier {
                 .toList(growable: false) ??
             const <String>[];
 
+        final category = decoded['category']?.toString().trim() ?? 'object';
+
+        // Parse food items
+        final foodItemsList = <FoodItemInfo>[];
+        final foodItemsRaw = decoded['foodItems'] as List<dynamic>?;
+        if (foodItemsRaw != null) {
+          for (final item in foodItemsRaw) {
+            if (item is Map<String, dynamic>) {
+              foodItemsList.add(FoodItemInfo(
+                name: item['name']?.toString() ?? 'Unknown',
+                estimatedServing: item['estimatedServing']?.toString() ?? '',
+                calories: (item['calories'] as num?)?.toInt() ?? 0,
+                proteinGrams: (item['proteinGrams'] as num?)?.toDouble() ?? 0,
+                carbsGrams: (item['carbsGrams'] as num?)?.toDouble() ?? 0,
+                fatGrams: (item['fatGrams'] as num?)?.toDouble() ?? 0,
+              ));
+            }
+          }
+        }
+
+        // Parse total nutrition
+        NutritionSummary? totalNutrition;
+        final totalRaw = decoded['totalNutrition'] as Map<String, dynamic>?;
+        if (totalRaw != null) {
+          totalNutrition = NutritionSummary(
+            calories: (totalRaw['calories'] as num?)?.toInt() ?? 0,
+            proteinGrams: (totalRaw['proteinGrams'] as num?)?.toDouble() ?? 0,
+            carbsGrams: (totalRaw['carbsGrams'] as num?)?.toDouble() ?? 0,
+            fatGrams: (totalRaw['fatGrams'] as num?)?.toDouble() ?? 0,
+            fiberGrams: (totalRaw['fiberGrams'] as num?)?.toDouble() ?? 0,
+            sugarGrams: (totalRaw['sugarGrams'] as num?)?.toDouble() ?? 0,
+          );
+        }
+
         return _ParsedDiagnosis(
           label: (decoded['label']?.toString().trim().isNotEmpty ?? false)
               ? decoded['label'].toString().trim()
@@ -253,6 +334,9 @@ class ImageClassificationController extends ChangeNotifier {
                   'Consult a local expert before treatment.',
                 ]
               : actions,
+          category: category,
+          foodItems: foodItemsList,
+          totalNutrition: totalNutrition,
         );
       }
     }
@@ -320,12 +404,18 @@ class _ParsedDiagnosis {
     required this.confidence,
     required this.description,
     required this.recommendedActions,
+    this.category = 'object',
+    this.foodItems = const [],
+    this.totalNutrition,
   });
 
   final String label;
   final double confidence;
   final String description;
   final List<String> recommendedActions;
+  final String category;
+  final List<FoodItemInfo> foodItems;
+  final NutritionSummary? totalNutrition;
 }
 
 extension on AiGenerationRequest {
@@ -343,15 +433,44 @@ extension on AiGenerationRequest {
 }
 
 const String _classificationPrompt = '''
-Classify this image with focus on plant/food/household-object recognition.
-Return strict JSON only using this schema:
+Analyze this image. Identify what is shown — plants, food/meals, or other objects.
+
+IF THE IMAGE CONTAINS FOOD OR A MEAL:
+List every individual food item you can identify. For each item and for the overall meal, estimate nutritional content.
+
+Return strict JSON using this schema:
 {
-  "label": "specific object or condition",
+  "label": "specific name of the object, plant, dish, or meal",
+  "category": "food" | "plant" | "object",
   "confidence": 0.0,
-  "description": "short explanation",
-  "recommendedActions": ["action1", "action2", "action3"]
+  "description": "detailed description of what you see",
+  "recommendedActions": ["action1", "action2", "action3"],
+  "foodItems": [
+    {
+      "name": "item name (e.g. fried egg)",
+      "estimatedServing": "e.g. 1 large egg",
+      "calories": 90,
+      "proteinGrams": 6.3,
+      "carbsGrams": 0.6,
+      "fatGrams": 7.0
+    }
+  ],
+  "totalNutrition": {
+    "calories": 0,
+    "proteinGrams": 0.0,
+    "carbsGrams": 0.0,
+    "fatGrams": 0.0,
+    "fiberGrams": 0.0,
+    "sugarGrams": 0.0
+  }
 }
+
+RULES:
 - confidence must be between 0 and 1.
+- For food: identify ALL visible items (eggs, rice, bread, vegetables, sauces, etc.). Be thorough.
+- For food: provide realistic per-item and total nutritional estimates.
+- For food: recommendedActions should include health/dietary tips.
+- For non-food images: omit foodItems and totalNutrition fields.
 - keep recommendedActions practical and safe.
 - if uncertain, set a lower confidence and explain uncertainty.
 ''';

@@ -639,6 +639,21 @@ class _QuizPageState extends ConsumerState<QuizPage> {
             ),
           ],
         ),
+        // Retry failed questions button
+        if (quiz.questions.any((q) => q.isAnswered && !q.isCorrect)) ...[
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () =>
+                  ref.read(quizControllerProvider.notifier).retryFailedQuestions(),
+              icon: const Icon(Icons.replay),
+              label: Text(
+                'Retry Failed Questions (${quiz.questions.where((q) => q.isAnswered && !q.isCorrect).length})',
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 24),
 
         // Per-question review

@@ -315,6 +315,7 @@ class _ResultCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final confidencePercent =
         (result.diagnosis.confidence * 100).toStringAsFixed(1);
+    final icon = result.isFood ? Icons.restaurant : Icons.grass;
 
     return Card(
       child: Padding(
@@ -324,8 +325,7 @@ class _ResultCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.grass,
-                    color: Theme.of(context).colorScheme.primary),
+                Icon(icon, color: Theme.of(context).colorScheme.primary),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -345,6 +345,56 @@ class _ResultCard extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
             ),
+
+            // Food items breakdown
+            if (result.isFood && result.foodItems.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Text(
+                'Detected food items',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 8),
+              for (final item in result.foodItems)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(item.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                            if (item.estimatedServing.isNotEmpty)
+                              Text(item.estimatedServing, style: Theme.of(context).textTheme.bodySmall),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        flex: 4,
+                        child: Text(
+                          '${item.calories} cal  P: ${item.proteinGrams.toStringAsFixed(1)}g  C: ${item.carbsGrams.toStringAsFixed(1)}g  F: ${item.fatGrams.toStringAsFixed(1)}g',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+
+            // Total nutrition summary
+            if (result.isFood && result.totalNutrition != null) ...[
+              const SizedBox(height: 12),
+              const Divider(),
+              const SizedBox(height: 8),
+              Text(
+                'Total nutrition estimate',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 8),
+              _NutritionGrid(nutrition: result.totalNutrition!),
+            ],
+
             const SizedBox(height: 12),
             Text(
               'Recommended actions',
@@ -364,6 +414,65 @@ class _ResultCard extends StatelessWidget {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _NutritionGrid extends StatelessWidget {
+  const _NutritionGrid({required this.nutrition});
+
+  final NutritionSummary nutrition;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 12,
+      runSpacing: 8,
+      children: [
+        _NutritionChip(label: 'Calories', value: '${nutrition.calories}', unit: 'kcal', color: Colors.orange),
+        _NutritionChip(label: 'Protein', value: nutrition.proteinGrams.toStringAsFixed(1), unit: 'g', color: Colors.red),
+        _NutritionChip(label: 'Carbs', value: nutrition.carbsGrams.toStringAsFixed(1), unit: 'g', color: Colors.blue),
+        _NutritionChip(label: 'Fat', value: nutrition.fatGrams.toStringAsFixed(1), unit: 'g', color: Colors.amber),
+        if (nutrition.fiberGrams > 0)
+          _NutritionChip(label: 'Fiber', value: nutrition.fiberGrams.toStringAsFixed(1), unit: 'g', color: Colors.green),
+        if (nutrition.sugarGrams > 0)
+          _NutritionChip(label: 'Sugar', value: nutrition.sugarGrams.toStringAsFixed(1), unit: 'g', color: Colors.pink),
+      ],
+    );
+  }
+}
+
+class _NutritionChip extends StatelessWidget {
+  const _NutritionChip({
+    required this.label,
+    required this.value,
+    required this.unit,
+    required this.color,
+  });
+
+  final String label;
+  final String value;
+  final String unit;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        color: color.withValues(alpha: 0.12),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$value $unit',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          Text(label, style: Theme.of(context).textTheme.bodySmall),
+        ],
       ),
     );
   }
