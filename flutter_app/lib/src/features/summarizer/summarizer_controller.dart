@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:pdfx/pdfx.dart' as pdfx;
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
 import '../../domain/services/ai/ai_models.dart';
@@ -18,6 +19,7 @@ class SummarizerState {
     this.processingProgress = 0,
     this.extractedTextLength = 0,
     this.lastProcessedText,
+    this.statusLabel,
   });
 
   final String? fileName;
@@ -27,6 +29,7 @@ class SummarizerState {
   final double processingProgress;
   final int extractedTextLength;
   final String? lastProcessedText;
+  final String? statusLabel;
 
   SummarizerState copyWith({
     String? fileName,
@@ -36,6 +39,7 @@ class SummarizerState {
     double? processingProgress,
     int? extractedTextLength,
     String? lastProcessedText,
+    Object? statusLabel = _noChange,
   }) {
     return SummarizerState(
       fileName: fileName ?? this.fileName,
@@ -45,6 +49,7 @@ class SummarizerState {
       processingProgress: processingProgress ?? this.processingProgress,
       extractedTextLength: extractedTextLength ?? this.extractedTextLength,
       lastProcessedText: lastProcessedText ?? this.lastProcessedText,
+      statusLabel: identical(statusLabel, _noChange) ? this.statusLabel : statusLabel as String?,
     );
   }
 }
@@ -57,6 +62,13 @@ class SummarizerController extends StateNotifier<SummarizerState> {
         super(const SummarizerState());
 
   final AiRepository _repository;
+
+  static const _ocrPrompt =
+      'Extract all readable text from this PDF page image. '
+      'Return only the extracted text, preserving paragraph structure. '
+      'If no text is readable, return an empty string.';
+
+  static const _maxOcrPages = 10;
 
   Future<void> processFile({
     required String fileName,
@@ -74,20 +86,38 @@ class SummarizerController extends StateNotifier<SummarizerState> {
       processingProgress: 0.1,
       extractedTextLength: 0,
       lastProcessedText: null,
+      statusLabel: null,
     );
 
     try {
-      state = state.copyWith(processingProgress: 0.2);
+      state = state.copyWith(processingProgress: 0.2, statusLabel: 'Extracting text...');
 
-      final extractedText = await _extractTextOffMainIfPossible(
-        fileName: fileName,
-        bytes: bytes,
-        pdfPassword: pdfPassword,
-      );
+      String extractedText = '';
+
+      // Try standard text extraction first
+      try {
+        extractedText = await _extractTextOffMainIfPossible(
+          fileName: fileName,
+          bytes: bytes,
+          pdfPassword: pdfPassword,
+        );
+      } on UnsupportedError {
+        // For PDFs, we may still try OCR; for other file types, rethrow
+        if (!fileName.toLowerCase().endsWith('.pdf')) rethrow;
+      }
+
+      // If text extraction yielded nothing for a PDF, try OCR via AI vision
+      if (extractedText.trim().isEmpty && fileName.toLowerCase().endsWith('.pdf')) {
+        state = state.copyWith(
+          processingProgress: 0.15,
+          statusLabel: 'Extracting text via OCR...',
+        );
+        extractedText = await _extractTextViaOcr(bytes);
+      }
 
       if (extractedText.trim().isEmpty) {
         throw UnsupportedError(
-          'No readable text found. This PDF may be scanned/image-based and needs OCR.',
+          'No readable text found. The document may be empty or contain only non-text content.',
         );
       }
 
@@ -95,6 +125,7 @@ class SummarizerController extends StateNotifier<SummarizerState> {
         extractedTextLength: extractedText.length,
         lastProcessedText: extractedText,
         processingProgress: 0.35,
+        statusLabel: 'Generating summary...',
       );
 
       await processText(extractedText, fileName: fileName);
@@ -105,6 +136,7 @@ class SummarizerController extends StateNotifier<SummarizerState> {
         summary: null,
         error: e.message,
         extractedTextLength: 0,
+        statusLabel: null,
       );
     } catch (e) {
       state = state.copyWith(
@@ -113,8 +145,58 @@ class SummarizerController extends StateNotifier<SummarizerState> {
         summary: null,
         error: 'Could not read this file. Try TXT or DOCX, or paste text.',
         extractedTextLength: 0,
+        statusLabel: null,
       );
     }
+  }
+
+  /// Renders PDF pages to images and uses AI vision to extract text (OCR).
+  Future<String> _extractTextViaOcr(Uint8List bytes) async {
+    final doc = await pdfx.PdfDocument.openData(bytes);
+    final pageCount = doc.pagesCount;
+    final pagesToProcess = pageCount > _maxOcrPages ? _maxOcrPages : pageCount;
+    final buffer = StringBuffer();
+
+    for (var i = 1; i <= pagesToProcess; i++) {
+      state = state.copyWith(
+        statusLabel: 'Extracting text via OCR (page $i/$pagesToProcess)...',
+        processingProgress: 0.15 + (0.20 * (i / pagesToProcess)),
+      );
+
+      final page = await doc.getPage(i);
+      final pageImage = await page.render(
+        width: page.width * 2,
+        height: page.height * 2,
+        format: pdfx.PdfPageImageFormat.png,
+      );
+      await page.close();
+
+      if (pageImage == null) continue;
+
+      final base64Image = base64Encode(pageImage.bytes);
+
+      try {
+        final result = await _repository.generate(
+          AiGenerationRequest(
+            prompt: '[ocr] $_ocrPrompt',
+            imageBase64: base64Image,
+            maxOutputTokens: 2048,
+            temperature: 0.1,
+          ),
+        );
+
+        final pageText = result.text.trim();
+        if (pageText.isNotEmpty) {
+          buffer.writeln(pageText);
+          buffer.writeln();
+        }
+      } catch (_) {
+        // Skip pages that fail OCR; continue with remaining pages
+      }
+    }
+
+    doc.close();
+    return buffer.toString().trim();
   }
 
   Future<void> processText(String text, {String? fileName}) async {
@@ -133,6 +215,7 @@ class SummarizerController extends StateNotifier<SummarizerState> {
       processingProgress: 0.4,
       extractedTextLength: cleanedText.length,
       lastProcessedText: cleanedText,
+      statusLabel: null,
     );
 
     try {
@@ -152,12 +235,14 @@ class SummarizerController extends StateNotifier<SummarizerState> {
         error: null,
         isLoading: false,
         processingProgress: 1.0,
+        statusLabel: null,
       );
     } catch (_) {
       state = state.copyWith(
         isLoading: false,
         processingProgress: 0,
         error: 'Unable to summarize right now. Please try again.',
+        statusLabel: null,
       );
     }
   }

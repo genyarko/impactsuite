@@ -1,6 +1,7 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../ai/ai_providers.dart';
 import 'summarizer_controller.dart';
@@ -33,7 +34,7 @@ class _SummarizerPageState extends ConsumerState<SummarizerPage> {
           ),
           if (state.isLoading) ...[
             const SizedBox(height: 16),
-            _LoadingCard(progress: state.processingProgress),
+            _LoadingCard(progress: state.processingProgress, statusLabel: state.statusLabel),
           ],
           if (state.error != null) ...[
             const SizedBox(height: 16),
@@ -41,7 +42,11 @@ class _SummarizerPageState extends ConsumerState<SummarizerPage> {
           ],
           if (state.summary != null) ...[
             const SizedBox(height: 16),
-            _SummaryCard(summary: state.summary!, textLength: state.extractedTextLength),
+            _SummaryCard(
+              summary: state.summary!,
+              textLength: state.extractedTextLength,
+              onGenerateQuiz: () => _generateQuizFromSummary(state.lastProcessedText ?? state.summary!),
+            ),
           ],
           if (state.summary != null || state.error != null) ...[
             const SizedBox(height: 16),
@@ -73,6 +78,10 @@ class _SummarizerPageState extends ConsumerState<SummarizerPage> {
     await ref
         .read(_summarizerControllerProvider.notifier)
         .processFile(fileName: picked.name, bytes: picked.bytes!);
+  }
+
+  void _generateQuizFromSummary(String sourceText) {
+    context.push('/quiz', extra: sourceText);
   }
 
   Future<void> _openTextInputDialog(BuildContext context) async {
@@ -187,14 +196,17 @@ class _UploadCard extends StatelessWidget {
 }
 
 class _LoadingCard extends StatelessWidget {
-  const _LoadingCard({required this.progress});
+  const _LoadingCard({required this.progress, this.statusLabel});
 
   final double progress;
+  final String? statusLabel;
 
   @override
   Widget build(BuildContext context) {
     String label;
-    if (progress < 0.3) {
+    if (statusLabel != null) {
+      label = statusLabel!;
+    } else if (progress < 0.3) {
       label = 'Extracting text...';
     } else if (progress < 0.7) {
       label = 'Generating summary...';
@@ -258,10 +270,15 @@ class _ErrorCard extends StatelessWidget {
 }
 
 class _SummaryCard extends StatelessWidget {
-  const _SummaryCard({required this.summary, required this.textLength});
+  const _SummaryCard({
+    required this.summary,
+    required this.textLength,
+    required this.onGenerateQuiz,
+  });
 
   final String summary;
   final int textLength;
+  final VoidCallback onGenerateQuiz;
 
   @override
   Widget build(BuildContext context) {
@@ -297,11 +314,7 @@ class _SummaryCard extends StatelessWidget {
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Quiz generation will be connected next.')),
-                  );
-                },
+                onPressed: onGenerateQuiz,
                 icon: const Icon(Icons.quiz),
                 label: const Text('Generate Quiz'),
               ),

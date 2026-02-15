@@ -10,7 +10,11 @@ import 'quiz_controller.dart';
 import 'quiz_providers.dart';
 
 class QuizPage extends ConsumerStatefulWidget {
-  const QuizPage({super.key});
+  const QuizPage({super.key, this.sourceText});
+
+  /// When non-null, the quiz page skips profile/setup and immediately
+  /// generates a quiz based on this text (e.g. from the summarizer).
+  final String? sourceText;
 
   @override
   ConsumerState<QuizPage> createState() => _QuizPageState();
@@ -46,6 +50,21 @@ class _QuizPageState extends ConsumerState<QuizPage> {
   void initState() {
     super.initState();
     _loadTrivia();
+
+    if (widget.sourceText != null) {
+      // Schedule after first frame so the provider is available.
+      Future.microtask(() {
+        final controller = ref.read(quizControllerProvider.notifier);
+        controller.skipProfile();
+        controller.updateSetup(
+          subject: Subject.general,
+          difficulty: Difficulty.medium,
+          topic: widget.sourceText!,
+          questionCount: 10,
+        );
+        controller.generateQuiz();
+      });
+    }
   }
 
   @override

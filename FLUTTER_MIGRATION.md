@@ -1,6 +1,6 @@
 # Flutter Rewrite Plan
 
-*** check chatgpt for solution for web ocr when pdf extraction fails. 
+*** in a quiz, where the user has to type in the answer, be more lenient especially the lower the grade of the child is.
 This repository now includes a Flutter application shell in `flutter_app/` that maps the main
 Kotlin/Compose feature areas into Flutter routes.
 
