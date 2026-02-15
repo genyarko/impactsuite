@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'story_controller.dart';
@@ -251,6 +252,25 @@ class _StoryReadingScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth >= 800) {
+          return _BookReadingScreen(controller: controller, story: story);
+        }
+        return _MobileReadingScreen(controller: controller, story: story);
+      },
+    );
+  }
+}
+
+class _MobileReadingScreen extends StatelessWidget {
+  const _MobileReadingScreen({required this.controller, required this.story});
+
+  final StoryController controller;
+  final StoryData story;
+
+  @override
+  Widget build(BuildContext context) {
     final page = story.pages[story.currentPage];
 
     return Padding(
@@ -298,7 +318,6 @@ class _StoryReadingScreen extends StatelessWidget {
                   children: [
                     Text(page.title, style: Theme.of(context).textTheme.headlineSmall),
                     const SizedBox(height: 10),
-                    // Show generated image if available
                     if (page.hasImage) ...[
                       _StoryImage(page: page),
                       const SizedBox(height: 12),
@@ -356,10 +375,474 @@ class _StoryReadingScreen extends StatelessWidget {
   }
 }
 
+class _BookReadingScreen extends StatefulWidget {
+  const _BookReadingScreen({required this.controller, required this.story});
+
+  final StoryController controller;
+  final StoryData story;
+
+  @override
+  State<_BookReadingScreen> createState() => _BookReadingScreenState();
+}
+
+class _BookReadingScreenState extends State<_BookReadingScreen> {
+  late final PageController _pageController;
+  final FocusNode _focusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController(initialPage: widget.story.currentPage);
+  }
+
+  @override
+  void didUpdateWidget(_BookReadingScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.story.currentPage != widget.story.currentPage) {
+      final target = widget.story.currentPage;
+      if (_pageController.hasClients && _pageController.page?.round() != target) {
+        _pageController.animateToPage(
+          target,
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.easeInOut,
+        );
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _handleKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent) return;
+    if (event.logicalKey == LogicalKeyboardKey.arrowRight ||
+        event.logicalKey == LogicalKeyboardKey.pageDown) {
+      if (widget.story.currentPage < widget.story.totalPages - 1) {
+        widget.controller.goToNextPage();
+      }
+    } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+        event.logicalKey == LogicalKeyboardKey.pageUp) {
+      if (widget.story.currentPage > 0) {
+        widget.controller.goToPreviousPage();
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final creamColor = isDark
+        ? colorScheme.surfaceContainerHigh
+        : const Color(0xFFFAF6F0);
+    final spineColor = isDark
+        ? colorScheme.outlineVariant.withValues(alpha: 0.3)
+        : Colors.brown.withValues(alpha: 0.15);
+
+    return KeyboardListener(
+      focusNode: _focusNode,
+      autofocus: true,
+      onKeyEvent: _handleKeyEvent,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+        child: Column(
+          children: [
+            // Top toolbar
+            Row(
+              children: [
+                ChoiceChip(
+                  selected: widget.controller.isReadingAloud,
+                  label: Text(widget.controller.isReadingAloud ? 'Reading Aloud' : 'Read Aloud'),
+                  onSelected: (_) {
+                    if (widget.controller.isReadingAloud) {
+                      widget.controller.stopReadingAloud();
+                    } else {
+                      widget.controller.startReadingAloud();
+                    }
+                  },
+                ),
+                const SizedBox(width: 8),
+                FilterChip(
+                  selected: widget.controller.autoReadAloud,
+                  label: const Text('Auto Read'),
+                  onSelected: (_) => widget.controller.toggleAutoReadAloud(),
+                ),
+                if (widget.controller.generationPhase.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      widget.controller.generationPhase,
+                      style: theme.textTheme.labelSmall,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+                const Spacer(),
+                Text(
+                  'Page ${widget.story.currentPage + 1} of ${widget.story.totalPages}',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            // Book container
+            Expanded(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1200, maxHeight: 700),
+                  child: Stack(
+                    children: [
+                      // Book body with shadow
+                      Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.18),
+                              blurRadius: 24,
+                              offset: const Offset(0, 8),
+                            ),
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.08),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: PageView.builder(
+                            controller: _pageController,
+                            itemCount: widget.story.totalPages,
+                            onPageChanged: (index) {
+                              if (widget.story.currentPage != index) {
+                                widget.controller.goToPage(index);
+                              }
+                            },
+                            itemBuilder: (context, index) {
+                              final page = widget.story.pages[index];
+                              return Container(
+                                color: creamColor,
+                                child: Row(
+                                  children: [
+                                    // Left page - illustration
+                                    Expanded(
+                                      child: _BookLeftPage(
+                                        page: page,
+                                        creamColor: creamColor,
+                                        isDark: isDark,
+                                      ),
+                                    ),
+                                    // Center spine
+                                    Container(
+                                      width: 2,
+                                      decoration: BoxDecoration(
+                                        gradient: LinearGradient(
+                                          begin: Alignment.centerLeft,
+                                          end: Alignment.centerRight,
+                                          colors: [
+                                            spineColor,
+                                            spineColor.withValues(alpha: 0.05),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    // Right page - text
+                                    Expanded(
+                                      child: _BookRightPage(
+                                        page: page,
+                                        pageNumber: index + 1,
+                                        totalPages: widget.story.totalPages,
+                                        isDark: isDark,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                      // Left click zone for previous page
+                      if (widget.story.currentPage > 0)
+                        Positioned(
+                          left: 0,
+                          top: 0,
+                          bottom: 0,
+                          width: 60,
+                          child: MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            child: GestureDetector(
+                              onTap: widget.controller.goToPreviousPage,
+                              child: Container(
+                                color: Colors.transparent,
+                                alignment: Alignment.centerLeft,
+                                padding: const EdgeInsets.only(left: 8),
+                                child: Icon(
+                                  Icons.chevron_left,
+                                  color: colorScheme.onSurface.withValues(alpha: 0.3),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      // Right click zone for next page
+                      if (widget.story.currentPage < widget.story.totalPages - 1)
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          bottom: 0,
+                          width: 60,
+                          child: MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            child: GestureDetector(
+                              onTap: widget.controller.goToNextPage,
+                              child: Container(
+                                color: Colors.transparent,
+                                alignment: Alignment.centerRight,
+                                padding: const EdgeInsets.only(right: 8),
+                                child: Icon(
+                                  Icons.chevron_right,
+                                  color: colorScheme.onSurface.withValues(alpha: 0.3),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            // Complete story button on last page
+            if (widget.story.currentPage >= widget.story.totalPages - 1)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: FilledButton.icon(
+                  onPressed: widget.story.isCompleted ? null : widget.controller.completeStory,
+                  icon: const Icon(Icons.check_circle),
+                  label: Text(widget.story.isCompleted ? 'Story completed' : 'Complete Story'),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BookLeftPage extends StatelessWidget {
+  const _BookLeftPage({
+    required this.page,
+    required this.creamColor,
+    required this.isDark,
+  });
+
+  final StoryPageData page;
+  final Color creamColor;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    if (page.hasImage) {
+      return _BookImage(page: page);
+    }
+
+    if (page.imageDescription != null) {
+      return Container(
+        color: isDark ? Colors.grey[850] : const Color(0xFFF0EBE3),
+        padding: const EdgeInsets.all(32),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.image_outlined,
+                size: 48,
+                color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                page.imageDescription!,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  fontStyle: FontStyle.italic,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // No image at all — decorative placeholder
+    return Container(
+      color: isDark ? Colors.grey[850] : const Color(0xFFF0EBE3),
+      child: Center(
+        child: Icon(
+          Icons.auto_stories,
+          size: 64,
+          color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.2),
+        ),
+      ),
+    );
+  }
+}
+
+class _BookImage extends StatelessWidget {
+  const _BookImage({required this.page});
+
+  final StoryPageData page;
+
+  @override
+  Widget build(BuildContext context) {
+    if (page.imageBase64 != null) {
+      try {
+        final bytes = base64Decode(page.imageBase64!);
+        return Image.memory(
+          bytes,
+          width: double.infinity,
+          height: double.infinity,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => _fallback(context),
+        );
+      } catch (_) {
+        return _fallback(context);
+      }
+    }
+
+    if (page.imageUrl != null) {
+      return Image.network(
+        page.imageUrl!,
+        width: double.infinity,
+        height: double.infinity,
+        fit: BoxFit.cover,
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          return Container(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            child: const Center(child: CircularProgressIndicator()),
+          );
+        },
+        errorBuilder: (_, __, ___) => _fallback(context),
+      );
+    }
+
+    return _fallback(context);
+  }
+
+  Widget _fallback(BuildContext context) {
+    return Container(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: Center(
+        child: Icon(
+          Icons.image_outlined,
+          size: 48,
+          color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
+        ),
+      ),
+    );
+  }
+}
+
+class _BookRightPage extends StatelessWidget {
+  const _BookRightPage({
+    required this.page,
+    required this.pageNumber,
+    required this.totalPages,
+    required this.isDark,
+  });
+
+  final StoryPageData page;
+  final int pageNumber;
+  final int totalPages;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(32, 28, 32, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Chapter title
+          Text(
+            page.title,
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontFamily: 'Georgia',
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.3,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Divider(
+            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+            thickness: 0.5,
+          ),
+          const SizedBox(height: 12),
+          // Story text
+          Expanded(
+            child: SingleChildScrollView(
+              child: Text(
+                page.content,
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  fontFamily: 'Georgia',
+                  height: 1.7,
+                  letterSpacing: 0.15,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          // Page number
+          Align(
+            alignment: Alignment.bottomRight,
+            child: Text(
+              '$pageNumber',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _StoryImage extends StatelessWidget {
   const _StoryImage({required this.page});
 
   final StoryPageData page;
+
+  void _openFullScreen(BuildContext context) {
+    if (!page.hasImage) return;
+    Navigator.of(context).push(
+      PageRouteBuilder<void>(
+        opaque: false,
+        barrierColor: Colors.black87,
+        barrierDismissible: true,
+        pageBuilder: (context, animation, secondaryAnimation) {
+          return _FullScreenImageViewer(page: page);
+        },
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return FadeTransition(opacity: animation, child: child);
+        },
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -375,14 +858,17 @@ class _StoryImage extends StatelessWidget {
     if (page.imageBase64 != null) {
       try {
         final bytes = base64Decode(page.imageBase64!);
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: Image.memory(
-            bytes,
-            width: double.infinity,
-            height: imageHeight,
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => fallback,
+        return GestureDetector(
+          onTap: () => _openFullScreen(context),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Image.memory(
+              bytes,
+              width: double.infinity,
+              height: imageHeight,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => fallback,
+            ),
           ),
         );
       } catch (_) {
@@ -392,31 +878,124 @@ class _StoryImage extends StatelessWidget {
 
     // Network URL (legacy)
     if (page.imageUrl != null) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Image.network(
-          page.imageUrl!,
-          width: double.infinity,
-          height: imageHeight,
-          fit: BoxFit.cover,
-          loadingBuilder: (context, child, loadingProgress) {
-            if (loadingProgress == null) return child;
-            return Container(
-              width: double.infinity,
-              height: imageHeight,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              ),
-              child: const Center(child: CircularProgressIndicator()),
-            );
-          },
-          errorBuilder: (_, __, ___) => fallback,
+      return GestureDetector(
+        onTap: () => _openFullScreen(context),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.network(
+            page.imageUrl!,
+            width: double.infinity,
+            height: imageHeight,
+            fit: BoxFit.cover,
+            loadingBuilder: (context, child, loadingProgress) {
+              if (loadingProgress == null) return child;
+              return Container(
+                width: double.infinity,
+                height: imageHeight,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                ),
+                child: const Center(child: CircularProgressIndicator()),
+              );
+            },
+            errorBuilder: (_, __, ___) => fallback,
+          ),
         ),
       );
     }
 
     return fallback;
+  }
+}
+
+class _FullScreenImageViewer extends StatefulWidget {
+  const _FullScreenImageViewer({required this.page});
+
+  final StoryPageData page;
+
+  @override
+  State<_FullScreenImageViewer> createState() => _FullScreenImageViewerState();
+}
+
+class _FullScreenImageViewerState extends State<_FullScreenImageViewer> {
+  final TransformationController _transformController = TransformationController();
+
+  @override
+  void dispose() {
+    _transformController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: GestureDetector(
+        onTap: () => Navigator.of(context).pop(),
+        child: Stack(
+          children: [
+            // Full-screen interactive image
+            Positioned.fill(
+              child: InteractiveViewer(
+                transformationController: _transformController,
+                minScale: 0.5,
+                maxScale: 4.0,
+                child: Center(
+                  child: _buildImage(),
+                ),
+              ),
+            ),
+            // Close button
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 8,
+              right: 8,
+              child: IconButton.filled(
+                onPressed: () => Navigator.of(context).pop(),
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.black54,
+                  foregroundColor: Colors.white,
+                ),
+                icon: const Icon(Icons.close),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImage() {
+    if (widget.page.imageBase64 != null) {
+      try {
+        final bytes = base64Decode(widget.page.imageBase64!);
+        return Image.memory(
+          bytes,
+          fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => _errorWidget(),
+        );
+      } catch (_) {
+        return _errorWidget();
+      }
+    }
+
+    if (widget.page.imageUrl != null) {
+      return Image.network(
+        widget.page.imageUrl!,
+        fit: BoxFit.contain,
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          return const Center(child: CircularProgressIndicator(color: Colors.white));
+        },
+        errorBuilder: (_, __, ___) => _errorWidget(),
+      );
+    }
+
+    return _errorWidget();
+  }
+
+  Widget _errorWidget() {
+    return const Icon(Icons.broken_image, size: 64, color: Colors.white54);
   }
 }
 

@@ -45,7 +45,9 @@
       "Bash(vercel:*)",
       "Bash(flutter build:*)",
       "Bash(curl:*)",
-      "Bash(dart analyze:*)"
+      "Bash(dart analyze:*)",
+      "Bash(flutter:*)",
+      "WebSearch"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

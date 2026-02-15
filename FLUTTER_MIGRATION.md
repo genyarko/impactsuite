@@ -1,9 +1,6 @@
 # Flutter Rewrite Plan
 
 *** check chatgpt for solution for web ocr when pdf extraction fails. 
-*** improve story mode on pcs or large screen, more like a book with flipping pages.
-*** web app wont open properly on huawei phones
-*** camera initialization fails on mobile web app
 This repository now includes a Flutter application shell in `flutter_app/` that maps the main
 Kotlin/Compose feature areas into Flutter routes.
 
