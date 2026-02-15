@@ -1,4 +1,5 @@
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -30,7 +31,9 @@ class _ImageClassificationPageState
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _initializeCamera();
+    if (!kIsWeb) {
+      _initializeCamera();
+    }
   }
 
   @override
@@ -42,6 +45,7 @@ class _ImageClassificationPageState
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (kIsWeb) return;
     final controller = _cameraController;
     if (controller == null || !controller.value.isInitialized) return;
 
@@ -166,83 +170,140 @@ class _ImageClassificationPageState
             clipBehavior: Clip.antiAlias,
             child: Column(
               children: [
-                // Camera preview or fallback
-                AspectRatio(
-                  aspectRatio: _isCameraInitialized
-                      ? _cameraController!.value.aspectRatio
-                      : 4 / 3,
-                  child: _isCameraInitialized
-                      ? CameraPreview(_cameraController!)
-                      : Container(
-                          color: Colors.black87,
-                          child: Center(
-                            child: _cameraError != null
-                                ? Padding(
-                                    padding: const EdgeInsets.all(16),
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        const Icon(Icons.no_photography,
-                                            size: 48,
-                                            color: Colors.white54),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          _cameraError!,
-                                          style: const TextStyle(
-                                              color: Colors.white70),
-                                          textAlign: TextAlign.center,
-                                        ),
-                                      ],
-                                    ),
-                                  )
-                                : const CircularProgressIndicator(
-                                    color: Colors.white),
-                          ),
+                if (kIsWeb)
+                  // Web: show upload-focused UI instead of broken camera
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 16),
+                    color: Colors.black87,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          state.isOcrMode ? Icons.document_scanner : Icons.photo_library,
+                          size: 64,
+                          color: Colors.white54,
                         ),
-                ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Upload an image to get started',
+                          style: TextStyle(color: Colors.white70, fontSize: 16),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          state.isOcrMode
+                              ? 'Select a photo to extract text'
+                              : 'Select a photo to classify',
+                          style: const TextStyle(color: Colors.white38, fontSize: 13),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  // Native: camera preview or fallback
+                  AspectRatio(
+                    aspectRatio: _isCameraInitialized
+                        ? _cameraController!.value.aspectRatio
+                        : 4 / 3,
+                    child: _isCameraInitialized
+                        ? CameraPreview(_cameraController!)
+                        : Container(
+                            color: Colors.black87,
+                            child: Center(
+                              child: _cameraError != null
+                                  ? Padding(
+                                      padding: const EdgeInsets.all(16),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(Icons.no_photography,
+                                              size: 48,
+                                              color: Colors.white54),
+                                          const SizedBox(height: 8),
+                                          Text(
+                                            _cameraError!,
+                                            style: const TextStyle(
+                                                color: Colors.white70),
+                                            textAlign: TextAlign.center,
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  : const CircularProgressIndicator(
+                                      color: Colors.white),
+                            ),
+                          ),
+                  ),
 
                 // Action buttons
                 Padding(
                   padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      // Capture button
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed: (state.isLoading || !_isCameraInitialized)
-                              ? null
-                              : _captureAndClassify,
-                          icon: state.isLoading
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2),
-                                )
-                              : const Icon(Icons.camera_alt),
-                          label: Text(state.isLoading
-                              ? 'Analyzing...'
-                              : 'Capture'),
+                  child: kIsWeb
+                      // Web: single prominent upload button
+                      ? SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.icon(
+                            onPressed: state.isLoading
+                                ? null
+                                : () {
+                                    ref
+                                        .read(
+                                            _imageClassificationControllerProvider)
+                                        .pickAndAnalyzeImage();
+                                  },
+                            icon: state.isLoading
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
+                                  )
+                                : const Icon(Icons.upload_file),
+                            label: Text(state.isLoading
+                                ? 'Analyzing...'
+                                : 'Choose Image'),
+                          ),
+                        )
+                      // Native: capture + upload buttons
+                      : Row(
+                          children: [
+                            Expanded(
+                              child: FilledButton.icon(
+                                onPressed: (state.isLoading || !_isCameraInitialized)
+                                    ? null
+                                    : _captureAndClassify,
+                                icon: state.isLoading
+                                    ? const SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 2),
+                                      )
+                                    : const Icon(Icons.camera_alt),
+                                label: Text(state.isLoading
+                                    ? 'Analyzing...'
+                                    : 'Capture'),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: state.isLoading
+                                    ? null
+                                    : () {
+                                        ref
+                                            .read(
+                                                _imageClassificationControllerProvider)
+                                            .pickAndAnalyzeImage();
+                                      },
+                                icon: const Icon(Icons.upload_file),
+                                label: const Text('Upload'),
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      // Upload button
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: state.isLoading
-                              ? null
-                              : () {
-                                  ref
-                                      .read(
-                                          _imageClassificationControllerProvider)
-                                      .pickAndAnalyzeImage();
-                                },
-                          icon: const Icon(Icons.upload_file),
-                          label: const Text('Upload'),
-                        ),
-                      ),
-                    ],
-                  ),
                 ),
               ],
             ),
