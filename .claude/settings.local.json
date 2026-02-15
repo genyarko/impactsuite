@@ -41,7 +41,10 @@
       "Bash(cmd /c \"cd C:\\\\Users\\\\genya\\\\Downloads\\\\MyGemma3N\\\\flutter_app && flutter pub get\")",
       "Bash(cmd /c \"cd /d C:\\\\Users\\\\genya\\\\Downloads\\\\MyGemma3N\\\\flutter_app && flutter pub get\")",
       "Bash(powershell -Command \"Set-Location ''C:\\\\Users\\\\genya\\\\Downloads\\\\MyGemma3N\\\\flutter_app''; flutter pub get\")",
-      "Bash(powershell -Command:*)"
+      "Bash(powershell -Command:*)",
+      "Bash(vercel:*)",
+      "Bash(flutter build:*)",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

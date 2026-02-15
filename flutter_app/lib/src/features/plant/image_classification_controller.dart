@@ -74,6 +74,16 @@ class ImageClassificationController extends ChangeNotifier {
   ImageClassificationState _state = const ImageClassificationState();
   ImageClassificationState get state => _state;
 
+  void setError(String message) {
+    _state = _state.copyWith(
+      isLoading: false,
+      error: message,
+      clearResult: true,
+      clearExtractedText: true,
+    );
+    notifyListeners();
+  }
+
   void toggleOcrMode() {
     _state = _state.copyWith(
       isOcrMode: !_state.isOcrMode,

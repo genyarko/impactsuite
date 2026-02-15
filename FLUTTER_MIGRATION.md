@@ -1,11 +1,11 @@
 # Flutter Rewrite Plan
 
-*** Next steps in CBT not working too properly.
-*** the storymode did not generate images. also the pages all had the same storyline.
-*** full implement crisis mode
-*** pdf extraction not working for summary. 
-*** implement tutor mode.
+** Next steps in CBT not working too properly.
+*** fix crisis mode
+*** check chatgpt for solution for web ocr when pdf extraction fails. 
 *** repeat questions student fail in next quiz. 
+* fix story mode image generation.
+* improve food scanner result. asked for proteins when egg was present on a meal. 
 This repository now includes a Flutter application shell in `flutter_app/` that maps the main
 Kotlin/Compose feature areas into Flutter routes.
 

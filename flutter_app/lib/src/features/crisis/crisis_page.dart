@@ -4,19 +4,15 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'crisis_controller.dart';
 import 'crisis_models.dart';
-
-final _crisisControllerProvider =
-    StateNotifierProvider.autoDispose<CrisisController, CrisisState>((ref) {
-      return CrisisController();
-    });
+import 'crisis_providers.dart';
 
 class CrisisPage extends ConsumerWidget {
   const CrisisPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(_crisisControllerProvider);
-    final controller = ref.read(_crisisControllerProvider.notifier);
+    final state = ref.watch(crisisControllerProvider);
+    final controller = ref.read(crisisControllerProvider.notifier);
 
     return SafeArea(
       child: Column(
@@ -307,23 +303,95 @@ class _FacilityCard extends StatelessWidget {
     final km = facility.distanceKmFrom(userLat, userLon);
 
     return Card(
-      child: ListTile(
-        leading: const CircleAvatar(child: Icon(Icons.local_hospital)),
-        title: Text(facility.name),
-        subtitle: Text(
-          '${facility.address}\n${km.toStringAsFixed(1)} km • ~${facility.estimatedMinutes} min',
-        ),
-        trailing: IconButton(
-          icon: const Icon(Icons.directions),
-          onPressed: () {
-            final uri = Uri.parse(
-              'https://www.google.com/maps/dir/?api=1&destination=${facility.latitude},${facility.longitude}',
-            );
-            _launchUri(context, uri);
-          },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const CircleAvatar(child: Icon(Icons.local_hospital)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(facility.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                      Text(
+                        '${facility.address} • ${km.toStringAsFixed(1)} km • ~${facility.estimatedMinutes} min',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                if (facility.specialization != 'general')
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Chip(
+                      label: Text(facility.specialization.toUpperCase(), style: const TextStyle(fontSize: 10)),
+                      backgroundColor: _specializationColor(facility.specialization),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+                    ),
+                  ),
+                if (facility.rating > 0) ...[
+                  Icon(Icons.star, size: 14, color: Colors.amber.shade700),
+                  const SizedBox(width: 2),
+                  Text(facility.rating.toStringAsFixed(1), style: const TextStyle(fontSize: 12)),
+                  const SizedBox(width: 8),
+                ],
+                if (facility.beds > 0) ...[
+                  const Icon(Icons.bed, size: 14),
+                  const SizedBox(width: 2),
+                  Text('${facility.beds} beds', style: const TextStyle(fontSize: 12)),
+                ],
+                const Spacer(),
+                if (facility.phone.isNotEmpty)
+                  IconButton(
+                    icon: const Icon(Icons.phone, size: 20),
+                    tooltip: 'Call ${facility.phone}',
+                    onPressed: () => _launchUri(context, Uri.parse('tel:${facility.phone}')),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                IconButton(
+                  icon: const Icon(Icons.directions, size: 20),
+                  tooltip: 'Directions',
+                  onPressed: () {
+                    final uri = Uri.parse(
+                      'https://www.google.com/maps/dir/?api=1&destination=${facility.latitude},${facility.longitude}',
+                    );
+                    _launchUri(context, uri);
+                  },
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
+  }
+
+  static Color _specializationColor(String spec) {
+    switch (spec) {
+      case 'trauma':
+        return Colors.red.shade100;
+      case 'cardiac':
+        return Colors.pink.shade100;
+      case 'stroke':
+        return Colors.purple.shade100;
+      case 'burn':
+        return Colors.orange.shade100;
+      default:
+        return Colors.grey.shade200;
+    }
   }
 }
 

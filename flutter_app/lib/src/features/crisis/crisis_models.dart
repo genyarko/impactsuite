@@ -24,6 +24,11 @@ class CrisisFacility {
     required this.latitude,
     required this.longitude,
     required this.estimatedMinutes,
+    this.phone = '',
+    this.specialization = 'general',
+    this.hasEmergency = true,
+    this.beds = 0,
+    this.rating = 0.0,
   });
 
   final String id;
@@ -32,6 +37,11 @@ class CrisisFacility {
   final double latitude;
   final double longitude;
   final int estimatedMinutes;
+  final String phone;
+  final String specialization;
+  final bool hasEmergency;
+  final int beds;
+  final double rating;
 
   double distanceKmFrom(double originLat, double originLon) {
     const earthRadiusKm = 6371.0;
@@ -46,6 +56,20 @@ class CrisisFacility {
   }
 
   double _toRadians(double value) => value * (math.pi / 180);
+}
+
+class FirstAidGuide {
+  const FirstAidGuide({
+    required this.condition,
+    required this.severity,
+    required this.steps,
+    this.warnings = const [],
+  });
+
+  final String condition;
+  final String severity;
+  final List<String> steps;
+  final List<String> warnings;
 }
 
 class QuickAction {

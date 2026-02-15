@@ -41,9 +41,17 @@ class UnifiedAiRepository implements AiRepository {
     final primary = preferOnDevice ? _gemma : _onlineRepo;
     final fallback = preferOnDevice ? _onlineRepo : _gemma;
 
+    var useFallback = false;
+
     try {
-      yield* primary.stream(request);
+      await for (final chunk in primary.stream(request)) {
+        yield chunk;
+      }
     } catch (_) {
+      useFallback = true;
+    }
+
+    if (useFallback) {
       yield* fallback.stream(request);
     }
   }

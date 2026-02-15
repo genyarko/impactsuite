@@ -1,55 +1,32 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'story_controller.dart';
+import 'story_providers.dart';
 
-class StoryPage extends StatefulWidget {
+class StoryPage extends ConsumerWidget {
   const StoryPage({super.key});
 
   @override
-  State<StoryPage> createState() => _StoryPageState();
-}
-
-class _StoryPageState extends State<StoryPage> {
-  late final StoryController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = StoryController()..addListener(_onControllerChanged);
-  }
-
-  @override
-  void dispose() {
-    _controller
-      ..removeListener(_onControllerChanged)
-      ..dispose();
-    super.dispose();
-  }
-
-  void _onControllerChanged() {
-    if (!mounted) {
-      return;
-    }
-    setState(() {});
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final story = _controller.currentStory;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final controller = ref.watch(storyControllerProvider);
+    final story = controller.currentStory;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(_controller.showStoryList ? 'Story Mode' : (story?.title ?? 'Reading Story')),
-        leading: !_controller.showStoryList
+        title: Text(controller.showStoryList ? 'Story Mode' : (story?.title ?? 'Reading Story')),
+        leading: !controller.showStoryList
             ? IconButton(
-                onPressed: _controller.backToStoryList,
+                onPressed: controller.backToStoryList,
                 icon: const Icon(Icons.arrow_back),
               )
             : null,
         actions: [
-          if (_controller.showStoryList)
+          if (controller.showStoryList)
             IconButton(
-              onPressed: _controller.showStreaks,
+              onPressed: controller.showStreaks,
               tooltip: 'Reading streaks',
               icon: const Icon(Icons.emoji_events),
             ),
@@ -60,10 +37,10 @@ class _StoryPageState extends State<StoryPage> {
           Positioned.fill(
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 250),
-              child: _buildBody(),
+              child: _buildBody(controller),
             ),
           ),
-          if (_controller.badgeNotification case final badge?)
+          if (controller.badgeNotification case final badge?)
             Positioned(
               top: 24,
               left: 24,
@@ -74,13 +51,13 @@ class _StoryPageState extends State<StoryPage> {
                   leading: Text(badge.icon, style: const TextStyle(fontSize: 24)),
                   title: Text('Badge unlocked: ${badge.title}'),
                   trailing: IconButton(
-                    onPressed: _controller.dismissBadgeNotification,
+                    onPressed: controller.dismissBadgeNotification,
                     icon: const Icon(Icons.close),
                   ),
                 ),
               ),
             ),
-          if (_controller.error case final error?)
+          if (controller.error case final error?)
             Positioned(
               left: 16,
               right: 16,
@@ -90,7 +67,7 @@ class _StoryPageState extends State<StoryPage> {
                 child: ListTile(
                   title: Text(error),
                   trailing: TextButton(
-                    onPressed: _controller.clearError,
+                    onPressed: controller.clearError,
                     child: const Text('Dismiss'),
                   ),
                 ),
@@ -101,25 +78,25 @@ class _StoryPageState extends State<StoryPage> {
     );
   }
 
-  Widget _buildBody() {
-    if (_controller.showStreakScreen) {
-      return _ReadingStreakScreen(controller: _controller);
+  Widget _buildBody(StoryController controller) {
+    if (controller.showStreakScreen) {
+      return _ReadingStreakScreen(controller: controller);
     }
 
-    if (_controller.isGenerating) {
-      return _StoryGenerationProgress(controller: _controller);
+    if (controller.isGenerating) {
+      return _StoryGenerationProgress(controller: controller);
     }
 
-    if (_controller.showStoryList) {
-      return _StoryListScreen(controller: _controller);
+    if (controller.showStoryList) {
+      return _StoryListScreen(controller: controller);
     }
 
-    final story = _controller.currentStory;
+    final story = controller.currentStory;
     if (story == null) {
       return const SizedBox.shrink();
     }
 
-    return _StoryReadingScreen(controller: _controller, story: story);
+    return _StoryReadingScreen(controller: controller, story: story);
   }
 }
 
@@ -299,6 +276,16 @@ class _StoryReadingScreen extends StatelessWidget {
                 label: const Text('Auto Read'),
                 onSelected: (_) => controller.toggleAutoReadAloud(),
               ),
+              if (controller.generationPhase.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    controller.generationPhase,
+                    style: Theme.of(context).textTheme.labelSmall,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 12),
@@ -310,19 +297,15 @@ class _StoryReadingScreen extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(page.title, style: Theme.of(context).textTheme.headlineSmall),
-                    if (page.imageDescription != null) ...[
-                      const SizedBox(height: 10),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(12),
-                          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                        ),
-                        child: Text(page.imageDescription!),
-                      ),
+                    const SizedBox(height: 10),
+                    // Show generated image if available
+                    if (page.hasImage) ...[
+                      _StoryImage(page: page),
+                      const SizedBox(height: 12),
+                    ] else if (page.imageDescription != null) ...[
+                      _ImageDescriptionBox(description: page.imageDescription!),
+                      const SizedBox(height: 12),
                     ],
-                    const SizedBox(height: 12),
                     Expanded(
                       child: SingleChildScrollView(
                         child: Text(
@@ -348,7 +331,7 @@ class _StoryReadingScreen extends StatelessWidget {
                   value: story.currentPage.toDouble(),
                   min: 0,
                   max: (story.totalPages - 1).toDouble(),
-                  divisions: story.totalPages - 1,
+                  divisions: story.totalPages > 1 ? story.totalPages - 1 : 1,
                   label: 'Page ${story.currentPage + 1}',
                   onChanged: (value) => controller.goToPage(value.round()),
                 ),
@@ -373,6 +356,103 @@ class _StoryReadingScreen extends StatelessWidget {
   }
 }
 
+class _StoryImage extends StatelessWidget {
+  const _StoryImage({required this.page});
+
+  final StoryPageData page;
+
+  @override
+  Widget build(BuildContext context) {
+    final fallback = _ImageDescriptionBox(
+      description: page.imageDescription ?? 'Illustration for this page',
+    );
+
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    // Scale image height based on screen width: ~55% of width, clamped between 180–400
+    final imageHeight = (screenWidth * 0.55).clamp(180.0, 400.0);
+
+    // Base64 image (from Gemini Imagen or DALL-E)
+    if (page.imageBase64 != null) {
+      try {
+        final bytes = base64Decode(page.imageBase64!);
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.memory(
+            bytes,
+            width: double.infinity,
+            height: imageHeight,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => fallback,
+          ),
+        );
+      } catch (_) {
+        return fallback;
+      }
+    }
+
+    // Network URL (legacy)
+    if (page.imageUrl != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Image.network(
+          page.imageUrl!,
+          width: double.infinity,
+          height: imageHeight,
+          fit: BoxFit.cover,
+          loadingBuilder: (context, child, loadingProgress) {
+            if (loadingProgress == null) return child;
+            return Container(
+              width: double.infinity,
+              height: imageHeight,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              ),
+              child: const Center(child: CircularProgressIndicator()),
+            );
+          },
+          errorBuilder: (_, __, ___) => fallback,
+        ),
+      );
+    }
+
+    return fallback;
+  }
+}
+
+class _ImageDescriptionBox extends StatelessWidget {
+  const _ImageDescriptionBox({required this.description});
+
+  final String description;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.image, color: Theme.of(context).colorScheme.onSurfaceVariant),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              description,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    fontStyle: FontStyle.italic,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _CreateStoryDialog extends StatefulWidget {
   const _CreateStoryDialog({required this.controller});
 
@@ -391,6 +471,7 @@ class _CreateStoryDialogState extends State<_CreateStoryDialog> {
   StoryGenre _genre = StoryGenre.fantasy;
   StoryTarget _target = StoryTarget.elementary;
   double _pageCount = 7;
+  bool _generateImages = true;
   final Set<String> _selectedCharacterIds = <String>{};
 
   @override
@@ -450,6 +531,13 @@ class _CreateStoryDialogState extends State<_CreateStoryDialog> {
               max: 20,
               divisions: 17,
               onChanged: (value) => setState(() => _pageCount = value),
+            ),
+            SwitchListTile(
+              title: const Text('Include Illustrations'),
+              subtitle: const Text('Generate AI images for each page'),
+              value: _generateImages,
+              onChanged: (value) => setState(() => _generateImages = value),
+              contentPadding: EdgeInsets.zero,
             ),
             TextField(
               controller: _charactersController,
@@ -522,6 +610,7 @@ class _CreateStoryDialogState extends State<_CreateStoryDialog> {
                     characters: [...selectedCharacterNames, ...extraCharacters],
                     setting: _settingController.text.trim().isEmpty ? null : _settingController.text.trim(),
                     theme: _themeController.text.trim().isEmpty ? null : _themeController.text.trim(),
+                    generateImages: _generateImages,
                   );
                   Navigator.of(context).pop(request);
                 },
@@ -555,9 +644,7 @@ class _CharacterManagementPageState extends State<_CharacterManagementPage> {
   }
 
   void _onControllerUpdate() {
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) return;
     setState(() {});
   }
 
@@ -853,7 +940,7 @@ class _ReadingStreakScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          Text('Update reading goal'),
+          const Text('Update reading goal'),
           Slider(
             value: controller.currentGoal.dailyMinutes.toDouble(),
             min: 10,

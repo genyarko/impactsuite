@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
+
 import '../../domain/services/ai/ai_models.dart';
 import '../../domain/services/ai/ai_repository.dart';
 import 'platform_ai_channels.dart';
@@ -13,6 +15,9 @@ class GemmaRepository implements AiRepository {
 
   @override
   Future<AiGenerationResult> generate(AiGenerationRequest request) async {
+    if (kIsWeb) {
+      throw UnsupportedError('On-device Gemma is not available on web');
+    }
     final text = await _channels.generateGemmaText(request);
     return AiGenerationResult(
       provider: AiProvider.gemma,
@@ -23,6 +28,9 @@ class GemmaRepository implements AiRepository {
 
   @override
   Stream<String> stream(AiGenerationRequest request) {
+    if (kIsWeb) {
+      throw UnsupportedError('On-device Gemma is not available on web');
+    }
     return _channels.streamText(provider: AiProvider.gemma, request: request);
   }
 }

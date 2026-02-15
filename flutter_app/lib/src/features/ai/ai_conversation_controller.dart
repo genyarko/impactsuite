@@ -4,13 +4,15 @@ import '../../domain/services/ai/ai_models.dart';
 import '../../domain/services/ai/ai_repository.dart';
 
 class AiConversationMessage {
-  const AiConversationMessage({
+  AiConversationMessage({
     required this.text,
     required this.isUser,
-  });
+    DateTime? timestamp,
+  }) : timestamp = timestamp ?? DateTime.now();
 
   final String text;
   final bool isUser;
+  final DateTime timestamp;
 }
 
 class AiConversationState {

@@ -376,17 +376,17 @@ class _ConversationPhase extends ConsumerWidget {
             onEndSession: () => controller.endSession(),
           ),
 
-          // Topic suggestions
-          if (subject != null && state.messages.length <= 1) ...[
+          // Topic suggestions (from curriculum data)
+          if (state.curriculumTopics.isNotEmpty && state.messages.length <= 1) ...[
             const SizedBox(height: 8),
             SizedBox(
               height: 40,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
-                itemCount: subject.sampleTopics.length,
+                itemCount: state.curriculumTopics.length,
                 separatorBuilder: (_, __) => const SizedBox(width: 8),
                 itemBuilder: (context, index) {
-                  final topic = subject.sampleTopics[index];
+                  final topic = state.curriculumTopics[index].title;
                   return ActionChip(
                     avatar: const Icon(Icons.lightbulb_outline, size: 16),
                     label: Text(topic),
@@ -934,14 +934,12 @@ class _TutorSubject {
     required this.description,
     required this.icon,
     required this.color,
-    required this.sampleTopics,
   });
 
   final String name;
   final String description;
   final IconData icon;
   final Color color;
-  final List<String> sampleTopics;
 }
 
 const _subjects = <_TutorSubject>[
@@ -950,48 +948,41 @@ const _subjects = <_TutorSubject>[
     description: 'Algebra, Geometry, Calculus, and more',
     icon: Icons.calculate,
     color: Color(0xFF2196F3),
-    sampleTopics: ['Linear equations and functions', 'Geometric shapes and angles', 'Probability and statistics'],
   ),
   _TutorSubject(
     name: 'Science',
     description: 'Physics, Chemistry, Biology',
     icon: Icons.science,
     color: Color(0xFF4CAF50),
-    sampleTopics: ['Forces and motion', 'Chemical reactions', 'Cell biology and genetics'],
   ),
   _TutorSubject(
     name: 'English',
     description: 'Grammar, Writing, Literature',
     icon: Icons.menu_book,
     color: Color(0xFFFF9800),
-    sampleTopics: ['Grammar and sentence structure', 'Poetry analysis and writing', 'Essay writing techniques'],
   ),
   _TutorSubject(
     name: 'History',
     description: 'World History, Ancient civilizations, Modern history',
     icon: Icons.history_edu,
     color: Color(0xFF9C27B0),
-    sampleTopics: ['Ancient civilizations', 'World wars and conflicts', 'Modern democracy'],
   ),
   _TutorSubject(
     name: 'Geography',
     description: 'Physical geography, Human geography, Maps',
     icon: Icons.public,
     color: Color(0xFF00BCD4),
-    sampleTopics: ['Climate and weather patterns', 'Physical landscapes', 'Population and urbanization'],
   ),
   _TutorSubject(
     name: 'Economics',
     description: 'Microeconomics, Macroeconomics, Markets',
     icon: Icons.trending_up,
     color: Color(0xFF795548),
-    sampleTopics: ['Supply and demand', 'Market structures', 'International trade'],
   ),
   _TutorSubject(
     name: 'Computer Science',
     description: 'Programming, Algorithms, Data Structures',
     icon: Icons.computer,
     color: Color(0xFF607D8B),
-    sampleTopics: ['Programming fundamentals', 'Data structures and algorithms', 'Web development basics'],
   ),
 ];

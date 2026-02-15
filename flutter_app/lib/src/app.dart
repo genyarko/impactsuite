@@ -63,34 +63,8 @@ class AppScaffold extends StatelessWidget {
 
   final Widget child;
 
-  static const _destinations = [
-    (label: 'Unified', icon: Icons.auto_awesome, route: '/'),
-    (label: 'Home', icon: Icons.home, route: '/home'),
-    (label: 'Tutor', icon: Icons.school, route: '/tutor'),
-    (label: 'Chat', icon: Icons.chat, route: '/chat'),
-    (label: 'Quiz', icon: Icons.quiz, route: '/quiz'),
-    (label: 'CBT', icon: Icons.psychology, route: '/cbt_coach'),
-    (label: 'Summary', icon: Icons.description, route: '/summarizer'),
-    (label: 'Story', icon: Icons.menu_book, route: '/story'),
-    (label: 'Crisis', icon: Icons.health_and_safety, route: '/crisis'),
-    (label: 'Settings', icon: Icons.settings, route: '/settings'),
-  ];
-
   @override
   Widget build(BuildContext context) {
-    final String location = GoRouterState.of(context).uri.path;
-    final selectedIndex = _destinations.indexWhere((d) => d.route == location);
-
-    return Scaffold(
-      body: child,
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: selectedIndex < 0 ? 0 : selectedIndex,
-        onDestinationSelected: (index) => context.go(_destinations[index].route),
-        destinations: [
-          for (final d in _destinations)
-            NavigationDestination(icon: Icon(d.icon), label: d.label),
-        ],
-      ),
-    );
+    return Scaffold(body: child);
   }
 }

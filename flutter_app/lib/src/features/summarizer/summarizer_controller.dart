@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
@@ -52,14 +53,74 @@ const _noChange = Object();
 
 class SummarizerController extends StateNotifier<SummarizerState> {
   SummarizerController({required AiRepository repository})
-    : _repository = repository,
-      super(const SummarizerState());
+      : _repository = repository,
+        super(const SummarizerState());
 
   final AiRepository _repository;
 
+  Future<void> processFile({
+    required String fileName,
+    required Uint8List bytes,
+    String? pdfPassword,
+  }) async {
+    // Prevent double-submit
+    if (state.isLoading) return;
+
+    state = state.copyWith(
+      fileName: fileName,
+      isLoading: true,
+      summary: null,
+      error: null,
+      processingProgress: 0.1,
+      extractedTextLength: 0,
+      lastProcessedText: null,
+    );
+
+    try {
+      state = state.copyWith(processingProgress: 0.2);
+
+      final extractedText = await _extractTextOffMainIfPossible(
+        fileName: fileName,
+        bytes: bytes,
+        pdfPassword: pdfPassword,
+      );
+
+      if (extractedText.trim().isEmpty) {
+        throw UnsupportedError(
+          'No readable text found. This PDF may be scanned/image-based and needs OCR.',
+        );
+      }
+
+      state = state.copyWith(
+        extractedTextLength: extractedText.length,
+        lastProcessedText: extractedText,
+        processingProgress: 0.35,
+      );
+
+      await processText(extractedText, fileName: fileName);
+    } on UnsupportedError catch (e) {
+      state = state.copyWith(
+        isLoading: false,
+        processingProgress: 0,
+        summary: null,
+        error: e.message,
+        extractedTextLength: 0,
+      );
+    } catch (e) {
+      state = state.copyWith(
+        isLoading: false,
+        processingProgress: 0,
+        summary: null,
+        error: 'Could not read this file. Try TXT or DOCX, or paste text.',
+        extractedTextLength: 0,
+      );
+    }
+  }
+
   Future<void> processText(String text, {String? fileName}) async {
     final cleanedText = text.trim();
-    if (cleanedText.isEmpty || state.isLoading) {
+    if (cleanedText.isEmpty || state.isLoading == false && state.summary == null && state.error != null) {
+      // If empty text, just show error
       state = state.copyWith(error: 'Please enter some text to summarize.');
       return;
     }
@@ -69,13 +130,12 @@ class SummarizerController extends StateNotifier<SummarizerState> {
       isLoading: true,
       summary: null,
       error: null,
-      processingProgress: 0.1,
+      processingProgress: 0.4,
       extractedTextLength: cleanedText.length,
       lastProcessedText: cleanedText,
     );
 
     try {
-      state = state.copyWith(processingProgress: 0.35);
       final prompt = _buildSummaryPrompt(cleanedText);
 
       state = state.copyWith(processingProgress: 0.7);
@@ -91,7 +151,7 @@ class SummarizerController extends StateNotifier<SummarizerState> {
         summary: result.text.trim(),
         error: null,
         isLoading: false,
-        processingProgress: 1,
+        processingProgress: 1.0,
       );
     } catch (_) {
       state = state.copyWith(
@@ -102,41 +162,58 @@ class SummarizerController extends StateNotifier<SummarizerState> {
     }
   }
 
-  Future<void> processFile({required String fileName, required Uint8List bytes}) async {
-    try {
-      final text = _extractText(fileName: fileName, bytes: bytes);
-      await processText(text, fileName: fileName);
-    } on UnsupportedError catch (error) {
-      state = state.copyWith(
-        fileName: fileName,
-        summary: null,
-        error: error.message,
-        extractedTextLength: 0,
-      );
-    } catch (_) {
-      state = state.copyWith(
-        fileName: fileName,
-        summary: null,
-        error: 'Could not read this file. Try TXT or DOCX, or paste text.',
-        extractedTextLength: 0,
-      );
-    }
-  }
-
+  /// ✅ Your UI expects this.
   Future<void> retry() async {
     final text = state.lastProcessedText;
-    if (text == null || text.isEmpty) {
-      return;
-    }
+    if (text == null || text.trim().isEmpty) return;
     await processText(text, fileName: state.fileName);
   }
 
-  void clear() {
-    state = const SummarizerState();
+  void clear() => state = const SummarizerState();
+
+  // ---------- Extraction (web-safe) ----------
+
+  Future<String> _extractTextOffMainIfPossible({
+    required String fileName,
+    required Uint8List bytes,
+    String? pdfPassword,
+  }) async {
+    // On web, compute/isolate behavior can be flaky. Run synchronously.
+    if (kIsWeb) {
+      return _extractText(fileName: fileName, bytes: bytes, pdfPassword: pdfPassword);
+    }
+
+    // compute can only pass ONE argument; wrap args in a simple map.
+    return compute(_extractTextComputeEntry, <String, Object?>{
+      'fileName': fileName,
+      'bytes': bytes,
+      'pdfPassword': pdfPassword,
+    });
   }
 
-  String _extractText({required String fileName, required Uint8List bytes}) {
+  /// Top-level / static entry required for compute.
+  static String _extractTextComputeEntry(Map<String, Object?> args) {
+    final fileName = args['fileName'] as String;
+    final bytes = args['bytes'] as Uint8List;
+    final pdfPassword = args['pdfPassword'] as String?;
+    return _extractTextStatic(fileName: fileName, bytes: bytes, pdfPassword: pdfPassword);
+  }
+
+  String _extractText({
+    required String fileName,
+    required Uint8List bytes,
+    String? pdfPassword,
+  }) {
+    return _extractTextStatic(fileName: fileName, bytes: bytes, pdfPassword: pdfPassword);
+  }
+
+  static String _extractTextStatic({
+    required String fileName,
+    required Uint8List bytes,
+    String? pdfPassword,
+  }) {
     final name = fileName.toLowerCase();
+
     if (name.endsWith('.txt')) {
       return utf8.decode(bytes, allowMalformed: true);
     }
@@ -147,11 +224,18 @@ class SummarizerController extends StateNotifier<SummarizerState> {
       if (docFile == null) {
         throw UnsupportedError('Invalid DOCX file: document.xml was not found.');
       }
-      final xmlContent = utf8.decode(docFile.content as List<int>, allowMalformed: true);
-      final plainText = xmlContent
-          .replaceAll(RegExp(r'<[^>]+>'), ' ')
-          .replaceAll(RegExp(r'\s+'), ' ')
-          .trim();
+
+      final xml = utf8.decode(docFile.content as List<int>, allowMalformed: true);
+
+      // Simple extraction: grab <w:t>...</w:t> text nodes
+      final matches = RegExp(r'<w:t[^>]*>(.*?)</w:t>', dotAll: true).allMatches(xml);
+      final buffer = StringBuffer();
+      for (final m in matches) {
+        final t = m.group(1);
+        if (t != null && t.trim().isNotEmpty) buffer.write('$t ');
+      }
+
+      final plainText = buffer.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
       if (plainText.isEmpty) {
         throw UnsupportedError('This DOCX file does not contain extractable text.');
       }
@@ -159,30 +243,54 @@ class SummarizerController extends StateNotifier<SummarizerState> {
     }
 
     if (name.endsWith('.pdf')) {
+      PdfDocument? document;
       try {
-        final document = PdfDocument(inputBytes: bytes);
+        // NOTE: no isEncrypted check; not available in your version.
+        // If password is needed and not provided, this may throw.
+        document = PdfDocument(inputBytes: bytes, password: pdfPassword);
+
         final extractor = PdfTextExtractor(document);
-        final plainText = extractor.extractText().trim();
-        document.dispose();
+        final pageCount = document.pages.count;
+
+        final buffer = StringBuffer();
+        for (var i = 0; i < pageCount; i++) {
+          final pageText = extractor
+              .extractText(startPageIndex: i, endPageIndex: i)
+              .trim();
+          if (pageText.isNotEmpty) {
+            buffer.writeln(pageText);
+            buffer.writeln();
+          }
+        }
+
+        final plainText = buffer.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
         if (plainText.isEmpty) {
           throw UnsupportedError(
-            'No extractable text found in this PDF. It may be scanned/image-based. Please paste text instead.',
+            'No extractable text found in this PDF. It may be scanned/image-based or protected.',
           );
         }
         return plainText;
       } catch (e) {
         if (e is UnsupportedError) rethrow;
+
+        // Common cases:
+        // - password required
+        // - corrupted/unsupported PDF
         throw UnsupportedError(
-          'Could not read this PDF (${e.runtimeType}). Please paste text instead.',
+          'Could not read this PDF (${e.runtimeType}). If it is password-protected, provide a password. '
+              'If it is scanned, it needs OCR.',
         );
+      } finally {
+        document?.dispose();
       }
     }
 
-    throw UnsupportedError('Unsupported file type. Please use TXT or DOCX.');
+    throw UnsupportedError('Unsupported file type. Use PDF, DOCX, or TXT.');
   }
 
   String _buildSummaryPrompt(String text) {
     final textLength = text.length;
+
     if (textLength > 5000) {
       return '''Please provide a comprehensive summary of the following text. Focus on key themes, main arguments, and actionable takeaways.
 
@@ -200,3 +308,4 @@ $text''';
     return 'Please summarize the following text in 2-3 sentences and highlight the most important information:\n\n$text';
   }
 }
+
