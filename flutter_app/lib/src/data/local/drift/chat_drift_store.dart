@@ -1,20 +1,15 @@
-import 'dart:io';
-
 import 'package:drift/drift.dart';
-import 'package:drift/native.dart';
-import 'package:path/path.dart' as path;
-import 'package:path_provider/path_provider.dart';
 
 import '../../models/chat_models.dart';
+import 'encrypted_database.dart';
 
 /// Drift-based local storage replacing the Room chat/session schema.
 class ChatDriftStore extends DatabaseConnectionUser {
   ChatDriftStore._(super.connection);
 
   static Future<ChatDriftStore> open() async {
-    final documentsDirectory = await getApplicationDocumentsDirectory();
-    final dbFile = File(path.join(documentsDirectory.path, 'impactsuite.sqlite'));
-    return ChatDriftStore._(DatabaseConnection(NativeDatabase(dbFile)));
+    final connection = await openEncryptedDatabase();
+    return ChatDriftStore._(connection);
   }
 
   Future<void> migrate() async {

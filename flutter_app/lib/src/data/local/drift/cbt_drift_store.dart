@@ -1,9 +1,6 @@
-import 'dart:io';
-
 import 'package:drift/drift.dart';
-import 'package:drift/native.dart';
-import 'package:path/path.dart' as path;
-import 'package:path_provider/path_provider.dart';
+
+import 'encrypted_database.dart';
 
 class CbtSessionRecord {
   const CbtSessionRecord({
@@ -23,9 +20,8 @@ class CbtDriftStore extends DatabaseConnectionUser {
   CbtDriftStore._(super.connection);
 
   static Future<CbtDriftStore> open() async {
-    final documentsDirectory = await getApplicationDocumentsDirectory();
-    final dbFile = File(path.join(documentsDirectory.path, 'impactsuite.sqlite'));
-    return CbtDriftStore._(DatabaseConnection(NativeDatabase(dbFile)));
+    final connection = await openEncryptedDatabase();
+    return CbtDriftStore._(connection);
   }
 
   Future<void> migrate() async {

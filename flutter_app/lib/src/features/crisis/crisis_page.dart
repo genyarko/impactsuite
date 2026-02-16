@@ -441,7 +441,18 @@ IconData _iconForAction(String icon) {
   }
 }
 
+const _allowedSchemes = {'tel', 'sms', 'https', 'http', 'geo'};
+
 Future<void> _launchUri(BuildContext context, Uri uri) async {
+  if (!_allowedSchemes.contains(uri.scheme)) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unsupported link type')),
+      );
+    }
+    return;
+  }
+
   final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
   if (!launched && context.mounted) {
     ScaffoldMessenger.of(context).showSnackBar(

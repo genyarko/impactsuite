@@ -47,7 +47,9 @@
       "Bash(curl:*)",
       "Bash(dart analyze:*)",
       "Bash(flutter:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(openssl dgst:*)",
+      "Bash(openssl base64:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

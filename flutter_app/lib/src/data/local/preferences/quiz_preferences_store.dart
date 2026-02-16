@@ -1,3 +1,4 @@
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 abstract class PreferencesStore {
@@ -5,6 +6,31 @@ abstract class PreferencesStore {
   Future<String?> getString(String key);
   Future<void> setBool(String key, bool value);
   Future<void> setString(String key, String value);
+}
+
+class SecurePreferencesStore implements PreferencesStore {
+  SecurePreferencesStore([FlutterSecureStorage? storage])
+      : _storage = storage ?? const FlutterSecureStorage();
+
+  final FlutterSecureStorage _storage;
+
+  @override
+  Future<bool?> getBool(String key) async {
+    final value = await _storage.read(key: key);
+    if (value == null) return null;
+    return value == 'true';
+  }
+
+  @override
+  Future<String?> getString(String key) => _storage.read(key: key);
+
+  @override
+  Future<void> setBool(String key, bool value) =>
+      _storage.write(key: key, value: value.toString());
+
+  @override
+  Future<void> setString(String key, String value) =>
+      _storage.write(key: key, value: value);
 }
 
 class SharedPreferencesStore implements PreferencesStore {

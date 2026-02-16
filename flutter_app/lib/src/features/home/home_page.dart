@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -23,7 +24,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _loadSettings() async {
-    final prefsStore = SharedPreferencesStore(SharedPreferencesAsync());
+    final prefsStore = kIsWeb
+        ? SharedPreferencesStore(SharedPreferencesAsync())
+        : SecurePreferencesStore() as PreferencesStore;
     final settingsStore = AppSettingsStore(prefsStore);
     final settings = await settingsStore.read();
 

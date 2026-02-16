@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../domain/services/speech_recognition_service.dart';
 import '../ai/ai_conversation_controller.dart';
 import '../ai/ai_providers.dart';
 
@@ -33,6 +34,13 @@ const _features = <FeatureShortcut>[
   FeatureShortcut(name: 'Home Page', command: 'home', icon: Icons.home, route: '/home', description: 'Navigate to home page'),
 ];
 
+String _timeOfDayGreeting() {
+  final hour = DateTime.now().hour;
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
 class UnifiedScreenPage extends ConsumerStatefulWidget {
   const UnifiedScreenPage({super.key});
 
@@ -43,13 +51,69 @@ class UnifiedScreenPage extends ConsumerStatefulWidget {
 class _UnifiedScreenPageState extends ConsumerState<UnifiedScreenPage> {
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final SpeechRecognitionService _speechService = SpeechRecognitionService();
   bool _showFeatureMenu = false;
+  bool _isListening = false;
 
   @override
   void dispose() {
+    _speechService.dispose();
     _controller.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _toggleListening() async {
+    if (_isListening) {
+      await _speechService.stopListening();
+      setState(() => _isListening = false);
+      return;
+    }
+
+    final available = await _speechService.init();
+    if (!available) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Speech recognition not available on this device.')),
+        );
+      }
+      return;
+    }
+
+    setState(() => _isListening = true);
+
+    await _speechService.startListening(
+      onResult: (text, isFinal) {
+        if (isFinal && text.trim().isNotEmpty) {
+          _controller.text = text;
+          setState(() => _isListening = false);
+          _sendMessage();
+        } else {
+          _controller.text = text;
+        }
+      },
+      onError: (error) {
+        if (mounted) {
+          setState(() => _isListening = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Speech error: $error')),
+          );
+        }
+      },
+      onStatus: (status) {
+        if (status == 'done' || status == 'notListening') {
+          if (!mounted) return;
+          // If the engine stopped (e.g. 3s pause timeout) with unsent text, send it
+          final pending = _controller.text.trim();
+          if (_isListening && pending.isNotEmpty) {
+            setState(() => _isListening = false);
+            _sendMessage();
+          } else {
+            setState(() => _isListening = false);
+          }
+        }
+      },
+    );
   }
 
   void _handleInputChanged(String value) {
@@ -186,15 +250,12 @@ class _UnifiedScreenPageState extends ConsumerState<UnifiedScreenPage> {
           _EnhancedChatInputArea(
             controller: _controller,
             isLoading: state.isLoading,
+            isMicListening: _isListening,
             suggestion: suggestion,
             onChanged: _handleInputChanged,
             onSend: _sendMessage,
             onCameraClick: () => context.go('/plant_scanner'),
-            onMicClick: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Voice capture is not yet wired in Flutter.')),
-              );
-            },
+            onMicClick: _toggleListening,
           ),
         ],
       ),
@@ -202,12 +263,46 @@ class _UnifiedScreenPageState extends ConsumerState<UnifiedScreenPage> {
   }
 
   PreferredSizeWidget _buildTopBar(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return AppBar(
       leading: IconButton(
         onPressed: () => setState(() => _showFeatureMenu = !_showFeatureMenu),
         icon: Icon(_showFeatureMenu ? Icons.close : Icons.menu),
       ),
-      title: const SizedBox.shrink(),
+      title: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 28,
+            height: 28,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                colors: [Color(0xFF7C4DFF), Color(0xFF536DFE)],
+              ),
+            ),
+            child: const Center(
+              child: Text(
+                'G3N',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            'AI Assistant',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w500,
+                ),
+          ),
+        ],
+      ),
       actions: [
         IconButton(
           onPressed: () => context.go('/settings'),
@@ -220,14 +315,15 @@ class _UnifiedScreenPageState extends ConsumerState<UnifiedScreenPage> {
           tooltip: 'Upload Document',
         ),
       ],
-      elevation: 4,
+      scrolledUnderElevation: 2,
+      elevation: 0,
       surfaceTintColor: Colors.transparent,
       shadowColor: Theme.of(context).shadowColor,
     );
   }
 }
 
-// ─── Feature Menu Overlay (vertical list of cards, matching Kotlin) ───
+// ─── Feature Menu Overlay (vertical list of cards with accent border) ───
 
 class _FeatureMenuOverlay extends StatelessWidget {
   const _FeatureMenuOverlay({required this.features, required this.onFeatureClick});
@@ -243,72 +339,101 @@ class _FeatureMenuOverlay extends StatelessWidget {
       elevation: 8,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxHeight: 300),
-        child: ListView.separated(
-          shrinkWrap: true,
-          padding: const EdgeInsets.all(8),
-          itemCount: features.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 4),
-          itemBuilder: (context, index) {
-            final feature = features[index];
-            return Card(
-              color: colorScheme.surfaceContainerHighest,
-              elevation: 0,
-              margin: EdgeInsets.zero,
-              clipBehavior: Clip.antiAlias,
-              child: InkWell(
-                onTap: () => onFeatureClick(feature),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    children: [
-                      Icon(feature.icon, size: 24, color: colorScheme.primary),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              feature.name,
-                              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Text(
+                'Features',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ),
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+                itemCount: features.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 4),
+                itemBuilder: (context, index) {
+                  final feature = features[index];
+                  return Card(
+                    color: colorScheme.surfaceContainerHighest,
+                    elevation: 0,
+                    margin: EdgeInsets.zero,
+                    clipBehavior: Clip.antiAlias,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: InkWell(
+                      onTap: () => onFeatureClick(feature),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          border: Border(
+                            left: BorderSide(
+                              color: colorScheme.primary,
+                              width: 3,
                             ),
-                            Text(
-                              feature.description,
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                          ),
+                        ),
+                        padding: const EdgeInsets.all(16),
+                        child: Row(
+                          children: [
+                            Icon(feature.icon, size: 24, color: colorScheme.primary),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    feature.name,
+                                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                          color: colorScheme.onSurfaceVariant,
+                                        ),
                                   ),
+                                  Text(
+                                    feature.description,
+                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                          color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                                        ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: colorScheme.primaryContainer,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                '/${feature.command}',
+                                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                      color: colorScheme.primary,
+                                    ),
+                              ),
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(width: 16),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: colorScheme.primaryContainer,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          '/${feature.command}',
-                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                color: colorScheme.primary,
-                              ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                    ),
+                  );
+                },
               ),
-            );
-          },
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-// ─── Empty State (matches Kotlin: Chat icon, title, subtitle, horizontal chip row) ───
+// ─── Empty State (gradient logo, time-of-day greeting, horizontal chip row) ───
 
 class _UnifiedEmptyState extends StatelessWidget {
   const _UnifiedEmptyState({required this.features, required this.onFeatureClick});
@@ -327,18 +452,29 @@ class _UnifiedEmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              Icons.chat,
-              size: 64,
-              color: colorScheme.primary.withValues(alpha: 0.3),
+            // Gradient logo
+            Container(
+              width: 72,
+              height: 72,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  colors: [Color(0xFF7C4DFF), Color(0xFF536DFE)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
+              child: const Icon(Icons.auto_awesome, color: Colors.white, size: 36),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
+            // Time-of-day greeting
             Text(
-              'Welcome to G3N AI',
+              '${_timeOfDayGreeting()}!',
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w500,
-                    color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                    color: colorScheme.onSurface,
                   ),
+              textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
             Text(
@@ -380,7 +516,7 @@ class _UnifiedEmptyState extends StatelessWidget {
   }
 }
 
-// ─── User Message Bubble (asymmetric corners, timestamp) ───
+// ─── User Message Bubble (asymmetric corners, timestamp, responsive width) ───
 
 class _UserMessageBubble extends StatelessWidget {
   const _UserMessageBubble({required this.message});
@@ -390,11 +526,12 @@ class _UserMessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final maxBubbleWidth = MediaQuery.of(context).size.width * 0.75;
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
         ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 280),
+          constraints: BoxConstraints(maxWidth: maxBubbleWidth),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -432,7 +569,7 @@ class _UserMessageBubble extends StatelessWidget {
   }
 }
 
-// ─── AI Message Bubble (avatar, asymmetric corners, timestamp) ───
+// ─── AI Message Bubble (avatar, asymmetric corners, timestamp, selectable text) ───
 
 class _AIMessageBubble extends StatelessWidget {
   const _AIMessageBubble({required this.message});
@@ -442,6 +579,7 @@ class _AIMessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final maxBubbleWidth = MediaQuery.of(context).size.width * 0.75;
     return Row(
       mainAxisAlignment: MainAxisAlignment.start,
       crossAxisAlignment: CrossAxisAlignment.end,
@@ -460,7 +598,7 @@ class _AIMessageBubble extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 280),
+          constraints: BoxConstraints(maxWidth: maxBubbleWidth),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -477,7 +615,7 @@ class _AIMessageBubble extends StatelessWidget {
                 ),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  child: Text(
+                  child: SelectableText(
                     message.text,
                     style: TextStyle(color: colorScheme.onSurfaceVariant),
                   ),
@@ -582,12 +720,13 @@ class _TypingIndicatorState extends State<_TypingIndicator> with TickerProviderS
   }
 }
 
-// ─── Enhanced Input Area (matches Kotlin: card-wrapped input with inline buttons) ───
+// ─── Enhanced Input Area (divider, card-wrapped input with styled send button) ───
 
 class _EnhancedChatInputArea extends StatelessWidget {
   const _EnhancedChatInputArea({
     required this.controller,
     required this.isLoading,
+    this.isMicListening = false,
     required this.suggestion,
     required this.onChanged,
     required this.onSend,
@@ -597,6 +736,7 @@ class _EnhancedChatInputArea extends StatelessWidget {
 
   final TextEditingController controller;
   final bool isLoading;
+  final bool isMicListening;
   final FeatureShortcut? suggestion;
   final ValueChanged<String> onChanged;
   final Future<void> Function() onSend;
@@ -606,12 +746,16 @@ class _EnhancedChatInputArea extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final sendActive = controller.text.isNotEmpty && !isLoading;
     return Material(
       elevation: 8,
       color: colorScheme.surface,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // Thin top divider
+          const Divider(height: 1, thickness: 0.5),
+
           // Command suggestion card
           if (suggestion != null)
             Card(
@@ -683,34 +827,47 @@ class _EnhancedChatInputArea extends StatelessWidget {
                     IconButton(
                       onPressed: isLoading ? null : onMicClick,
                       icon: Icon(
-                        Icons.mic,
+                        isMicListening ? Icons.mic_off : Icons.mic,
                         size: 20,
-                        color: !isLoading ? colorScheme.onSurfaceVariant : colorScheme.onSurface.withValues(alpha: 0.38),
+                        color: isMicListening
+                            ? colorScheme.error
+                            : (!isLoading ? colorScheme.onSurfaceVariant : colorScheme.onSurface.withValues(alpha: 0.38)),
                       ),
                       constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
                       padding: EdgeInsets.zero,
                     ),
-                    IconButton(
-                      onPressed: (controller.text.isNotEmpty && !isLoading) ? onSend : null,
-                      icon: isLoading
-                          ? SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: colorScheme.primary,
-                              ),
-                            )
-                          : Icon(
-                              Icons.send,
-                              size: 20,
-                              color: (controller.text.isNotEmpty && !isLoading)
-                                  ? colorScheme.primary
-                                  : colorScheme.onSurface.withValues(alpha: 0.38),
-                            ),
-                      constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-                      padding: EdgeInsets.zero,
-                    ),
+                    // Send button with filled circle when active
+                    if (isLoading)
+                      const Padding(
+                        padding: EdgeInsets.all(8),
+                        child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    else
+                      Container(
+                        width: 36,
+                        height: 36,
+                        margin: const EdgeInsets.only(left: 2),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: sendActive ? colorScheme.primary : Colors.transparent,
+                        ),
+                        child: IconButton(
+                          onPressed: sendActive ? onSend : null,
+                          icon: Icon(
+                            Icons.send,
+                            size: 18,
+                            color: sendActive
+                                ? colorScheme.onPrimary
+                                : colorScheme.onSurface.withValues(alpha: 0.38),
+                          ),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                        ),
+                      ),
                   ],
                 ),
               ),

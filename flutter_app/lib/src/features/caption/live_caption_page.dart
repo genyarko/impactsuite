@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../domain/services/speech_recognition_service.dart';
 import '../ai/ai_providers.dart';
 import 'live_caption_controller.dart';
 
@@ -19,13 +20,96 @@ class LiveCaptionPage extends ConsumerStatefulWidget {
 class _LiveCaptionPageState extends ConsumerState<LiveCaptionPage> {
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
+  final SpeechRecognitionService _speechService = SpeechRecognitionService();
   int _lastHistoryCount = 0;
 
   @override
   void dispose() {
+    _speechService.dispose();
     _textController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _startVoiceCapture() async {
+    final controller = ref.read(_liveCaptionControllerProvider.notifier);
+    final state = ref.read(_liveCaptionControllerProvider);
+
+    final available = await _speechService.init();
+    if (!available) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Speech recognition not available on this device.')),
+        );
+      }
+      return;
+    }
+
+    controller.startLiveCaption();
+
+    // Map source language code to speech locale
+    final localeId = state.sourceLanguage == CaptionLanguage.auto
+        ? 'en_US'
+        : state.sourceLanguage.code;
+
+    _beginListening(localeId);
+  }
+
+  void _beginListening(String localeId) {
+    _speechService.startListening(
+      localeId: localeId,
+      onResult: (text, isFinal) {
+        if (isFinal && text.trim().isNotEmpty) {
+          ref.read(_liveCaptionControllerProvider.notifier).submitVoiceTranscript(text);
+          // Restart listening for continuous mode
+          if (ref.read(_liveCaptionControllerProvider).isListening) {
+            Future.delayed(const Duration(milliseconds: 200), () {
+              if (mounted && ref.read(_liveCaptionControllerProvider).isListening) {
+                _beginListening(localeId);
+              }
+            });
+          }
+        }
+      },
+      onError: (error) {
+        if (mounted) {
+          // Auto-restart on transient errors while still in listening mode
+          final state = ref.read(_liveCaptionControllerProvider);
+          if (state.isListening && error != 'error_permission') {
+            Future.delayed(const Duration(milliseconds: 500), () {
+              if (mounted && ref.read(_liveCaptionControllerProvider).isListening) {
+                _beginListening(localeId);
+              }
+            });
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Speech error: $error')),
+            );
+          }
+        }
+      },
+      onStatus: (status) {
+        // When speech engine finishes (e.g. silence timeout), restart if still active
+        if (status == 'done' || status == 'notListening') {
+          if (mounted && ref.read(_liveCaptionControllerProvider).isListening) {
+            Future.delayed(const Duration(milliseconds: 200), () {
+              if (mounted && ref.read(_liveCaptionControllerProvider).isListening) {
+                final state = ref.read(_liveCaptionControllerProvider);
+                final locale = state.sourceLanguage == CaptionLanguage.auto
+                    ? 'en_US'
+                    : state.sourceLanguage.code;
+                _beginListening(locale);
+              }
+            });
+          }
+        }
+      },
+    );
+  }
+
+  Future<void> _stopVoiceCapture() async {
+    await _speechService.stopListening();
+    ref.read(_liveCaptionControllerProvider.notifier).stopLiveCaption();
   }
 
   @override
@@ -172,11 +256,10 @@ class _LiveCaptionPageState extends ConsumerState<LiveCaptionPage> {
                       ? Theme.of(context).colorScheme.error
                       : Theme.of(context).colorScheme.primary,
               onPressed: () {
-                final controller = ref.read(_liveCaptionControllerProvider.notifier);
                 if (state.isListening) {
-                  controller.stopLiveCaption();
+                  _stopVoiceCapture();
                 } else {
-                  controller.startLiveCaption();
+                  _startVoiceCapture();
                 }
               },
               child: Icon(state.isListening ? Icons.mic_off : Icons.mic),

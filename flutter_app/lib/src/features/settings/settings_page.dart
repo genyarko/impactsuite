@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../data/local/preferences/app_settings_store.dart';
 import '../../data/local/preferences/quiz_preferences_store.dart';
@@ -30,6 +31,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   bool _loading = true;
   bool _apiKeysInitialized = false;
+  bool _obscureGeminiKey = true;
+  bool _obscureOpenAiKey = true;
+  bool _obscureSpeechKey = true;
+  bool _obscureMapsKey = true;
 
   @override
   void initState() {
@@ -100,7 +105,16 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Text('Settings', style: Theme.of(context).textTheme.headlineMedium),
+          Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => context.go('/'),
+              ),
+              const SizedBox(width: 8),
+              Text('Settings', style: Theme.of(context).textTheme.headlineMedium),
+            ],
+          ),
           const SizedBox(height: 8),
           Text(
             'Configure AI providers, quiz behavior, and accessibility.',
@@ -144,20 +158,40 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 if (appSettings.onlineModelProvider == OnlineModelProvider.gemini)
                   TextField(
                     controller: _geminiApiKeyController,
-                    decoration: const InputDecoration(
+                    obscureText: _obscureGeminiKey,
+                    enableSuggestions: false,
+                    autocorrect: false,
+                    decoration: InputDecoration(
                       labelText: 'Gemini API Key',
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
                       hintText: 'Enter key used by Gemini online provider',
+                      suffixIcon: IconButton(
+                        icon: Icon(_obscureGeminiKey
+                            ? Icons.visibility_off
+                            : Icons.visibility),
+                        onPressed: () => setState(
+                            () => _obscureGeminiKey = !_obscureGeminiKey),
+                      ),
                     ),
                     onChanged: (value) => _saveApiKey(gemini: value.trim()),
                   )
                 else
                   TextField(
                     controller: _openAiApiKeyController,
-                    decoration: const InputDecoration(
+                    obscureText: _obscureOpenAiKey,
+                    enableSuggestions: false,
+                    autocorrect: false,
+                    decoration: InputDecoration(
                       labelText: 'OpenAI API Key',
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
                       hintText: 'sk-... key for OpenAI online provider',
+                      suffixIcon: IconButton(
+                        icon: Icon(_obscureOpenAiKey
+                            ? Icons.visibility_off
+                            : Icons.visibility),
+                        onPressed: () => setState(
+                            () => _obscureOpenAiKey = !_obscureOpenAiKey),
+                      ),
                     ),
                     onChanged: (value) => _saveApiKey(openAi: value.trim()),
                   ),
@@ -186,20 +220,40 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               children: [
                 TextField(
                   controller: _speechApiKeyController,
-                  decoration: const InputDecoration(
+                  obscureText: _obscureSpeechKey,
+                  enableSuggestions: false,
+                  autocorrect: false,
+                  decoration: InputDecoration(
                     labelText: 'Google Cloud Speech API Key',
-                    border: OutlineInputBorder(),
+                    border: const OutlineInputBorder(),
                     hintText: 'Used by Live Caption, AI Tutor voice, and CBT Coach',
+                    suffixIcon: IconButton(
+                      icon: Icon(_obscureSpeechKey
+                          ? Icons.visibility_off
+                          : Icons.visibility),
+                      onPressed: () => setState(
+                          () => _obscureSpeechKey = !_obscureSpeechKey),
+                    ),
                   ),
                   onChanged: (value) => _saveApiKey(speech: value.trim()),
                 ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _mapsApiKeyController,
-                  decoration: const InputDecoration(
+                  obscureText: _obscureMapsKey,
+                  enableSuggestions: false,
+                  autocorrect: false,
+                  decoration: InputDecoration(
                     labelText: 'Google Maps API Key (Optional)',
-                    border: OutlineInputBorder(),
+                    border: const OutlineInputBorder(),
                     hintText: 'Required for crisis map / nearby services lookup',
+                    suffixIcon: IconButton(
+                      icon: Icon(_obscureMapsKey
+                          ? Icons.visibility_off
+                          : Icons.visibility),
+                      onPressed: () => setState(
+                          () => _obscureMapsKey = !_obscureMapsKey),
+                    ),
                   ),
                   onChanged: (value) => _saveApiKey(maps: value.trim()),
                 ),

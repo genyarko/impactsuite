@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import '../../domain/services/ai/ai_models.dart';
 import '../../domain/services/ai/ai_repository.dart';
+import '../../domain/services/text_to_speech_service.dart';
 
 enum StoryGenre { fantasy, adventure, mystery, sciFi, educational }
 
@@ -241,11 +242,17 @@ class ReadingStats {
 class StoryController extends ChangeNotifier {
   StoryController({
     required AiRepository repository,
+    required TextToSpeechService ttsService,
     this.openAiApiKey = '',
     this.geminiApiKey = '',
-  }) : _repository = repository;
+  })  : _repository = repository,
+        _tts = ttsService {
+    _tts.onComplete = _onTtsDone;
+    _tts.onError = (_) => _onTtsDone();
+  }
 
   final AiRepository _repository;
+  final TextToSpeechService _tts;
   final String openAiApiKey;
   final String geminiApiKey;
 
@@ -750,6 +757,52 @@ Generate the complete story now:
     }
   }
 
+  /// Regenerates the image for a single page that failed or has no image.
+  Future<void> regenerateImageForPage(int pageIndex) async {
+    final story = currentStory;
+    if (story == null || pageIndex < 0 || pageIndex >= story.totalPages) return;
+
+    final hasAnyImageKey = geminiApiKey.isNotEmpty || openAiApiKey.isNotEmpty;
+    if (!hasAnyImageKey) {
+      error = 'No API key configured. Add a Gemini or OpenAI key in Settings.';
+      notifyListeners();
+      return;
+    }
+
+    final page = story.pages[pageIndex];
+    var description = page.imageDescription;
+
+    // If no description exists, generate one from the page content
+    if (description == null || description.isEmpty) {
+      description =
+          "Children's book illustration for: ${page.title}. ${page.content.length > 200 ? page.content.substring(0, 200) : page.content}";
+    }
+
+    generationPhase = 'Regenerating illustration for page ${pageIndex + 1}...';
+    notifyListeners();
+
+    try {
+      final imageResult = await _generateImage(description);
+      if (imageResult != null) {
+        final updatedPages = [...story.pages];
+        updatedPages[pageIndex] = updatedPages[pageIndex].copyWith(
+          imageBase64: imageResult.base64,
+          imageDescription: description,
+        );
+        _updateCurrentStory(story.copyWith(pages: updatedPages, hasImages: true));
+      } else {
+        error = 'Image generation failed. Please try again.';
+        notifyListeners();
+      }
+    } catch (e) {
+      error = 'Image generation error: $e';
+      notifyListeners();
+    } finally {
+      generationPhase = '';
+      notifyListeners();
+    }
+  }
+
   /// Tries Gemini Imagen first, then DALL-E as fallback.
   Future<_ImageResult?> _generateImage(String description) async {
     // Try Gemini Imagen first (more widely available)
@@ -786,11 +839,14 @@ Generate the complete story now:
     try {
       // Try Imagen 3 model
       final url = Uri.parse(
-        'https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=$geminiApiKey',
+        'https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict',
       );
       final response = await http.post(
         url,
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': geminiApiKey,
+        },
         body: jsonEncode({
           'instances': [
             {'prompt': imagePrompt},
@@ -815,7 +871,9 @@ Generate the complete story now:
           }
         }
       } else {
-        debugPrint('Gemini Imagen error: ${response.statusCode} ${response.body}');
+        if (kDebugMode) {
+          debugPrint('Gemini Imagen error: ${response.statusCode} ${response.body}');
+        }
         // Try Gemini 2.0 Flash native image generation as second attempt
         return _generateImageWithGeminiFlash(description);
       }
@@ -836,11 +894,14 @@ Generate the complete story now:
 
     try {
       final url = Uri.parse(
-        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=$geminiApiKey',
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent',
       );
       final response = await http.post(
         url,
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': geminiApiKey,
+        },
         body: jsonEncode({
           'contents': [
             {
@@ -876,7 +937,9 @@ Generate the complete story now:
           }
         }
       } else {
-        debugPrint('Gemini Flash image error: ${response.statusCode} ${response.body}');
+        if (kDebugMode) {
+          debugPrint('Gemini Flash image error: ${response.statusCode} ${response.body}');
+        }
       }
     } catch (e) {
       debugPrint('Gemini Flash image request failed: $e');
@@ -1034,7 +1097,9 @@ Generate the visual descriptions now:
       );
 
       if (response.statusCode != 200) {
-        debugPrint('DALL-E error: ${response.statusCode} ${response.body}');
+        if (kDebugMode) {
+          debugPrint('DALL-E error: ${response.statusCode} ${response.body}');
+        }
         return null;
       }
 
@@ -1123,7 +1188,8 @@ Generate the visual descriptions now:
   }
 
   void backToStoryList() {
-    stopReadingAloud();
+    _tts.stop();
+    isReadingAloud = false;
     showStreakScreen = false;
     showStoryList = true;
     currentStory = null;
@@ -1143,19 +1209,34 @@ Generate the visual descriptions now:
   void goToNextPage() {
     final story = currentStory;
     if (story == null || story.currentPage >= story.totalPages - 1) return;
+    if (isReadingAloud) {
+      _tts.stop();
+      isReadingAloud = false;
+    }
     _updateCurrentStory(story.copyWith(currentPage: story.currentPage + 1));
+    if (autoReadAloud) startReadingAloud();
   }
 
   void goToPreviousPage() {
     final story = currentStory;
     if (story == null || story.currentPage <= 0) return;
+    if (isReadingAloud) {
+      _tts.stop();
+      isReadingAloud = false;
+    }
     _updateCurrentStory(story.copyWith(currentPage: story.currentPage - 1));
+    if (autoReadAloud) startReadingAloud();
   }
 
   void goToPage(int page) {
     final story = currentStory;
     if (story == null || page < 0 || page >= story.totalPages) return;
+    if (isReadingAloud) {
+      _tts.stop();
+      isReadingAloud = false;
+    }
     _updateCurrentStory(story.copyWith(currentPage: page));
+    if (autoReadAloud) startReadingAloud();
   }
 
   void completeStory() {
@@ -1192,14 +1273,37 @@ Generate the visual descriptions now:
     notifyListeners();
   }
 
-  void startReadingAloud() {
+  Future<void> startReadingAloud() async {
+    final story = currentStory;
+    if (story == null) return;
+
+    final page = story.pages[story.currentPage];
+    final textToRead = '${page.title}. ${page.content}';
+
     isReadingAloud = true;
+    notifyListeners();
+
+    await _tts.speak(textToRead);
+  }
+
+  Future<void> stopReadingAloud() async {
+    isReadingAloud = false;
+    await _tts.stop();
     notifyListeners();
   }
 
-  void stopReadingAloud() {
+  void _onTtsDone() {
+    if (!isReadingAloud) return;
     isReadingAloud = false;
-    notifyListeners();
+
+    // Auto-advance to next page if autoReadAloud is enabled
+    final story = currentStory;
+    if (autoReadAloud && story != null && story.currentPage < story.totalPages - 1) {
+      goToNextPage();
+      startReadingAloud();
+    } else {
+      notifyListeners();
+    }
   }
 
   void toggleAutoReadAloud() {
@@ -1215,6 +1319,12 @@ Generate the visual descriptions now:
   void clearError() {
     error = null;
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _tts.dispose();
+    super.dispose();
   }
 
   void _updateCurrentStory(StoryData updatedStory) {

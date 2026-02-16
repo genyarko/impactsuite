@@ -299,11 +299,7 @@ class _MobileReadingScreen extends StatelessWidget {
               if (controller.generationPhase.isNotEmpty) ...[
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    controller.generationPhase,
-                    style: Theme.of(context).textTheme.labelSmall,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  child: _AnimatedGenerationPhase(text: controller.generationPhase),
                 ),
               ],
             ],
@@ -319,10 +315,14 @@ class _MobileReadingScreen extends StatelessWidget {
                     Text(page.title, style: Theme.of(context).textTheme.headlineSmall),
                     const SizedBox(height: 10),
                     if (page.hasImage) ...[
-                      _StoryImage(page: page),
+                      _StoryImage(page: page, pageIndex: story.currentPage, controller: controller),
                       const SizedBox(height: 12),
                     ] else if (page.imageDescription != null) ...[
-                      _ImageDescriptionBox(description: page.imageDescription!),
+                      _ImageDescriptionBox(
+                        description: page.imageDescription!,
+                        pageIndex: story.currentPage,
+                        controller: controller,
+                      ),
                       const SizedBox(height: 12),
                     ],
                     Expanded(
@@ -475,11 +475,7 @@ class _BookReadingScreenState extends State<_BookReadingScreen> {
                 if (widget.controller.generationPhase.isNotEmpty) ...[
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text(
-                      widget.controller.generationPhase,
-                      style: theme.textTheme.labelSmall,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    child: _AnimatedGenerationPhase(text: widget.controller.generationPhase),
                   ),
                 ],
                 const Spacer(),
@@ -536,6 +532,8 @@ class _BookReadingScreenState extends State<_BookReadingScreen> {
                                     Expanded(
                                       child: _BookLeftPage(
                                         page: page,
+                                        pageIndex: index,
+                                        controller: widget.controller,
                                         creamColor: creamColor,
                                         isDark: isDark,
                                       ),
@@ -642,11 +640,15 @@ class _BookReadingScreenState extends State<_BookReadingScreen> {
 class _BookLeftPage extends StatelessWidget {
   const _BookLeftPage({
     required this.page,
+    required this.pageIndex,
+    required this.controller,
     required this.creamColor,
     required this.isDark,
   });
 
   final StoryPageData page;
+  final int pageIndex;
+  final StoryController controller;
   final Color creamColor;
   final bool isDark;
 
@@ -656,9 +658,11 @@ class _BookLeftPage extends StatelessWidget {
       return _BookImage(page: page);
     }
 
+    final placeholderColor = isDark ? Colors.grey[850] : const Color(0xFFF0EBE3);
+
     if (page.imageDescription != null) {
       return Container(
-        color: isDark ? Colors.grey[850] : const Color(0xFFF0EBE3),
+        color: placeholderColor,
         padding: const EdgeInsets.all(32),
         child: Center(
           child: Column(
@@ -678,20 +682,29 @@ class _BookLeftPage extends StatelessWidget {
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
+              const SizedBox(height: 16),
+              _RegenerateImageButton(pageIndex: pageIndex, controller: controller),
             ],
           ),
         ),
       );
     }
 
-    // No image at all — decorative placeholder
+    // No image at all — decorative placeholder with regenerate option
     return Container(
-      color: isDark ? Colors.grey[850] : const Color(0xFFF0EBE3),
+      color: placeholderColor,
       child: Center(
-        child: Icon(
-          Icons.auto_stories,
-          size: 64,
-          color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.2),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.auto_stories,
+              size: 64,
+              color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.2),
+            ),
+            const SizedBox(height: 16),
+            _RegenerateImageButton(pageIndex: pageIndex, controller: controller),
+          ],
         ),
       ),
     );
@@ -823,9 +836,11 @@ class _BookRightPage extends StatelessWidget {
 }
 
 class _StoryImage extends StatelessWidget {
-  const _StoryImage({required this.page});
+  const _StoryImage({required this.page, required this.pageIndex, required this.controller});
 
   final StoryPageData page;
+  final int pageIndex;
+  final StoryController controller;
 
   void _openFullScreen(BuildContext context) {
     if (!page.hasImage) return;
@@ -848,6 +863,8 @@ class _StoryImage extends StatelessWidget {
   Widget build(BuildContext context) {
     final fallback = _ImageDescriptionBox(
       description: page.imageDescription ?? 'Illustration for this page',
+      pageIndex: pageIndex,
+      controller: controller,
     );
 
     final screenWidth = MediaQuery.sizeOf(context).width;
@@ -1000,9 +1017,15 @@ class _FullScreenImageViewerState extends State<_FullScreenImageViewer> {
 }
 
 class _ImageDescriptionBox extends StatelessWidget {
-  const _ImageDescriptionBox({required this.description});
+  const _ImageDescriptionBox({
+    required this.description,
+    this.pageIndex,
+    this.controller,
+  });
 
   final String description;
+  final int? pageIndex;
+  final StoryController? controller;
 
   @override
   Widget build(BuildContext context) {
@@ -1013,17 +1036,140 @@ class _ImageDescriptionBox extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.image, color: Theme.of(context).colorScheme.onSurfaceVariant),
-          const SizedBox(width: 8),
-          Expanded(
+          Row(
+            children: [
+              Icon(Icons.image, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  description,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontStyle: FontStyle.italic,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                ),
+              ),
+            ],
+          ),
+          if (controller != null && pageIndex != null) ...[
+            const SizedBox(height: 8),
+            _RegenerateImageButton(pageIndex: pageIndex!, controller: controller!),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _RegenerateImageButton extends StatefulWidget {
+  const _RegenerateImageButton({required this.pageIndex, required this.controller});
+
+  final int pageIndex;
+  final StoryController controller;
+
+  @override
+  State<_RegenerateImageButton> createState() => _RegenerateImageButtonState();
+}
+
+class _RegenerateImageButtonState extends State<_RegenerateImageButton> {
+  bool _isRegenerating = false;
+
+  Future<void> _regenerate() async {
+    setState(() => _isRegenerating = true);
+    await widget.controller.regenerateImageForPage(widget.pageIndex);
+    if (mounted) setState(() => _isRegenerating = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Hide while the initial story image generation is in progress
+    if (widget.controller.generationPhase.isNotEmpty && !_isRegenerating) {
+      return const SizedBox.shrink();
+    }
+
+    if (_isRegenerating) {
+      return const SizedBox(
+        height: 36,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+            SizedBox(width: 8),
+            Text('Generating...'),
+          ],
+        ),
+      );
+    }
+
+    return TextButton.icon(
+      onPressed: _regenerate,
+      icon: const Icon(Icons.refresh, size: 18),
+      label: const Text('Regenerate Image'),
+    );
+  }
+}
+
+/// Animated pulsing text shown during image generation.
+class _AnimatedGenerationPhase extends StatefulWidget {
+  const _AnimatedGenerationPhase({required this.text});
+
+  final String text;
+
+  @override
+  State<_AnimatedGenerationPhase> createState() => _AnimatedGenerationPhaseState();
+}
+
+class _AnimatedGenerationPhaseState extends State<_AnimatedGenerationPhase>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _opacity;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+    _opacity = Tween<double>(begin: 0.4, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return FadeTransition(
+      opacity: _opacity,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 12,
+            height: 12,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.5,
+              color: colorScheme.primary,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Flexible(
             child: Text(
-              description,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    fontStyle: FontStyle.italic,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+              widget.text,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: colorScheme.primary,
+                    fontWeight: FontWeight.w600,
                   ),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
