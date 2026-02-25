@@ -29,6 +29,16 @@ The app is a single module project (`:app`) with an additional dynamic asset pac
 If Google Play services are available the model can also be delivered via the
 `gemma3n_assetpack` dynamic feature at first launch.
 
+
+## CI/CD
+
+GitHub Actions workflows are included for both CI and CD:
+
+- **CI** (`.github/workflows/ci.yml`) runs on pushes to `main`/`master` and pull requests. It builds the debug APK and runs unit tests.
+- **CD** (`.github/workflows/cd.yml`) runs on tags matching `v*`, builds release APK/AAB artifacts, uploads them, and creates a GitHub Release.
+
+Both workflows create an empty `.env` file when it is missing, so the pipeline does not fail in repositories that do not use `.env`.
+
 ## Project Structure
 
 ```
